@@ -1,0 +1,8 @@
+# Normalise text to LF in the repository so diffs and the version script behave the same on every platform.
+* text=auto eol=lf
+*.png binary
+*.ico binary
+*.icns binary
+*.woff2 binary
+*.exe binary
+*.db binary
