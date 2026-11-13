@@ -38,6 +38,9 @@ pub struct Email {
     pub attachments: Vec<String>,
     /// A safe `https:` or `mailto:` link from the List-Unsubscribe header, or empty.
     pub unsubscribe: String,
+    /// The conversation this message belongs to: the first id in References (the oldest message), else the id it
+    /// replies to, else its own Message-ID. Empty when the message has no usable id at all.
+    pub thread: String,
 }
 
 /// A Message-ID is used in IMAP SEARCH commands, so only a strict `<token>` of visible ASCII is kept.
@@ -90,11 +93,34 @@ pub fn addresses(value: &str) -> Vec<(String, String)> {
     out
 }
 
+/// Every `<...>` token in a header value, with or without spaces between them (`<a@x><b@x>` is two ids).
 fn ids(value: &str) -> Vec<String> {
-    value
-        .split_whitespace()
-        .filter(|t| t.starts_with('<') && t.ends_with('>'))
-        .map(String::from)
+    let mut out = vec![];
+    let mut cur: Option<String> = None;
+    for c in value.chars() {
+        match (c, cur.as_mut()) {
+            ('<', _) => cur = Some(String::from("<")),
+            ('>', Some(s)) => {
+                s.push('>');
+                out.push(cur.take().unwrap_or_default());
+            }
+            (c, Some(s)) if !c.is_whitespace() => s.push(c),
+            (_, Some(_)) => cur = None, // whitespace inside <...> is not an id
+            _ => {}
+        }
+        if out.len() >= 200 {
+            break; // a header cannot make this list unbounded
+        }
+    }
+    out
+}
+
+/// The clean Message-IDs a header value (In-Reply-To, References) refers to.
+pub fn header_ids(value: &str) -> Vec<String> {
+    ids(value)
+        .iter()
+        .map(|i| clean_message_id(i))
+        .filter(|i| !i.is_empty())
         .collect()
 }
 
@@ -434,16 +460,24 @@ fn parse_inner(uid: u32, raw: &[u8]) -> anyhow::Result<Email> {
         .unwrap_or_default();
     let mut refs = ids(&get("In-Reply-To"));
     let in_reply_to = refs.clone();
-    refs.extend(ids(&get("References")));
+    let reference_ids = ids(&get("References"));
+    refs.extend(reference_ids.iter().cloned());
     let message_id = clean_message_id(&get("Message-ID"));
-    let mut thread: Vec<String> = refs
+    // taken before the list is cut to its last entries, so a long thread keeps its root
+    let thread = reference_ids
+        .iter()
+        .chain(in_reply_to.iter())
+        .map(|r| clean_message_id(r))
+        .find(|r| !r.is_empty())
+        .unwrap_or_else(|| message_id.clone());
+    let mut chain: Vec<String> = refs
         .iter()
         .map(|r| clean_message_id(r))
         .filter(|r| !r.is_empty())
         .collect();
-    thread.dedup();
-    if thread.len() > MAX_REFERENCES {
-        thread.drain(..thread.len() - MAX_REFERENCES);
+    chain.dedup();
+    if chain.len() > MAX_REFERENCES {
+        chain.drain(..chain.len() - MAX_REFERENCES);
     }
     let prec = get("Precedence").to_lowercase();
     let auto = get("Auto-Submitted");
@@ -508,12 +542,13 @@ fn parse_inner(uid: u32, raw: &[u8]) -> anyhow::Result<Email> {
         body,
         in_reply_to,
         reply_to,
-        references: thread.join(" "),
+        references: chain.join(" "),
         bulk_headers,
         auth_fail,
         attachment_count,
         attachments,
         unsubscribe,
+        thread,
     })
 }
 

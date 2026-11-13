@@ -140,6 +140,47 @@ A Sonnet re-review of these fixes found more, all fixed with tests:
 | CSS leaked into the text when the 256 KB cap cut a style block in half | An unfinished block at the cut is dropped |
 | The integrity check ran on every settings save | Once per launch |
 
+### Phase 2 design review (Opus, 2026-11-13, before any code)
+
+The design was reviewed before it was built. Changes it forced:
+
+| Risk found | Decision |
+| --- | --- |
+| Words like "URGENT action required" would give a phisher priority 5, the urgent flag, a quiet-hours bypass and a push alert | Rules never set the urgent flag; priority 5 needs a known sender, a question, a near due date and a passed sender check; message words count for nothing |
+| Closing tasks whose message "left the inbox" would hide mail that was archived to snooze it or moved by a filter | Such tasks are only marked and shown in a fold; they stay open |
+| An auto-closed task would close again after the user reopened it, and reopening would queue an unarchive that duplicates the mail | A `keep_open` flag; no mailbox change is ever queued by the automatic path |
+| A server error, a reply with no UIDs, or a changed UIDVALIDITY could read as "everything is gone" | All of these mean unknown and change nothing; a batch vanishing while the inbox has mail is not believed |
+| A forwarded message looks like a reply (it carries In-Reply-To) | Forwards do not count |
+| Learning keyed on the display name, inflated by undo or by one keypress on a conversation, lets a sender be talked up | Keyed on the address; undo removes the correction; one correction per action; forged mail neither teaches nor learns; a shift never sets urgent; Normal resets |
+| Thread keys that are empty or taken from a truncated list group unrelated mail or whole sets of tasks | Separate stored root; no key means `uid:<id>`; tasks you added never group |
+
+The stored message text is now readable in the app through a desktop-only command (`read_body`). A phone with the access
+code still gets the 400-character excerpt only.
+
+A Sonnet review of the finished Phase 2 code found more, all fixed with tests:
+
+| Finding | Fix |
+| --- | --- |
+| Replying to the newest message of a conversation closed the older, unanswered ones (References lists them all) | Only In-Reply-To marks a message as answered |
+| Forwards written as WG:, TR:, RV: or "Fwd :" counted as replies | Forward prefixes in nine languages, spaces tolerated |
+| Done, star and snooze on a conversation row reached messages hidden by a search or the Starred tab | The row remembers the messages it was grouped from, in the list actually shown |
+| A conversation row hid facts about older messages (urgent, due, draft, needs a reply) and could fold or mark "left your inbox" a conversation that still had live mail | The row shows what is true of any message; folds need every message to qualify |
+| Clicking a priority dot on a conversation taught the opposite direction | The dots show the newest message's own priority |
+| Nudging one mail up twice, or walking it 3, 5, 4, 3, counted as several corrections | One correction per task (first priority to latest), removed when they match again |
+| A correction could match a different sender's mail after the server renumbered | Matched by task and address; renumbering keeps what was learned but clears the task link; a new account forgets it all |
+| Any "due today" in a message lifted a promotion above real mail | A date lifts a row only for someone who writes to you and is waiting on an answer, never bulk mail |
+| A reopened task could be closed by the app again after a stray close and undo | `keep_open` is only ever set, never cleared |
+| A forged message naming a conversation in References woke it from snooze | Mail that failed its sender check cannot wake a snooze |
+| Waking a conversation sent one notification per message | One per conversation |
+| The IMAP library clears the read time limit after every IDLE, so a silent server could hang the sync forever | The 60-second limit is restored after each IDLE |
+| The extra Sent and inbox checks ran on every inbox change | At most every 20 seconds after a change, and every two minutes when idle |
+| Keyboard: Enter on a row's buttons opened the row instead, and editing a date by keyboard dropped focus | Enter and Space belong to a focused button; focus returns to the field after a change |
+
+Known and accepted: a conversation whose replies carry only In-Reply-To (no References) can split into more than one row;
+tasks older than the newest 500 are not checked for replies; mail you sent to yourself comes back as a task (some people use
+that as a reminder); a mail returned to the inbox after being archived through write-back arrives under a new UID and can
+appear as a second task.
+
 Still open from this review: a signed update channel, code signing and notarization, a live-mailbox test, macOS and
 Linux builds run on real machines, a `Host` header check on the hub, two watchers briefly overlapping after a
 settings save (the stop flag now keeps them from writing, but the old one can still sit in IDLE for up to a minute),

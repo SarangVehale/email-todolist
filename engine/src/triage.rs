@@ -120,14 +120,25 @@ impl Triager for RulesTriager {
         } else {
             "Unknown sender"
         };
+        let due = due_in(e);
+        let needs_reply = !s.bulk && (s.reply || s.known) && e.body.contains('?');
+        let mut priority = base_score(s);
+        let mut why = format!("Rule-based: {why}.");
+        // Someone who knows you is waiting for an answer and the date is today, tomorrow or past. This is the one
+        // thing rules promote to 5. It never sets "urgent" (that flag bypasses quiet hours), and the words in a
+        // message ("URGENT", "ASAP") count for nothing, because anyone can write them.
+        if needs_reply && !e.auth_fail && !due.is_empty() && crate::dates::due_within_a_day(&due) {
+            priority = 5;
+            why = "Rule-based: someone you write to is waiting for an answer and it is due.".into();
+        }
         Ok(Triage {
-            priority: base_score(s),
+            priority,
             category: rule_category(e, s).into(),
             action: e.subject.chars().take(80).collect(),
             urgent: false,
-            why: format!("Rule-based: {why}."),
-            needs_reply: !s.bulk && (s.reply || s.known) && e.body.contains('?'),
-            due: due_in(e),
+            why,
+            needs_reply,
+            due,
         })
     }
 }

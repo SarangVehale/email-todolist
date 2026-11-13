@@ -5,7 +5,8 @@ use engine::signals::SentIndex;
 use engine::store::Store;
 use engine::triage::RulesTriager;
 use engine::watcher::{
-    build_sent_index, connect_plain, find_sent_folder, find_special, process_new,
+    build_sent_index, connect_plain, find_sent_folder, find_special, process_new, reconcile_open,
+    refresh_sent_index,
 };
 use engine::writeback::drain_session;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -36,6 +37,8 @@ struct State {
     log: Vec<String>,
     refuse_move: bool,
     refuse_store: bool,
+    refuse_fetch: bool,
+    omit_uid: bool,
 }
 
 struct Server {
@@ -241,6 +244,11 @@ fn serve(stream: TcpStream, st: Arc<Mutex<State>>) {
                         );
                     }
                     "FETCH" => {
+                        if s.refuse_fetch {
+                            let _ = w.write_all(format!("{tag} NO fetch refused\r\n").as_bytes());
+                            continue;
+                        }
+                        let omit_uid = s.omit_uid;
                         let (set, items) = a2.split_once(' ').unwrap_or((a2, ""));
                         let f = s
                             .folders
@@ -262,8 +270,13 @@ fn serve(stream: TcpStream, st: Arc<Mutex<State>>) {
                                     m.fake_size.unwrap_or(m.raw.len() as u32)
                                 );
                             }
+                            let uid_item = if omit_uid {
+                                String::new()
+                            } else {
+                                format!("UID {uid} ")
+                            };
                             let _ = w.write_all(
-                                format!("* {seq} FETCH (UID {uid} FLAGS ({}) ", m.flags.join(" "))
+                                format!("* {seq} FETCH ({uid_item}FLAGS ({}) ", m.flags.join(" "))
                                     .as_bytes(),
                             );
                             if !part.is_empty() {
@@ -1147,4 +1160,302 @@ fn a_missing_archive_folder_never_loses_the_message() {
         store.get(7).unwrap().status == "done",
         "the local state still reflects what the user did"
     );
+}
+
+// ───────────────── tasks that close themselves ─────────────────
+fn with_sent(inbox: Vec<Msg>, sent: Vec<Msg>) -> Vec<Folder> {
+    vec![
+        folder("INBOX", "", inbox),
+        folder("[Gmail]/All Mail", "\\All", vec![]),
+        folder("[Gmail]/Sent Mail", "\\Sent", sent),
+        folder("[Gmail]/Drafts", "\\Drafts", vec![]),
+    ]
+}
+
+fn sent_reply(uid: u32, to_id: &str, subject: &str) -> Msg {
+    msg(
+        uid,
+        raw_mail(
+            &format!("From: me@example.com\nTo: priya@acme.com\nSubject: {subject}\nMessage-ID: <sent{uid}@me>\nIn-Reply-To: {to_id}\nReferences: {to_id}"),
+            "ok",
+        ),
+    )
+}
+
+/// Syncs the inbox into a store and returns it with the Sent index of the same session.
+fn synced(srv: &Server) -> (Store, SentIndex) {
+    let store = Store::memory().unwrap();
+    let mut s = srv.session();
+    let folder = find_sent_folder(&mut s).unwrap();
+    let idx = build_sent_index(&mut s, &folder, 500).unwrap();
+    process_new(&mut s, &store, &RulesTriager, &idx, 50, &mut |_, _| {}).unwrap();
+    (store, idx)
+}
+
+fn no_stop() -> std::sync::atomic::AtomicBool {
+    std::sync::atomic::AtomicBool::new(false)
+}
+
+fn set_inbox(srv: &Server, f: impl FnOnce(&mut Folder)) {
+    let mut st = srv.st.lock().unwrap();
+    f(st.folders.iter_mut().find(|f| f.name == "INBOX").unwrap());
+}
+
+#[test]
+fn a_task_closes_itself_when_you_replied_and_nothing_is_queued_or_changed() {
+    let srv = Server::start(with_sent(
+        vec![
+            inbox_msg(1, "<a@acme>", "question"),
+            inbox_msg(2, "<b@acme>", "other"),
+        ],
+        vec![sent_reply(1, "<a@acme>", "Re: question")],
+    ));
+    let (store, idx) = synced(&srv);
+    let mut s = srv.session();
+    let r = reconcile_open(&mut s, &store, &idx, &no_stop()).unwrap();
+    assert_eq!(r.replied, 1);
+    let t = store.get(1).unwrap();
+    assert_eq!(
+        (t.status.as_str(), t.closed_by.as_str()),
+        ("done", "replied")
+    );
+    assert_eq!(store.get(2).unwrap().status, "open");
+    assert!(
+        store.pending(10).is_empty(),
+        "closing because of a reply never queues a mailbox change"
+    );
+    assert!(
+        !srv.log()
+            .iter()
+            .any(|l| l.contains("STORE") || l.contains("MOVE")),
+        "{:?}",
+        srv.log()
+    );
+}
+
+#[test]
+fn forwarding_a_message_is_not_replying_to_it() {
+    for subject in ["Fwd: question", "FW: question", "fwd:question"] {
+        let srv = Server::start(with_sent(
+            vec![inbox_msg(1, "<a@acme>", "question")],
+            vec![sent_reply(1, "<a@acme>", subject)],
+        ));
+        let (store, idx) = synced(&srv);
+        let mut s = srv.session();
+        assert_eq!(
+            reconcile_open(&mut s, &store, &idx, &no_stop())
+                .unwrap()
+                .replied,
+            0,
+            "{subject}"
+        );
+        assert_eq!(store.get(1).unwrap().status, "open");
+    }
+}
+
+#[test]
+fn a_reopened_task_stays_open_and_does_not_ask_the_mailbox_to_unarchive() {
+    let srv = Server::start(with_sent(
+        vec![inbox_msg(1, "<a@acme>", "question")],
+        vec![sent_reply(1, "<a@acme>", "Re: question")],
+    ));
+    let (store, idx) = synced(&srv);
+    let mut s = srv.session();
+    reconcile_open(&mut s, &store, &idx, &no_stop()).unwrap();
+    assert_eq!(store.get(1).unwrap().status, "done");
+    store.set_done(1, false).unwrap(); // the user says: this still needs me
+    assert_eq!(store.get(1).unwrap().status, "open");
+    assert!(
+        store.pending(10).is_empty(),
+        "reopening an automatic close must not queue an unarchive"
+    );
+    reconcile_open(&mut s, &store, &idx, &no_stop()).unwrap();
+    assert_eq!(
+        store.get(1).unwrap().status,
+        "open",
+        "the next pass does not close it again"
+    );
+    assert_eq!(store.get(1).unwrap().closed_by, "");
+}
+
+#[test]
+fn closing_by_hand_still_queues_the_archive_as_before() {
+    let srv = Server::start(with_sent(vec![inbox_msg(1, "<a@acme>", "q")], vec![]));
+    let (store, _) = synced(&srv);
+    store.set_done(1, true).unwrap();
+    assert_eq!(store.get(1).unwrap().closed_by, "");
+    assert_eq!(store.pending(10).len(), 1);
+}
+
+#[test]
+fn mail_that_left_the_inbox_is_marked_but_stays_open_and_comes_back_if_it_returns() {
+    let srv = Server::start(with_sent(
+        vec![
+            inbox_msg(1, "<a@acme>", "one"),
+            inbox_msg(2, "<b@acme>", "two"),
+        ],
+        vec![],
+    ));
+    let (store, idx) = synced(&srv);
+    let mut s = srv.session();
+    let mut taken = None;
+    set_inbox(&srv, |f| taken = Some(f.msgs.remove(0))); // archived somewhere else
+    let r = reconcile_open(&mut s, &store, &idx, &no_stop()).unwrap();
+    assert_eq!(r.gone, 1);
+    let t = store.get(1).unwrap();
+    assert!(
+        t.gone && t.status == "open",
+        "marked, never closed, so nothing is lost"
+    );
+    assert!(!store.get(2).unwrap().gone);
+    set_inbox(&srv, |f| f.msgs.insert(0, taken.take().unwrap())); // moved back
+    reconcile_open(&mut s, &store, &idx, &no_stop()).unwrap();
+    assert!(!store.get(1).unwrap().gone);
+}
+
+#[test]
+fn a_server_error_means_unknown_and_nothing_changes() {
+    let srv = Server::start(with_sent(vec![inbox_msg(1, "<a@acme>", "one")], vec![]));
+    let (store, idx) = synced(&srv);
+    srv.st.lock().unwrap().refuse_fetch = true;
+    let mut s = srv.session();
+    let r = reconcile_open(&mut s, &store, &idx, &no_stop());
+    assert!(r.is_ok(), "an error from the server must not stop syncing");
+    assert!(!store.get(1).unwrap().gone);
+}
+
+#[test]
+fn a_reply_without_uids_does_not_read_as_everything_gone() {
+    let srv = Server::start(with_sent(
+        vec![
+            inbox_msg(1, "<a@acme>", "one"),
+            inbox_msg(2, "<b@acme>", "two"),
+        ],
+        vec![],
+    ));
+    let (store, idx) = synced(&srv);
+    srv.st.lock().unwrap().omit_uid = true;
+    let mut s = srv.session();
+    reconcile_open(&mut s, &store, &idx, &no_stop()).unwrap();
+    assert!(!store.get(1).unwrap().gone && !store.get(2).unwrap().gone);
+}
+
+#[test]
+fn a_renumbered_inbox_changes_nothing_here() {
+    let srv = Server::start(with_sent(vec![inbox_msg(1, "<a@acme>", "one")], vec![]));
+    let (store, idx) = synced(&srv);
+    set_inbox(&srv, |f| f.uidvalidity = 999);
+    let mut s = srv.session();
+    reconcile_open(&mut s, &store, &idx, &no_stop()).unwrap();
+    assert!(
+        !store.get(1).unwrap().gone,
+        "the old numbers mean nothing now; the sync handles it"
+    );
+}
+
+#[test]
+fn a_large_batch_vanishing_while_the_inbox_is_not_empty_is_treated_as_unknown() {
+    let inbox: Vec<Msg> = (1..=6)
+        .map(|u| inbox_msg(u, &format!("<m{u}@acme>"), "x"))
+        .collect();
+    let srv = Server::start(with_sent(inbox, vec![]));
+    let (store, idx) = synced(&srv);
+    set_inbox(&srv, |f| {
+        f.msgs = vec![inbox_msg(100, "<new@acme>", "unrelated")]
+    });
+    let mut s = srv.session();
+    reconcile_open(&mut s, &store, &idx, &no_stop()).unwrap();
+    assert!(
+        (1..=6).all(|u| !store.get(u).unwrap().gone),
+        "a server that answers oddly cannot hide the whole list"
+    );
+}
+
+#[test]
+fn an_inbox_that_really_is_empty_marks_everything_gone_but_closes_nothing() {
+    let inbox: Vec<Msg> = (1..=6)
+        .map(|u| inbox_msg(u, &format!("<m{u}@acme>"), "x"))
+        .collect();
+    let srv = Server::start(with_sent(inbox, vec![]));
+    let (store, idx) = synced(&srv);
+    set_inbox(&srv, |f| f.msgs.clear());
+    let mut s = srv.session();
+    reconcile_open(&mut s, &store, &idx, &no_stop()).unwrap();
+    assert!((1..=6).all(|u| {
+        let t = store.get(u).unwrap();
+        t.gone && t.status == "open"
+    }));
+}
+
+#[test]
+fn a_stopped_pass_does_nothing() {
+    let srv = Server::start(with_sent(
+        vec![inbox_msg(1, "<a@acme>", "q")],
+        vec![sent_reply(1, "<a@acme>", "Re: q")],
+    ));
+    let (store, idx) = synced(&srv);
+    let mut s = srv.session();
+    let stop = std::sync::atomic::AtomicBool::new(true);
+    reconcile_open(&mut s, &store, &idx, &stop).unwrap();
+    assert_eq!(store.get(1).unwrap().status, "open");
+}
+
+#[test]
+fn the_sent_index_picks_up_new_replies_without_starting_over() {
+    let srv = Server::start(with_sent(
+        vec![
+            inbox_msg(1, "<a@acme>", "q"),
+            inbox_msg(2, "<b@acme>", "q2"),
+        ],
+        vec![sent_reply(1, "<a@acme>", "Re: q")],
+    ));
+    let (_store, mut idx) = synced(&srv);
+    assert!(idx.replied_to.contains("<a@acme>") && !idx.replied_to.contains("<b@acme>"));
+    // the user replies to the second message from their phone
+    srv.st
+        .lock()
+        .unwrap()
+        .folders
+        .iter_mut()
+        .find(|f| f.name == "[Gmail]/Sent Mail")
+        .unwrap()
+        .msgs
+        .push(sent_reply(2, "<b@acme>", "Re: q2"));
+    let mut s = srv.session();
+    let folder = find_sent_folder(&mut s).unwrap();
+    refresh_sent_index(&mut s, &folder, &mut idx).unwrap();
+    assert!(idx.replied_to.contains("<b@acme>"));
+    let log_before = srv.log().len();
+    refresh_sent_index(&mut s, &folder, &mut idx).unwrap();
+    let fetches = srv.log()[log_before..]
+        .iter()
+        .filter(|l| l.contains("FETCH"))
+        .count();
+    assert_eq!(
+        fetches, 0,
+        "nothing new in Sent means nothing is downloaded"
+    );
+}
+
+#[test]
+fn a_renumbered_sent_folder_is_read_again_from_scratch() {
+    let srv = Server::start(with_sent(
+        vec![inbox_msg(1, "<a@acme>", "q")],
+        vec![sent_reply(1, "<a@acme>", "Re: q")],
+    ));
+    let (_, mut idx) = synced(&srv);
+    {
+        let mut st = srv.st.lock().unwrap();
+        let sent = st
+            .folders
+            .iter_mut()
+            .find(|f| f.name == "[Gmail]/Sent Mail")
+            .unwrap();
+        sent.uidvalidity = 7777;
+        sent.msgs = vec![sent_reply(5, "<z@acme>", "Re: z")];
+    }
+    let mut s = srv.session();
+    let folder = find_sent_folder(&mut s).unwrap();
+    refresh_sent_index(&mut s, &folder, &mut idx).unwrap();
+    assert!(idx.replied_to.contains("<z@acme>"));
 }

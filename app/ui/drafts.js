@@ -16,6 +16,11 @@ const editing = () => document.activeElement?.closest?.("#view textarea, #view i
 /* small tags in the row's meta line */
 function tagsHTML(t) {
   const out = [];
+  if (t._thread) out.push(`<span class="tg">${t._thread.length} messages</span>`);
+  if (t._max > t.priority) out.push(`<span class="tg" title="An earlier message in this conversation ranks higher">Earlier P${t._max}</span>`);
+  if (t.gone && t.status !== "done") out.push('<span class="tg">Left inbox</span>');
+  if (t.closed_by === "replied") out.push('<span class="tg">Replied</span>');
+  if (t.learned) out.push(`<span class="tg" title="Adjusted from your corrections of this sender. Sender → Normal starts over.">Learned ${t.learned > 0 ? "+" : "−"}${Math.abs(t.learned)}</span>`);
   if (t.draft) out.push(`<span class="tg">Draft${t.draft.saved ? " · saved" : ""}</span>`);
   else if (t.needs_reply) out.push('<span class="tg">↩ Reply</span>');
   if (t.due) out.push(`<span class="tg ${t.due <= isoToday() ? "r" : ""}">Due ${dueLabel(t.due)}</span>`);
@@ -31,17 +36,33 @@ function unsubWhere(u) {
   try { return /^mailto:/i.test(u) ? "by email" : new URL(u).hostname || "link" } catch { return "link" }
 }
 
-/* attachments, the unsubscribe link and a free-text note */
+/* snooze presets, and a date picker for "wake me on this day" */
+function snoozeHTML(t) {
+  const tomorrow = new Date(Date.now() + 864e5), min = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, "0")}-${String(tomorrow.getDate()).padStart(2, "0")}`;
+  return `<div class="drow"><span class="lbl">Snooze</span><button class="mini" data-act="snooze" data-preset="3h">3 hours</button><button class="mini" data-act="snooze" data-preset="tomorrow">Tomorrow</button><button class="mini" data-act="snooze" data-preset="nextweek">Next week</button><label class="lbl" for="sd${t.uid}">or until</label><input id="sd${t.uid}" class="mini dateinp" type="date" min="${min}" data-snooze-date="${t.uid}" aria-label="Snooze until this day">${isSnoozed(t) ? '<button class="mini" data-act="snooze" data-preset="clear">Bring back</button>' : ""}</div>`;
+}
+
+/* messages read on demand (kept in memory only, per task id) */
+const bodies = {};
+
+/* attachments, the unsubscribe link, due date, title, the message text and a free-text note */
 function extraHTML(t) {
   const files = t.attachment_count ? `<div class="spec"><div><span>Files</span><b>${t.attachments.map(esc).join(" · ")}${t.attachment_count > t.attachments.length ? ` · and ${t.attachment_count - t.attachments.length} more` : ""}</b></div></div>` : "";
   const unsub = t.unsubscribe ? `<div class="drow"><span class="lbl">Newsletter</span><button class="mini" data-act="copy-unsub">Copy unsubscribe link</button><span class="lbl">${esc(unsubWhere(t.unsubscribe))}</span></div>` : "";
+  const own = find(t.uid) || t; // a conversation row shows the earliest due date; the field edits this message's own
+  const due = `<div class="drow"><label class="lbl" for="du${t.uid}">Due</label><input id="du${t.uid}" class="mini dateinp" type="date" data-due="${t.uid}" value="${esc(own.due || "")}" aria-label="Due date">${own.due ? '<button class="mini" data-act="due-clear">Clear</button>' : ""}</div>`;
+  const title = isLocal(t) ? `<div class="drow"><label class="lbl" for="ti${t.uid}">Title</label><input id="ti${t.uid}" class="dtext titleinp" type="text" maxlength="200" data-title="${t.uid}" value="${esc(t.subject)}" aria-label="Task title"></div>` : "";
+  const gmail = S.gmail && t.message_id ? '<button class="mini" data-act="copy-gmail">Copy Gmail link</button>' : "";
+  const read = !isLocal(t) && !isHub
+    ? `<div class="drow"><button class="mini" data-act="read-body" aria-expanded="${bodies[t.uid] !== undefined}">${bodies[t.uid] !== undefined ? "Hide message" : "Read message"}</button>${gmail}</div>${bodies[t.uid] !== undefined ? `<pre class="bodytext" tabindex="0" aria-label="Message text">${esc(bodies[t.uid] || "No text.")}</pre>` : ""}`
+    : "";
   const note = `<label class="lbl nl" for="n${t.uid}">Note</label><textarea id="n${t.uid}" class="dtext note" data-note="${t.uid}" rows="2" maxlength="2000" placeholder="Anything to remember about this" aria-label="Note">${esc(t.note || "")}</textarea>`;
-  return files + unsub + note;
+  return files + unsub + title + due + read + note;
 }
 
 /* the controls inside an expanded row */
 function replyHTML(t) {
-  if (isLocal(t)) return extraHTML(t) + `<div class="drow"><span class="lbl">Snooze</span><button class="mini" data-act="snooze" data-preset="3h">3 hours</button><button class="mini" data-act="snooze" data-preset="tomorrow">Tomorrow</button><button class="mini" data-act="snooze" data-preset="nextweek">Next week</button>${isSnoozed(t) ? '<button class="mini" data-act="snooze" data-preset="clear">Bring back</button>' : ""}</div>`;
+  if (isLocal(t)) return extraHTML(t) + snoozeHTML(t);
   return extraHTML(t) + replyBlock(t);
 }
 function replyBlock(t) {
@@ -59,7 +80,7 @@ function replyBlock(t) {
     : desktop
       ? `<div class="drow"><button class="mini pri" data-act="draft-new" data-ins="" ${t.drafting ? "disabled" : ""}>${t.drafting ? "Writing…" : "Draft a reply"}</button>${chips(INS, "draft-new")}</div>`
       : `<div class="note">Open the desktop app to write a draft for this message.</div>`;
-  const snooze = `<div class="drow"><span class="lbl">Snooze</span><button class="mini" data-act="snooze" data-preset="3h">3 hours</button><button class="mini" data-act="snooze" data-preset="tomorrow">Tomorrow</button><button class="mini" data-act="snooze" data-preset="nextweek">Next week</button>${isSnoozed(t) ? '<button class="mini" data-act="snooze" data-preset="clear">Bring back</button>' : ""}</div>`;
+  const snooze = snoozeHTML(t);
   const pref = t.pref || "normal", pb = (lvl, l) => `<button class="mini ${pref === lvl ? "on" : ""}" data-act="pref" data-level="${lvl}">${l}</button>`;
   return `<div class="reply">${head}${warn}${body}</div>${snooze}<div class="drow"><span class="lbl">Sender</span>${pb("normal", "Normal")}${pb("important", "Always important")}${pb("mute", "Mute")}</div>`;
 }
@@ -93,6 +114,12 @@ function saveDraftText(uid, body, now) {
   draftTimer = setTimeout(() => call("draft_update", { uid, body }), now ? 0 : 600);
 }
 
+function setDue(t, due) {
+  const uid = t.uid, old = t.due || ""; if (old === due) return;
+  t.due = due; undoStack.push(() => { const x = find(uid); if (x) x.due = old; call("set_due", { uid, due: old }) });
+  call("set_due", { uid, due }); showUndo(due ? "Due date set" : "Due date cleared"); render();
+}
+
 let noteTimer;
 function saveNote(uid, note, now) {
   const t = find(uid); if (t) t.note = note;
@@ -115,16 +142,24 @@ function handleExtra(e, t, act) {
       genDraft(t, el.dataset.ins || "", edited); return true;
     }
     case "copy-unsub": copyText(t.unsubscribe || ""); return true;
+    case "copy-gmail": copyText("https://mail.google.com/mail/u/0/#search/" + encodeURIComponent("rfc822msgid:" + String(t.message_id).replace(/^<|>$/g, ""))); return true;
+    case "due-clear": setDue(t, ""); return true;
+    case "read-body":
+      if (bodies[t.uid] !== undefined) { delete bodies[t.uid]; render(); return true }
+      (async () => { try { bodies[t.uid] = await rpc("read_body", { uid: t.uid }) } catch (err) { toast(String(err)) } render() })();
+      return true;
     case "draft-copy": copyText(t.draft?.body || ""); return true;
-    case "draft-discard": t.draft = null; call("draft_discard", { uid: t.uid }); render(); return true;
+    case "draft-discard":
+      if (t.draft?.source === "user" && !twice(el, "Discard your edits? Click again")) return true;
+      t.draft = null; call("draft_discard", { uid: t.uid }); render(); return true;
     case "draft-save":
       if (t.reply_warn && !twice(el, "Address differs. Click again to save")) return true;
       (async () => { busy++; try { await rpc("draft_to_mailbox", { uid: t.uid }); toast("Saving to your Drafts folder…"); if (t.draft) t.draft.saved = true } catch (err) { toast(String(err)) } finally { busy--; render() } })();
       return true;
     case "snooze": {
-      const p = el.dataset.preset;
-      call("set_snooze", { uid: t.uid, preset: p }); t.snooze_until = p === "clear" ? 0 : (p === "3h" ? Date.now() / 1000 + 10800 : Date.now() / 1000 + 86400);
-      undoStack.push(() => { t.snooze_until = 0; call("set_snooze", { uid: t.uid, preset: "clear" }) });
+      const p = el.dataset.preset, ids = members(t).map(x => x.uid), until = p === "clear" ? 0 : (p === "3h" ? Date.now() / 1000 + 10800 : Date.now() / 1000 + 86400);
+      ids.forEach(u => { const x = find(u); if (x) x.snooze_until = until; call("set_snooze", { uid: u, preset: p }) });
+      undoStack.push(() => ids.forEach(u => { const x = find(u); if (x) x.snooze_until = 0; call("set_snooze", { uid: u, preset: "clear" }) }));
       if (p !== "clear") { showUndo("Snoozed"); openUid = null } render(); return true;
     }
     case "pref": {
@@ -150,7 +185,24 @@ document.addEventListener("input", e => {
   else if (e.target.dataset?.draft) saveDraftText(+e.target.dataset.draft, e.target.value, false);
   else if (e.target.dataset?.note) saveNote(+e.target.dataset.note, e.target.value, false);
 });
-document.addEventListener("change", e => { if (e.target.id === "sort") { flt.sort = e.target.value; render() } });
+document.addEventListener("change", e => {
+  const x = e.target;
+  if (x.id === "sort") { flt.sort = x.value; render() }
+  else if (x.dataset?.due) { const t = find(+x.dataset.due), id = x.id; if (t) { setDue(t, x.value); document.getElementById(id)?.focus() } }
+  else if (x.dataset?.title) {
+    const t = find(+x.dataset.title), title = x.value.trim(); if (!t || !title || title === t.subject) { if (t) x.value = t.subject; return }
+    const old = t.subject; t.subject = t.action = title;
+    undoStack.push(() => { const y = find(t.uid); if (y) y.subject = y.action = old; call("set_title", { uid: t.uid, title: old }) });
+    call("set_title", { uid: t.uid, title }); showUndo("Title changed"); const id = x.id; render(); document.getElementById(id)?.focus();
+  } else if (x.dataset?.snoozeDate) {
+    const t = find(+x.dataset.snoozeDate); if (!t || !x.value) return;
+    const ids = members(t).map(y => y.uid);
+    (async () => {
+      busy++; try { for (const u of ids) await rpc("set_snooze", { uid: u, date: x.value }); const until = new Date(x.value + "T09:00:00").getTime() / 1000; ids.forEach(u => { const y = find(u); if (y) y.snooze_until = until }); undoStack.push(() => ids.forEach(u => { const y = find(u); if (y) y.snooze_until = 0; call("set_snooze", { uid: u, preset: "clear" }) })); showUndo("Snoozed"); openUid = null }
+      catch (err) { toast(String(err).replace(/^Error: /, "")) } finally { busy--; render() }
+    })();
+  }
+});
 document.addEventListener("focusout", e => {
   if (e.target.dataset?.draft) saveDraftText(+e.target.dataset.draft, e.target.value, true);
   if (e.target.dataset?.note) saveNote(+e.target.dataset.note, e.target.value, true);
@@ -158,11 +210,31 @@ document.addEventListener("focusout", e => {
 });
 document.addEventListener("keydown", e => { if (e.target.id === "q" && e.key === "Escape") { flt.q = ""; e.target.blur(); render() } });
 
+/* mark all folded automated mail as done (one undo restores all) */
+document.addEventListener("click", e => {
+  const b = e.target.closest("[data-autodone]"); if (!b) return;
+  const l = parts().auto.flatMap(members); if (!l.length || !twice(b, `Click again: ${l.length} done`)) return;
+  const ids = l.map(t => t.uid);
+  l.forEach(t => { t.status = "done"; call("set_done", { uid: t.uid, done: true }) });
+  undoStack.push(() => ids.forEach(u => { const t = find(u); if (t) { t.status = "open"; call("set_done", { uid: u, done: false }) } }));
+  showUndo(`${ids.length} done`); render();
+});
+
+/* mark everything that left the inbox as done (one undo restores all) */
+document.addEventListener("click", e => {
+  const b = e.target.closest("[data-gonedone]"); if (!b) return;
+  const l = parts().gone.flatMap(members); if (!l.length || !twice(b, `Click again: ${l.length} done`)) return;
+  const ids = l.map(t => t.uid);
+  l.forEach(t => { t.status = "done"; call("set_done", { uid: t.uid, done: true }) });
+  undoStack.push(() => ids.forEach(u => { const t = find(u); if (t) { t.status = "open"; call("set_done", { uid: u, done: false }) } }));
+  showUndo(`${ids.length} done`); render();
+});
+
 /* mark everything currently shown as done (one undo restores all) */
 document.addEventListener("click", e => {
   const b = e.target.closest("[data-bulk]"); if (!b) return;
-  const l = listFor(); if (l.length < 2 || !twice(b, `Click again: ${l.length} done`)) return;
-  const ids = l.map(t => t.uid);
+  const rows = listFor(); if (rows.length < 2 || !twice(b, `Click again: ${rows.length} done`)) return;
+  const l = rows.flatMap(members), ids = l.map(t => t.uid);
   l.forEach(t => { t.status = "done"; call("set_done", { uid: t.uid, done: true }) });
   undoStack.push(() => ids.forEach(u => { const t = find(u); if (t) { t.status = "open"; call("set_done", { uid: u, done: false }) } }));
   showUndo(`${ids.length} done`); render();
@@ -170,6 +242,21 @@ document.addEventListener("click", e => {
 
 /* ───────── add a task of your own, and the shortcuts card ───────── */
 const vl = () => $("#veil");
+let veilFrom = null;
+const FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select,textarea,[tabindex]:not([tabindex="-1"])';
+function dialogOpened(label) {
+  veilFrom = document.activeElement;
+  const p = vl().querySelector(".panel"); if (p) { p.setAttribute("role", "dialog"); p.setAttribute("aria-modal", "true"); p.setAttribute("aria-label", label) }
+  setTimeout(() => (vl().querySelector("[autofocus]") || vl().querySelector(FOCUSABLE))?.focus(), 30);
+}
+document.addEventListener("keydown", e => {
+  if (e.key !== "Tab" || !vl().classList.contains("show")) return;
+  const f = [...vl().querySelectorAll(FOCUSABLE)].filter(x => x.offsetParent !== null); if (!f.length) return;
+  const first = f[0], last = f[f.length - 1];
+  if (!vl().contains(document.activeElement)) { e.preventDefault(); first.focus() }
+  else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus() }
+  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus() }
+});
 function openAdd() {
   vl().dataset.kind = "add"; vl().classList.add("show");
   vl().innerHTML = `<div class="panel"><h2>Add a task</h2><p>For things that did not come by email. It lives in your list only.</p>
@@ -177,7 +264,8 @@ function openAdd() {
     <div class="row2" style="grid-template-columns:1fr 1fr"><div><label class="f" for="at-pri">Priority</label><select id="at-pri">${[1, 2, 3, 4, 5].map(n => `<option value="${n}" ${n === 3 ? "selected" : ""}>${n}${n === 5 ? " (highest)" : n === 1 ? " (lowest)" : ""}</option>`).join("")}</select></div>
     <div><label class="f" for="at-due">Due (optional)</label><input id="at-due" type="date"></div></div>
     <div class="foot"><span class="sp"></span><button class="btn" data-vc="1">Cancel</button><button class="btn pri" data-add="1">Add</button></div></div>`;
-  setTimeout(() => $("#at-title")?.focus(), 30);
+  dialogOpened("Add a task");
+  setTimeout(() => $("#at-title")?.focus(), 40);
 }
 async function submitAdd() {
   const title = $("#at-title").value.trim(); if (!title) { toast("Give the task a title"); return }
@@ -191,6 +279,7 @@ function openHelp() {
   vl().dataset.kind = "help"; vl().classList.add("show");
   vl().innerHTML = `<div class="panel"><h2>Keyboard</h2><div class="keylist">${HELP.map(([k, l]) => `<div><span class="cap">${k}</span><b>${l}</b></div>`).join("")}</div>
     <div class="foot"><span class="sp"></span><button class="btn pri" data-vc="1">Close</button></div></div>`;
+  dialogOpened("Keyboard shortcuts");
 }
 document.addEventListener("click", e => {
   if (vl().dataset.kind === "add" && e.target.closest("[data-add]")) submitAdd();
@@ -199,6 +288,7 @@ document.addEventListener("click", e => {
 });
 document.addEventListener("keydown", e => {
   const k = vl().dataset.kind;
+  if (vl().classList.contains("show") && e.key === "Escape" && k === "settings") { closeVeil(); return }
   if (vl().classList.contains("show") && (k === "add" || k === "help")) {
     if (e.key === "Escape") closeVeil();
     else if (k === "add" && e.key === "Enter" && e.target.id === "at-title") { e.preventDefault(); submitAdd() }

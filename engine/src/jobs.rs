@@ -60,20 +60,44 @@ pub fn snooze_until(preset: &str, from: chrono::DateTime<Local>) -> Option<f64> 
     }
 }
 
+/// One line per conversation (not per message) for tasks whose snooze just ended.
+pub fn wake_notices(due: &[crate::store::Task]) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    due.iter()
+        .filter(|t| seen.insert(t.thread.clone()))
+        .map(|t| {
+            if t.action.is_empty() {
+                t.subject.clone()
+            } else {
+                t.action.clone()
+            }
+        })
+        .collect()
+}
+
+/// Wake time for "snooze until this date": 09:00 local on that day. The date must be a real day, no earlier than
+/// today (and today only while 09:00 is still ahead) and no more than a year away.
+pub fn snooze_on(date: &str, from: chrono::DateTime<Local>) -> Option<f64> {
+    if !crate::dates::valid_iso(date) {
+        return None;
+    }
+    let day = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").ok()?;
+    if day > from.date_naive() + Span::days(366) {
+        return None;
+    }
+    let at = Local
+        .from_local_datetime(&day.and_time(NaiveTime::from_hms_opt(9, 0, 0)?))
+        .earliest()?;
+    (at > from).then(|| at.timestamp() as f64)
+}
+
 fn tick(core: &Arc<Core>) {
     let Ok(store) = core.store() else { return };
     let s = core.settings();
     let now = Local::now();
     if let Ok(due) = store.wake_due(now.timestamp() as f64) {
-        for t in due {
-            core.notify_user(
-                "Back from snooze",
-                if t.action.is_empty() {
-                    &t.subject
-                } else {
-                    &t.action
-                },
-            );
+        for label in wake_notices(&due) {
+            core.notify_user("Back from snooze", &label);
         }
     }
     let today = now.format("%Y-%m-%d").to_string();
@@ -88,17 +112,31 @@ fn tick(core: &Arc<Core>) {
             .all_tasks()
             .unwrap_or_default()
             .into_iter()
-            .filter(|t| t.status == "open" && t.snooze_until <= 0.0)
+            .filter(|t| t.status == "open" && t.snooze_until <= 0.0 && !t.gone)
             .collect();
         if !open.is_empty() {
+            let today = now.format("%Y-%m-%d").to_string();
+            let conversations = open
+                .iter()
+                .map(|t| t.thread.as_str())
+                .collect::<std::collections::HashSet<_>>()
+                .len();
             let high = open.iter().filter(|t| t.priority >= 4).count();
             let urgent = open.iter().filter(|t| t.urgent).count();
+            let due = open
+                .iter()
+                .filter(|t| !t.due.is_empty() && t.due <= today)
+                .count();
             let drafts = open.iter().filter(|t| t.draft.is_some()).count();
             core.notify_user(
                 "Inbox digest",
                 &format!(
-                    "{} open · {high} high · {urgent} urgent · {drafts} draft{} ready",
-                    open.len(),
+                    "{conversations} open · {high} high · {due} due{} · {drafts} draft{} ready",
+                    if urgent > 0 {
+                        format!(" · {urgent} urgent")
+                    } else {
+                        String::new()
+                    },
                     if drafts == 1 { "" } else { "s" }
                 ),
             );

@@ -8,6 +8,15 @@ versions may change behaviour.
 First public build.
 
 ### Added
+- Tasks close themselves when you reply to the message (forwards do not count), and mail that left the inbox is
+  marked and folded away instead of cluttering the list; nothing about this ever changes your mailbox.
+- Conversations are one row, with a count and the highest priority; done, star and snooze apply to the whole row.
+- The list learns from corrections of a sender (by address, with a way to start over), and rules mode now produces
+  priority 5 for an overdue question from someone you write to. Words like "urgent" in a message count for nothing.
+- Read the stored message text in the app, copy a Gmail link, edit due dates, rename your own tasks, snooze until a date.
+- Keyboard and screen-reader work: dialogs with roles and focus handling, Escape to close, announced toasts, readable
+  contrast on every row, reduced-motion support.
+
 - One-installer desktop app (Windows build verified; macOS and Linux builds are configured but not yet run in CI).
 - First-run setup wizard: connect any IMAP mailbox with an app password, choose how mail is ranked, set alerts.
 - Mail ranked by priority, category, due date and "needs a reply" from rules, a local Ollama model, or your own
@@ -29,7 +38,7 @@ First public build.
 - Third review (Opus, 2026-11-13): one bad unsubscribe link could blank the list; a crashing message could crash the app on every start; hostile HTML could stall the watcher; sign-out left mail text in the database files; the hub answered public networks; mail data sat in Roaming AppData. All fixed with tests; see SECURITY.md.
 - A damaged database is set aside and rebuilt, newer data is refused, and a `crash.log` records internal errors (no telemetry).
 - Two independent security reviews; all confirmed findings fixed with regression tests. See SECURITY.md.
-- 157 automated tests, including protocol tests against a scripted mock IMAP server and a dedicated edge-case suite.
+- 208 automated tests, including protocol tests against a scripted mock IMAP server and a dedicated edge-case suite.
 
 ### Known limitations
 - Microsoft (Outlook, Microsoft 365) accounts are not supported: Microsoft turned off password sign-in for IMAP.

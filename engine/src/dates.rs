@@ -78,6 +78,11 @@ fn parse_iso(s: &str) -> Option<NaiveDate> {
     NaiveDate::from_ymd_opt(y, m, d)
 }
 
+/// True when `due` (YYYY-MM-DD) is today, tomorrow or already past.
+pub fn due_within_a_day(due: &str) -> bool {
+    parse_iso(due).is_some_and(|d| d <= Local::now().date_naive() + Duration::days(1))
+}
+
 /// The calendar date (local time) a message was received; today when the Date header was missing.
 pub fn received_date(received: f64) -> NaiveDate {
     // outside 2000..2100 the calendar arithmetic below could overflow, so treat it as unknown

@@ -54,6 +54,9 @@ process_new():
             signals = compute(email, sent_index)
             triage  = AI or rules, falling back to rules on any error
             triage  = apply sender preference (important / mute) unless the sender check failed
+            triage  = rules only, no preference, sender check not failed: shift priority by what the last three
+                      corrections of this ADDRESS taught (>= 2, same direction, 1-2 steps); undo removes a correction
+            a new message in a snoozed conversation wakes it
             store task; callback(alert, label, auto-draft)
             clear the in-flight mark
         cursor = max(cursor, highest uid in chunk)           # skipped messages still advance it
@@ -77,6 +80,7 @@ parse(raw):
         body = text with quoted ">" lines removed, blank runs collapsed, capped at 3000 chars
         excerpt = first 400 chars on one line
         reply_to = first valid Reply-To address, else the sender
+        thread = first id of the raw References header, else In-Reply-To, else own Message-ID  ("" if none usable)
         attachments = names of parts marked attachment (or non-inline parts with a file name): count them all,
                       keep five names, path and control characters removed, <= 60 chars; inline images are skipped
         unsubscribe = first https link in List-Unsubscribe, else the first mailto link; anything else
@@ -96,6 +100,7 @@ signals: known    = sender in my Sent recipients   AND sender_ok
 rules score:  reply or (known and not bulk) -> 4;  bulk -> 1 (2 if known);  otherwise 3
               category from subject words (finance/travel/promo/work), else notification/personal/other
               needs_reply = not bulk and (reply or known) and the text contains "?"
+              priority 5 = needs_reply and sender check not failed and due is today, tomorrow or past   # never "urgent"
               due = first date in the subject or first 1500 body characters that follows a cue word
                     (due, by, before, until, deadline, on ...): ISO, "20 Nov [2026]", "Nov 20th", weekday names
                     (the same day counts), today/eod, tomorrow; no cue -> no date; impossible dates (30 Feb) ignored;
@@ -109,6 +114,25 @@ AI (optional, local Ollama or own API key):
 ```
 Edge cases: spoofed sender, prompt injection, hostile category strings, malformed model output —
 `failed_dkim_or_spf…`, `email_text_cannot_close…`, `unknown_or_hostile_categories…`, `model_replies_in_many_shapes…`.
+
+## 5b. Closing tasks that are finished elsewhere (`watcher.rs: reconcile_open`, `refresh_sent_index`)
+
+```
+after each sync, and every 2 minutes while idle:                    # failures are logged, never fatal
+    top up the Sent index with new Sent messages (read again if the Sent UIDVALIDITY changed)
+        replied_to = every id named in In-Reply-To (not References) of a sent message, except forwards (Fwd, FW, WG, TR, RV, ENC...)
+    for each open mail task (not user-added), newest 500:
+        if replied_to has its Message-ID and the user has not reopened it: close it, closed_by = "replied"
+                                                                          # no outbox item, mailbox untouched
+    EXAMINE INBOX; if its UIDVALIDITY differs from the stored one: stop (process_new handles renumbering)
+    for the remaining tasks in chunks of 200:
+        FETCH uids RFC822.SIZE; on any error: stop                  # unknown means change nothing
+        if the reply names no UIDs, or >= 5 vanished while the inbox is not empty: stop
+        mark `gone` for tasks whose UID is missing; clear `gone` for tasks that are back   # they stay open
+```
+Edge cases: server errors and odd replies, renumbered folders, forwards, reopened tasks, tasks the user added —
+`a_task_closes_itself_when_you_replied…`, `forwarding_a_message_is_not_replying_to_it`, `a_server_error_means_unknown…`,
+`a_large_batch_vanishing…`, `a_reopened_task_stays_open…`.
 
 ## 6. Changing the real mailbox (`writeback.rs`) — only when the user turned it on
 
@@ -127,6 +151,7 @@ drain():                                           # in order; stops at the firs
         draft:   build the message (section 7); APPEND to the Drafts folder flagged \Draft
         on error: retry later; after 5 tries drop the item and log it
 ```
+Reopening a task the app closed by itself never queues an "unarchive" (the mailbox was never changed).
 Edge cases: decoy IDs that merely contain the real one, duplicate copies, missing folders, refused commands —
 `gmail_actions_touch_exactly…`, `duplicate_copies…`, `a_missing_archive_folder…`, `a_lookup_with_no_exact_match…`.
 

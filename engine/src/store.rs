@@ -57,6 +57,15 @@ pub struct Task {
     pub unsubscribe: String,
     /// Free text the user wrote on the task.
     pub note: String,
+    /// Key shared by every message of one conversation. Mail with no usable id and tasks you added get `uid:<id>`,
+    /// so they are never grouped with anything.
+    pub thread: String,
+    /// "replied" when the app closed this task because it found your reply in Sent; empty otherwise.
+    pub closed_by: String,
+    /// The message is no longer in your inbox.
+    pub gone: bool,
+    /// Steps added to (or taken from) the priority because of your corrections of this sender; 0 = none.
+    pub learned: i32,
     pub draft: Option<Draft>,
     /// "important", "mute" or empty (normal) for this sender.
     pub pref: String,
@@ -117,10 +126,23 @@ const ADDED_COLUMNS: &[(&str, &str)] = &[
     ("attachment_count", "INTEGER DEFAULT 0"),
     ("unsubscribe", "TEXT DEFAULT ''"),
     ("note", "TEXT DEFAULT ''"),
+    ("thread", "TEXT DEFAULT ''"),
+    // "replied" when the app closed the task because a reply was found in Sent; empty when the user closed it
+    ("closed_by", "TEXT DEFAULT ''"),
+    // the user reopened an automatically closed task: do not close it again
+    ("keep_open", "INTEGER DEFAULT 0"),
+    // the message is no longer in the inbox (moved, archived or deleted somewhere else)
+    ("gone", "INTEGER DEFAULT 0"),
+    // priority steps added or removed because of the user's earlier corrections of this sender
+    ("learned", "INTEGER DEFAULT 0"),
 ];
 
+/// Same idea for the corrections table.
+const ADDED_OVERRIDE_COLUMNS: &[(&str, &str)] =
+    &[("addr", "TEXT DEFAULT ''"), ("uid", "INTEGER DEFAULT 0")];
+
 const SELECT: &str = "SELECT t.uid,t.message_id,t.sender,t.addr,t.subject,t.received,t.priority,t.category,t.action,t.urgent,t.status,t.star,\
-t.excerpt,t.why,t.signals,t.needs_reply,t.due,t.snooze_until,t.reply_to,d.body,d.source,d.saved,d.updated,p.level,t.auth_fail,t.attachments,t.attachment_count,t.unsubscribe,t.note \
+t.excerpt,t.why,t.signals,t.needs_reply,t.due,t.snooze_until,t.reply_to,d.body,d.source,d.saved,d.updated,p.level,t.auth_fail,t.attachments,t.attachment_count,t.unsubscribe,t.note,t.thread,t.closed_by,t.gone,t.learned \
 FROM tasks t LEFT JOIN drafts d ON d.uid=t.uid LEFT JOIN sender_prefs p ON p.addr=t.addr";
 
 fn domain(a: &str) -> String {
@@ -133,6 +155,11 @@ fn row(r: &rusqlite::Row) -> rusqlite::Result<Task> {
     let auth_fail = r.get::<_, i32>(24)? != 0;
     let attachments: Vec<String> =
         serde_json::from_str(&r.get::<_, String>(25)?).unwrap_or_default();
+    let uid: u32 = r.get(0)?;
+    let thread = match r.get::<_, String>(29)? {
+        t if t.is_empty() => format!("uid:{uid}"),
+        t => t,
+    };
     let reply_warn = auth_fail || (!reply_to.is_empty() && domain(&reply_to) != domain(&addr));
     let draft = match r.get::<_, Option<String>>(19)? {
         Some(body) => Some(Draft {
@@ -168,6 +195,10 @@ fn row(r: &rusqlite::Row) -> rusqlite::Result<Task> {
         attachment_count: r.get(26)?,
         unsubscribe: r.get(27)?,
         note: r.get(28)?,
+        thread,
+        closed_by: r.get(30)?,
+        gone: r.get::<_, i32>(31)? != 0,
+        learned: r.get(32)?,
         draft,
         pref: r.get::<_, Option<String>>(23)?.unwrap_or_default(),
     })
@@ -182,6 +213,19 @@ fn migrate(db: &Connection) -> anyhow::Result<()> {
     for (name, def) in ADDED_COLUMNS {
         if !have.iter().any(|h| h == name) {
             db.execute(&format!("ALTER TABLE tasks ADD COLUMN {name} {def}"), [])?;
+        }
+    }
+    let have: Vec<String> = db
+        .prepare("PRAGMA table_info(overrides)")?
+        .query_map([], |r| r.get::<_, String>(1))?
+        .filter_map(Result::ok)
+        .collect();
+    for (name, def) in ADDED_OVERRIDE_COLUMNS {
+        if !have.iter().any(|h| h == name) {
+            db.execute(
+                &format!("ALTER TABLE overrides ADD COLUMN {name} {def}"),
+                [],
+            )?;
         }
     }
     Ok(())
@@ -348,7 +392,8 @@ impl Store {
     /// model's priority. Returns the triage as stored, so alerts use the final priority.
     pub fn add(&self, e: &Email, t: &Triage, s: &Signals) -> anyhow::Result<Triage> {
         let mut t = t.clone();
-        match self.pref(&e.sender_addr).as_deref() {
+        let pref = self.pref(&e.sender_addr);
+        match pref.as_deref() {
             Some("important") if t.priority < 4 && !e.auth_fail => {
                 t.priority = 4;
                 t.why = format!("{} (sender marked important)", t.why.trim_end_matches('.'));
@@ -361,16 +406,39 @@ impl Store {
             }
             _ => {}
         }
+        // What the user taught by correcting this sender before. Only the rules ranker is shifted (a model already
+        // sees the corrections in its prompt), never a sender with an explicit preference, never mail that failed its
+        // sender check, and it never makes anything urgent.
+        let mut learned = 0;
+        if pref.is_none() && !e.auth_fail && t.why.starts_with("Rule-based") {
+            let shift = self.learned_shift(&e.sender_addr);
+            if shift != 0 {
+                let new = (t.priority as i32 + shift).clamp(1, 5) as u8;
+                learned = new as i32 - t.priority as i32;
+                if learned != 0 {
+                    t.priority = new;
+                    t.why = format!("{} Adjusted from your corrections.", t.why.trim_end());
+                }
+            }
+        }
         self.db.execute(
-            "INSERT OR REPLACE INTO tasks(uid,message_id,sender,addr,subject,received,priority,category,action,urgent,excerpt,why,signals,body,needs_reply,due,reply_to,refs,auth_fail,attachments,attachment_count,unsubscribe)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22)",
+            "INSERT OR REPLACE INTO tasks(uid,message_id,sender,addr,subject,received,priority,category,action,urgent,excerpt,why,signals,body,needs_reply,due,reply_to,refs,auth_fail,attachments,attachment_count,unsubscribe,thread,learned)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24)",
             params![
                 e.uid, e.message_id, e.sender_name, e.sender_addr, e.subject, e.received, t.priority, t.category,
                 t.action, t.urgent as i32, e.excerpt, t.why, serde_json::to_string(s)?, e.body,
                 t.needs_reply as i32, t.due, e.reply_to, e.references, e.auth_fail as i32,
-                serde_json::to_string(&e.attachments)?, e.attachment_count as i64, e.unsubscribe
+                serde_json::to_string(&e.attachments)?, e.attachment_count as i64, e.unsubscribe, e.thread,
+                learned
             ],
         )?;
+        // news in a snoozed conversation wakes it: the snooze was for the old state of the thread
+        if !e.thread.is_empty() && !e.auth_fail {
+            self.db.execute(
+                "UPDATE tasks SET snooze_until=0 WHERE thread=?1 AND status='open' AND snooze_until>0 AND uid<>?2",
+                params![e.thread, e.uid],
+            )?;
+        }
         self.log(&format!(
             "triaged “{}” → P{}, {}{}{}",
             e.subject,
@@ -404,14 +472,19 @@ impl Store {
 
     // ---- user actions: update locally, log, queue the mailbox change ----
     pub fn set_done(&self, uid: u32, done: bool) -> anyhow::Result<bool> {
-        if self.get(uid).is_none() {
+        let Some(t) = self.get(uid) else {
             return Ok(false);
-        }
+        };
+        // Reopening a task the app closed by itself (you had replied): the mailbox was never changed, so there is
+        // nothing to unarchive, and the task must not be closed again by the next pass.
+        let auto = !done && !t.closed_by.is_empty();
         self.db.execute(
-            "UPDATE tasks SET status=?1, snooze_until=0, done_at=CASE WHEN ?1='done' THEN CAST(strftime('%s','now') AS INTEGER) ELSE 0 END WHERE uid=?2",
-            params![if done { "done" } else { "open" }, uid],
+            "UPDATE tasks SET status=?1, snooze_until=0, closed_by='', keep_open=CASE WHEN ?3=1 THEN 1 ELSE keep_open END, done_at=CASE WHEN ?1='done' THEN CAST(strftime('%s','now') AS INTEGER) ELSE 0 END WHERE uid=?2",
+            params![if done { "done" } else { "open" }, uid, auto as i32],
         )?;
-        self.queue(uid, if done { "archive" } else { "unarchive" }, "")?;
+        if !auto {
+            self.queue(uid, if done { "archive" } else { "unarchive" }, "")?;
+        }
         self.log(&format!(
             "{} “{}”",
             if done { "archived" } else { "reopened" },
@@ -449,10 +522,45 @@ impl Store {
                 "UPDATE tasks SET priority=?1 WHERE uid=?2",
                 params![new, uid],
             )?;
-            self.db.execute(
-                "INSERT INTO overrides(sender,subject,old_priority,new_priority,at) VALUES(?1,?2,?3,?4,strftime('%s','now'))",
-                params![t.sender, t.subject, t.priority, new],
-            )?;
+            let forged: bool = self
+                .db
+                .query_row("SELECT auth_fail FROM tasks WHERE uid=?1", [uid], |r| {
+                    r.get::<_, i32>(0)
+                })
+                .unwrap_or(0)
+                != 0;
+            // Corrections teach by sender ADDRESS, one per action. A correction of mail that failed its sender
+            // check teaches nothing, and changing a task back to what it was (undo) removes the correction it made
+            // instead of recording an opposite one.
+            if !forged && !t.addr.is_empty() {
+                // One correction per task: the priority it had at first, and the priority it has now. Nudging the
+                // same mail twice is still one correction, and walking it back to where it started removes it.
+                let existing: Option<(i64, u8)> = self
+                    .db
+                    .query_row(
+                        "SELECT id, old_priority FROM overrides WHERE uid=?1 AND uid<>0 AND addr=?2 ORDER BY id DESC LIMIT 1",
+                        params![uid, t.addr],
+                        |r| Ok((r.get(0)?, r.get(1)?)),
+                    )
+                    .optional()?;
+                match existing {
+                    Some((id, first)) if first == new => {
+                        self.db.execute("DELETE FROM overrides WHERE id=?1", [id])?;
+                    }
+                    Some((id, _)) => {
+                        self.db.execute(
+                            "UPDATE overrides SET new_priority=?1, at=strftime('%s','now') WHERE id=?2",
+                            params![new, id],
+                        )?;
+                    }
+                    None => {
+                        self.db.execute(
+                            "INSERT INTO overrides(sender,subject,old_priority,new_priority,at,addr,uid) VALUES(?1,?2,?3,?4,strftime('%s','now'),?5,?6)",
+                            params![t.sender, t.subject, t.priority, new, t.addr, uid],
+                        )?;
+                    }
+                }
+            }
             self.queue(uid, "label", &format!("AI/P{new}"))?;
             self.log(&format!(
                 "P{}→P{} “{}” saved as a correction",
@@ -529,6 +637,9 @@ impl Store {
         if level == "normal" {
             self.db
                 .execute("DELETE FROM sender_prefs WHERE addr=?1", [addr])?;
+            // "Normal" is also the way to start over: whatever was learned about this sender is forgotten
+            self.db
+                .execute("DELETE FROM overrides WHERE addr=?1", [addr])?;
         } else {
             self.db.execute(
                 "INSERT OR REPLACE INTO sender_prefs VALUES(?1,?2)",
@@ -588,6 +699,83 @@ impl Store {
             return Ok(false);
         }
         self.meta_set(&key, &(used + 1).to_string())?;
+        Ok(true)
+    }
+
+    // ---- tasks that close themselves ----
+    /// Open mail tasks (not the ones you added) with their Message-ID, for the reply and left-the-inbox checks:
+    /// (uid, message_id, keep_open, gone). Newest first.
+    pub fn open_mail_tasks(&self, limit: i64) -> Vec<(u32, String, bool, bool)> {
+        let Ok(mut q) = self.db.prepare(
+            "SELECT uid, message_id, keep_open, gone FROM tasks WHERE status='open' AND uid<?1 AND message_id<>'' ORDER BY received DESC LIMIT ?2",
+        ) else {
+            return vec![];
+        };
+        q.query_map(params![LOCAL_UID_BASE, limit], |r| {
+            Ok((
+                r.get(0)?,
+                r.get(1)?,
+                r.get::<_, i32>(2)? != 0,
+                r.get::<_, i32>(3)? != 0,
+            ))
+        })
+        .map(|rows| rows.filter_map(Result::ok).collect())
+        .unwrap_or_default()
+    }
+
+    /// Closes a task because the mailbox shows it is dealt with (`by` = "replied"). Never touches the mailbox, and
+    /// leaves tasks the user reopened alone. Returns whether anything changed.
+    pub fn auto_close(&self, uid: u32, by: &str) -> anyhow::Result<bool> {
+        let n = self.db.execute(
+            "UPDATE tasks SET status='done', snooze_until=0, closed_by=?1, done_at=CAST(strftime('%s','now') AS INTEGER) WHERE uid=?2 AND status='open' AND keep_open=0 AND uid<?3",
+            params![by, uid, LOCAL_UID_BASE],
+        )?;
+        if n > 0 {
+            self.log(&format!("closed “{}”: you replied", self.label(uid)))?;
+        }
+        Ok(n > 0)
+    }
+
+    /// Marks a task whose message is no longer in the inbox (or clears the mark if it is back).
+    pub fn set_gone(&self, uid: u32, gone: bool) -> anyhow::Result<()> {
+        self.db.execute(
+            "UPDATE tasks SET gone=?1 WHERE uid=?2 AND gone<>?1",
+            params![gone as i32, uid],
+        )?;
+        Ok(())
+    }
+
+    /// The inbox UIDVALIDITY the stored tasks were numbered under, if known.
+    pub fn stored_uid_validity(&self) -> Option<u32> {
+        self.meta_get("uid_validity")?.parse().ok()
+    }
+
+    // ---- editable fields ----
+    /// Sets or clears (empty string) the due date of any task. Only a real `YYYY-MM-DD` is accepted.
+    pub fn set_due(&self, uid: u32, due: &str) -> anyhow::Result<bool> {
+        if self.get(uid).is_none() || !(due.is_empty() || crate::dates::valid_iso(due)) {
+            return Ok(false);
+        }
+        self.db
+            .execute("UPDATE tasks SET due=?1 WHERE uid=?2", params![due, uid])?;
+        Ok(true)
+    }
+
+    /// Renames a task you added yourself. A message's subject is not ours to rewrite, so mail tasks are refused.
+    pub fn set_title(&self, uid: u32, title: &str) -> anyhow::Result<bool> {
+        let title = title.trim();
+        if uid < LOCAL_UID_BASE
+            || self.get(uid).is_none()
+            || title.is_empty()
+            || title.chars().count() > 200
+            || title.chars().any(|c| c.is_control())
+        {
+            return Ok(false);
+        }
+        self.db.execute(
+            "UPDATE tasks SET subject=?1, action=?1 WHERE uid=?2",
+            params![title, uid],
+        )?;
         Ok(true)
     }
 
@@ -705,6 +893,33 @@ impl Store {
             .unwrap_or_default()
     }
 
+    /// Priority steps to add to later mail from `addr`, learned from the user's last three corrections of it.
+    /// Needs at least two, all in the same direction; the size is their rounded average, between 1 and 2 steps.
+    pub fn learned_shift(&self, addr: &str) -> i32 {
+        if addr.is_empty() {
+            return 0;
+        }
+        let Ok(mut q) = self.db.prepare(
+            "SELECT new_priority-old_priority FROM overrides WHERE addr=?1 ORDER BY id DESC LIMIT 3",
+        ) else {
+            return 0;
+        };
+        let deltas: Vec<i32> = q
+            .query_map([addr], |r| r.get(0))
+            .map(|rows| rows.filter_map(Result::ok).collect())
+            .unwrap_or_default();
+        if deltas.len() < 2 || !(deltas.iter().all(|d| *d > 0) || deltas.iter().all(|d| *d < 0)) {
+            return 0;
+        }
+        let mean = deltas.iter().sum::<i32>() as f64 / deltas.len() as f64;
+        let steps = (mean.abs().round() as i32).clamp(1, 2);
+        if mean > 0.0 {
+            steps
+        } else {
+            -steps
+        }
+    }
+
     pub fn recent_overrides(&self, n: i64) -> Vec<Override> {
         let Ok(mut st) = self
             .db
@@ -803,6 +1018,8 @@ impl Store {
         let reset = matches!(self.meta_get("uid_validity"), Some(c) if c != v.to_string());
         if reset {
             self.reset_mailbox_data()?;
+            // what was learned about senders still holds, but the links to the old UIDs mean nothing now
+            self.db.execute("UPDATE overrides SET uid=0", [])?;
         }
         self.meta_set("uid_validity", &v.to_string())?;
         Ok(reset)
@@ -834,6 +1051,13 @@ impl Store {
     }
 
     /// Forget everything tied to a mailbox (used when the account changes). Sender preferences stay.
+    /// The account changed: everything tied to the old mailbox goes, including what was learned about its senders.
+    pub fn reset_for_new_account(&self) -> anyhow::Result<()> {
+        self.reset_mailbox_data()?;
+        self.db.execute("DELETE FROM overrides", [])?;
+        Ok(())
+    }
+
     pub fn reset_mailbox_data(&self) -> anyhow::Result<()> {
         self.db.execute_batch(
             "DELETE FROM tasks WHERE uid < 2000000000; DELETE FROM drafts WHERE uid < 2000000000; DELETE FROM outbox; DELETE FROM meta;",

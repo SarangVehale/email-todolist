@@ -331,7 +331,7 @@ impl Core {
                 if (new.host.as_str(), new.user.as_str())
                     != (s.account.host.as_str(), s.account.user.as_str())
                 {
-                    self.store()?.reset_mailbox_data()?;
+                    self.store()?.reset_for_new_account()?;
                 }
                 secrets::set("imap-password", &s_arg(a, "password").replace(' ', ""))?;
                 s.account = new;

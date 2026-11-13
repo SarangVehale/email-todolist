@@ -10,38 +10,43 @@ const PROVIDERS = {
 };
 let W = { step: 0, provider: "gmail", host: "imap.gmail.com", port: 993, user: "", pw: "", tested: null, testing: false, ai: "rules", ollamaModels: [], model: "", key: "", aiTest: null, desktop: true, topic: "", autostart: true, writeback: false, hub: false };
 const veil = $("#veil");
-function closeVeil() { veil.classList.remove("show"); veil.innerHTML = ""; veil.dataset.kind = ""; lastSnap = ""; render(); load() }
+function closeVeil() {
+  const back = typeof veilFrom !== "undefined" ? veilFrom : null;
+  veil.classList.remove("show"); veil.innerHTML = ""; veil.dataset.kind = ""; lastSnap = ""; render(); load();
+  setTimeout(() => { const t = back && back.isConnected ? back : document.querySelector(".row.cur .mid, #bar nav button.on"); t?.focus?.() }, 40);
+}
 const rand = n => Array.from(crypto.getRandomValues(new Uint8Array(n)), b => "abcdefghjkmnpqrstuvwxyz23456789"[b % 31]).join("");
-const panel = inner => `<div class="panel">${inner}</div>`;
+const panel = inner => `<div class="panel" role="dialog" aria-modal="true" aria-label="Inbox Agent">${inner}</div>`;
 
-function openWizard() { veil.dataset.kind = "wizard"; veil.classList.add("show"); drawWizard() }
+function openWizard() { veil.dataset.kind = "wizard"; veil.classList.add("show"); drawWizard(); dialogOpened("Set up Inbox Agent") }
 function drawWizard() {
   const n = W.step; let h = `<div class="step">Step ${n + 1} of 5</div>`, back = n > 0 ? `<button class="btn" data-w="back">Back</button>` : "", next = `<button class="btn pri" data-w="next">Continue</button>`;
   if (n === 0) h += `<h2>Welcome.</h2><p>Inbox Agent reads your mail and turns it into one list, ranked by how much each message needs you. You get alerted only when something is important.</p>
       <div class="help"><b>Private by design.</b> Your mail is read on this computer. Your password is kept in your system keychain, never in a file. Nothing in your mailbox is changed unless you switch that on.</div>`;
   if (n === 1) {
     const p = PROVIDERS[W.provider];
-    h += `<h2>Connect your mail</h2><label class="f">Provider</label><select data-f="provider">${Object.entries(PROVIDERS).map(([k, v]) => `<option value="${k}" ${W.provider === k ? "selected" : ""}>${v.name}</option>`).join("")}</select>
+    h += `<h2>Connect your mail</h2><label class="f" for="w-provider">Provider</label><select id="w-provider" data-f="provider">${Object.entries(PROVIDERS).map(([k, v]) => `<option value="${k}" ${W.provider === k ? "selected" : ""}>${v.name}</option>`).join("")}</select>
       <div class="help"><b>Getting an app password</b><ol>${p.help.map(x => `<li>${esc(x)}</li>`).join("")}</ol></div>
-      ${W.provider === "other" ? `<div class="row2"><div><label class="f">IMAP server</label><input type="text" data-f="host" value="${esc(W.host)}" placeholder="imap.example.com"></div><div><label class="f">Port</label><input type="number" data-f="port" value="${W.port}"></div></div>` : ""}
-      <label class="f">Email address</label><input type="text" data-f="user" value="${esc(W.user)}" autocomplete="off" placeholder="you@example.com">
-      <label class="f">App password</label><input type="password" data-f="pw" value="${esc(W.pw)}" autocomplete="off">
+      ${W.provider === "other" ? `<div class="row2"><div><label class="f" for="w-host">IMAP server</label><input id="w-host" type="text" data-f="host" value="${esc(W.host)}" placeholder="imap.example.com"></div><div><label class="f" for="w-port">Port</label><input id="w-port" type="number" data-f="port" value="${W.port}"></div></div>` : ""}
+      <label class="f" for="w-user">Email address</label><input id="w-user" type="text" data-f="user" value="${esc(W.user)}" autocomplete="off" placeholder="you@example.com">
+      <label class="f" for="w-pw">App password</label><input id="w-pw" type="password" data-f="pw" value="${esc(W.pw)}" autocomplete="off">
       <div class="foot"><button class="btn sm" data-w="test" ${W.testing ? "disabled" : ""}>${W.testing ? "Testing…" : "Test connection"}</button><span id="testres">${W.tested ? (W.tested.ok ? `<span class="ok">Connected · Sent folder: ${esc(W.tested.sent)}</span>` : `<span class="bad">${esc(W.tested.error)}</span>`) : ""}</span></div>`;
     next = `<button class="btn pri" data-w="next" ${W.tested?.ok ? "" : "disabled"}>Continue</button>`;
   }
   if (n === 2) {
-    h += `<h2>How should mail be ranked?</h2><p>You can change this any time in Settings.</p>
-      <div class="opt ${W.ai === "rules" ? "sel" : ""}" data-ai="rules"><div class="r"></div><div><b>Rules only</b><span>Instant and fully private. Uses who you write to, replies to your mail and bulk-mail headers.</span></div></div>
-      <div class="opt ${W.ai === "ollama" ? "sel" : ""}" data-ai="ollama"><div class="r"></div><div><b>Local AI (Ollama)</b><span>Runs a model on your computer. Free and private. Needs Ollama installed with a model pulled.</span></div></div>
-      <div class="opt ${W.ai === "anthropic" ? "sel" : ""}" data-ai="anthropic"><div class="r"></div><div><b>Claude with your own API key</b><span>Best quality. Email text is sent to Anthropic and billed to your API account.</span></div></div>`;
+    h += `<h2>How should mail be ranked?</h2><p>You can change this any time in Settings.</p><div role="radiogroup" aria-label="How mail is ranked">
+      <button type="button" class="opt ${W.ai === "rules" ? "sel" : ""}" data-ai="rules" role="radio" aria-checked="${W.ai === "rules"}"><div class="r"></div><div><b>Rules only</b><span>Instant and fully private. Uses who you write to, replies to your mail and bulk-mail headers.</span></div></button>
+      <button type="button" class="opt ${W.ai === "ollama" ? "sel" : ""}" data-ai="ollama" role="radio" aria-checked="${W.ai === "ollama"}"><div class="r"></div><div><b>Local AI (Ollama)</b><span>Runs a model on your computer. Free and private. Needs Ollama installed with a model pulled.</span></div></button>
+      <button type="button" class="opt ${W.ai === "anthropic" ? "sel" : ""}" data-ai="anthropic" role="radio" aria-checked="${W.ai === "anthropic"}"><div class="r"></div><div><b>Claude with your own API key</b><span>Best quality. Email text is sent to Anthropic and billed to your API account.</span></div></button>`;
+    h += "</div>";
     if (W.ai === "ollama") h += `<label class="f">Model</label>${W.ollamaModels.length ? `<select data-f="model">${W.ollamaModels.map(m => `<option ${W.model === m ? "selected" : ""}>${esc(m)}</option>`).join("")}</select>` : `<div class="help">Ollama wasn’t found on this computer. Install it from ollama.com, run <b>ollama pull llama3.2</b>, then press Detect.</div>`}<div class="foot"><button class="btn sm" data-w="detect">Detect</button></div>`;
-    if (W.ai === "anthropic") h += `<label class="f">API key</label><input type="password" data-f="key" value="${esc(W.key)}" autocomplete="off" placeholder="sk-ant-…"><p>Kept in your system keychain. Signing in with a Claude subscription isn’t offered: Anthropic doesn’t permit it in third-party apps.</p>`;
+    if (W.ai === "anthropic") h += `<label class="f" for="w-key">API key</label><input id="w-key" type="password" data-f="key" value="${esc(W.key)}" autocomplete="off" placeholder="sk-ant-…"><p>Kept in your system keychain. Signing in with a Claude subscription isn’t offered: Anthropic doesn’t permit it in third-party apps.</p>`;
     if (W.ai !== "rules") h += `<div class="foot"><button class="btn sm" data-w="aitest">Test</button><span>${W.aiTest ? (W.aiTest.ok ? `<span class="ok">Works · P${W.aiTest.priority} · ${esc(W.aiTest.action)}</span>` : `<span class="bad">${esc(W.aiTest.error)} (rules will be used)</span>`) : ""}</span></div>`;
   }
   if (n === 3) {
     h += `<h2>Alerts</h2><label class="sw"><input type="checkbox" data-c="desktop" ${W.desktop ? "checked" : ""}><div><b>Desktop notifications</b><span>Only for priority 4–5 and urgent mail.</span></div></label>
       <label class="sw"><input type="checkbox" data-c="autostart" ${W.autostart ? "checked" : ""}><div><b>Start with this computer</b><span>Keeps watching your inbox from the tray.</span></div></label>
-      <label class="f">Phone alerts with ntfy (optional)</label><div class="row2" style="grid-template-columns:1fr auto"><input type="text" data-f="topic" value="${esc(W.topic)}" placeholder="a private topic name"><button class="btn sm" data-w="topic">Generate</button></div>
+      <label class="f" for="w-topic">Phone alerts with ntfy (optional)</label><div class="row2" style="grid-template-columns:1fr auto"><input id="w-topic" type="text" data-f="topic" value="${esc(W.topic)}" placeholder="a private topic name"><button class="btn sm" data-w="topic">Generate</button></div>
       <p>Install the free ntfy app on your phone and subscribe to the same topic. Treat the topic like a password.</p>`;
   }
   if (n === 4) {
@@ -99,7 +104,7 @@ veil.addEventListener("click", async e => {
 });
 
 const ALERT_CATS = ["work", "personal", "finance", "travel", "notification", "promo", "reading", "other"];
-function openSettings() { veil.dataset.kind = "settings"; veil.classList.add("show"); drawSettings() }
+function openSettings() { veil.dataset.kind = "settings"; veil.classList.add("show"); drawSettings().then(() => dialogOpened("Settings")) }
 async function drawSettings() {
   const s = S.settings, a = s.alerts || {}, ai = s.ai || {}, dr = s.drafts || { auto: false, tone: "friendly", signature: "", min_priority: 3, daily_cap: 25 };
   let hub = null; if (s.hub?.enabled) hub = await rpc("hub_info").catch(() => null);

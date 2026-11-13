@@ -29,6 +29,13 @@ pub struct Account {
 
 /// Opens a TLS connection with hard connect and read/write time limits, so a dead network can never hang a thread forever.
 pub fn connect(a: &Account) -> Result<Sess> {
+    connect_with_socket(a).map(|(s, _)| s)
+}
+
+/// Like `connect`, and also returns a handle to the same socket. The IMAP library clears the read time limit after
+/// every IDLE, so the sync loop uses this handle to put the 60-second limit back; without it a server that goes silent
+/// after an IDLE would hang the thread for good.
+pub fn connect_with_socket(a: &Account) -> Result<(Sess, TcpStream)> {
     use std::net::ToSocketAddrs;
     let addr = (a.host.as_str(), a.port)
         .to_socket_addrs()?
@@ -37,15 +44,17 @@ pub fn connect(a: &Account) -> Result<Sess> {
     let tcp = TcpStream::connect_timeout(&addr, Duration::from_secs(15))?;
     tcp.set_read_timeout(Some(Duration::from_secs(60)))?;
     tcp.set_write_timeout(Some(Duration::from_secs(60)))?;
+    let socket = tcp.try_clone()?;
     let tls = TlsConnector::builder().build()?;
     let stream = tls
         .connect(&a.host, tcp)
         .map_err(|e| anyhow!("secure connection failed: {e}"))?;
     let mut client = imap::Client::new(stream);
     client.read_greeting()?;
-    client
+    let session = client
         .login(&a.user, &a.password)
-        .map_err(|e| anyhow!("login failed: {}", e.0))
+        .map_err(|e| anyhow!("login failed: {}", e.0))?;
+    Ok((session, socket))
 }
 
 /// Plain-TCP connection for tests against a local mock server. Never used with a real mailbox.
@@ -110,9 +119,11 @@ pub fn build_sent_index<T: Read + Write>(
     limit: usize,
 ) -> Result<SentIndex> {
     let mut idx = SentIndex::default();
-    s.examine(folder)?;
+    let mailbox = s.examine(folder)?;
+    idx.uidvalidity = mailbox.uid_validity.unwrap_or(0);
     let mut uids: Vec<u32> = s.uid_search("ALL")?.into_iter().collect();
     uids.sort_unstable();
+    idx.last_uid = uids.last().copied().unwrap_or(0);
     let start = uids.len().saturating_sub(limit);
     for chunk in uids[start..].chunks(100) {
         for m in s.uid_fetch(uid_set(chunk), "BODY.PEEK[HEADER]")?.iter() {
@@ -122,6 +133,112 @@ pub fn build_sent_index<T: Read + Write>(
         }
     }
     Ok(idx)
+}
+
+/// Adds messages that arrived in Sent since the index was built. If the folder was renumbered, it is read again
+/// from scratch. Nothing is downloaded when nothing is new.
+pub fn refresh_sent_index<T: Read + Write>(
+    s: &mut Session<T>,
+    folder: &str,
+    idx: &mut SentIndex,
+) -> Result<()> {
+    let mailbox = s.examine(folder)?;
+    if idx.uidvalidity != 0 && mailbox.uid_validity.is_some_and(|v| v != idx.uidvalidity) {
+        *idx = build_sent_index(s, folder, 500)?;
+        return Ok(());
+    }
+    let last = idx.last_uid;
+    let mut fresh: Vec<u32> = s
+        .uid_search(format!("UID {}:*", last + 1))?
+        .into_iter()
+        .filter(|u| *u > last)
+        .collect();
+    fresh.sort_unstable();
+    let start = fresh.len().saturating_sub(500);
+    for chunk in fresh[start..].chunks(100) {
+        for m in s.uid_fetch(uid_set(chunk), "BODY.PEEK[HEADER]")?.iter() {
+            if let Some(h) = m.header() {
+                idx.add_headers(h);
+            }
+        }
+    }
+    if let Some(max) = fresh.last() {
+        idx.last_uid = *max;
+    }
+    Ok(())
+}
+
+/// What one pass of `reconcile_open` changed.
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+pub struct Reconciled {
+    /// Tasks closed because a reply was found in Sent.
+    pub replied: usize,
+    /// Tasks newly marked as no longer in the inbox.
+    pub gone: usize,
+}
+
+/// Looks at the open mail tasks and compares them with the mailbox:
+/// * a reply in Sent (not a forward) closes the task as "replied";
+/// * a message that is no longer in INBOX is marked `gone` (it stays open: it may have been archived to deal with
+///   later, or filtered; the list shows these in their own fold) and the mark is removed if it comes back.
+///
+/// Anything unclear counts as "unknown" and changes nothing: a server error, a reply without UIDs, a renumbered
+/// inbox, or a whole batch vanishing while the inbox still holds other mail. It never changes the mailbox.
+pub fn reconcile_open<T: Read + Write>(
+    s: &mut Session<T>,
+    store: &Store,
+    sent: &SentIndex,
+    stop: &AtomicBool,
+) -> Result<Reconciled> {
+    let mut out = Reconciled::default();
+    if stop.load(Ordering::Relaxed) {
+        return Ok(out);
+    }
+    let tasks = store.open_mail_tasks(500);
+    let mut still_open = vec![];
+    for (uid, id, keep_open, gone) in tasks {
+        if !keep_open && sent.replied_to.contains(&id) && store.auto_close(uid, "replied")? {
+            out.replied += 1;
+        } else {
+            still_open.push((uid, gone));
+        }
+    }
+    let Ok(mailbox) = s.examine("INBOX") else {
+        return Ok(out);
+    };
+    // the stored UIDs mean something else after a renumbering; process_new deals with that
+    if let (Some(now), Some(then)) = (mailbox.uid_validity, store.stored_uid_validity()) {
+        if now != then {
+            return Ok(out);
+        }
+    }
+    for chunk in still_open.chunks(200) {
+        if stop.load(Ordering::Relaxed) {
+            break;
+        }
+        let uids: Vec<u32> = chunk.iter().map(|(u, _)| *u).collect();
+        let Ok(fetched) = s.uid_fetch(uid_set(&uids), "RFC822.SIZE") else {
+            return Ok(out); // the server said no: unknown
+        };
+        let present: std::collections::HashSet<u32> =
+            fetched.iter().filter_map(|m| m.uid).collect();
+        if !fetched.is_empty() && present.is_empty() {
+            return Ok(out); // a reply that names no UIDs says nothing
+        }
+        if present.is_empty() && mailbox.exists > 0 && uids.len() >= 5 {
+            return Ok(out); // a whole batch vanished while the inbox still has mail: do not believe it
+        }
+        for (uid, was_gone) in chunk {
+            let is_gone = !present.contains(uid);
+            if is_gone != *was_gone {
+                store.set_gone(*uid, is_gone)?;
+                if is_gone {
+                    out.gone += 1;
+                }
+            }
+        }
+    }
+    Ok(out)
 }
 
 /// Fetches and triages INBOX messages newer than the stored cursor. Returns how many were new.
@@ -265,6 +382,36 @@ pub fn process_new_until<T: Read + Write>(
     Ok(n)
 }
 
+/// How often an idle connection looks for replies sent and mail moved elsewhere.
+const RECONCILE_EVERY: Duration = Duration::from_secs(120);
+
+/// Brings the Sent index up to date and lets finished tasks close. A failure here is logged and ignored: it must
+/// never take down the connection that delivers new mail.
+fn maintain<T: Read + Write>(
+    s: &mut Session<T>,
+    store: &Store,
+    folder: &str,
+    sent: &mut SentIndex,
+    stop: &AtomicBool,
+) {
+    if let Err(e) = refresh_sent_index(s, folder, sent) {
+        let _ = store.log(&format!("could not read your Sent folder this time: {e}"));
+        return;
+    }
+    match reconcile_open(s, store, sent, stop) {
+        Ok(r) if r.replied > 0 || r.gone > 0 => {
+            let _ = store.log(&format!(
+                "checked your mailbox: {} closed because you replied, {} no longer in the inbox",
+                r.replied, r.gone
+            ));
+        }
+        Err(e) => {
+            let _ = store.log(&format!("could not check for finished mail this time: {e}"));
+        }
+        _ => {}
+    }
+}
+
 /// Runs until `stop` is set. Reconnects after errors. IDLE is re-issued every minute so `stop` is
 /// honoured promptly.
 pub fn run(
@@ -280,16 +427,20 @@ pub fn run(
         status("connecting");
         // a panic anywhere in a connection attempt becomes an ordinary error and goes through the retry path
         let attempt = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> Result<()> {
-            let mut s = connect(a)?;
+            let (mut s, socket) = connect_with_socket(a)?;
             let folder = find_sent_folder(&mut s)?;
-            let sent = build_sent_index(&mut s, &folder, 500)?;
+            let mut sent = build_sent_index(&mut s, &folder, 500)?;
             store.log(&format!("connected as {}; Sent folder “{folder}”", a.user))?;
             status("syncing");
             process_new_until(&mut s, store, triager, &sent, first_run_limit, on_new, stop)?;
+            maintain(&mut s, store, &folder, &mut sent, stop);
+            let mut last_check = std::time::Instant::now();
             status("idle");
             while !stop.load(Ordering::Relaxed) {
                 s.examine("INBOX")?; // read-only; IDLE works on an examined mailbox
                 let outcome = s.idle()?.wait_with_timeout(Duration::from_secs(60))?;
+                // the library cleared the read limit; restore it before anything else is sent or read
+                let _ = socket.set_read_timeout(Some(Duration::from_secs(60)));
                 if stop.load(Ordering::Relaxed) {
                     break;
                 }
@@ -304,7 +455,16 @@ pub fn run(
                         on_new,
                         stop,
                     )?;
+                    // a busy mailbox changes all the time: do the extra checks at most every 20 seconds then
+                    if last_check.elapsed() >= Duration::from_secs(20) {
+                        maintain(&mut s, store, &folder, &mut sent, stop);
+                        last_check = std::time::Instant::now();
+                    }
                     status("idle");
+                } else if last_check.elapsed() >= RECONCILE_EVERY {
+                    // nothing arrived, but you may have replied or archived elsewhere
+                    maintain(&mut s, store, &folder, &mut sent, stop);
+                    last_check = std::time::Instant::now();
                 }
             }
             Ok(())

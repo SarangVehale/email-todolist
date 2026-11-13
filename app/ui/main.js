@@ -42,14 +42,22 @@ function toast(msg) { const e = document.createElement("div"); e.className = "to
 /* ───────── list model ───────── */
 const SECT = [["Now", "now"], ["Today", ""], ["This week", ""], ["Later", ""]];
 const sect = p => p >= 5 ? 0 : p === 4 ? 1 : p === 3 ? 2 : 3;
+/* what the task is worth when ordering: due today or overdue lifts it to at least 4 */
+const maxp = t => t._max ?? t.priority;
+const waiting = t => !!(t.needs_reply || (t.signals && t.signals.known)) && !(t.signals && t.signals.bulk);
+const ep = t => (t.due && t.due <= isoToday() && waiting(t) ? Math.max(maxp(t), 4) : maxp(t));
 const isSnoozed = t => t.snooze_until > Date.now() / 1000;
 const SORTS = {
-  priority: (a, b) => b.priority - a.priority || (b.star - a.star) || a.received - b.received,
+  priority: (a, b) => ep(b) - ep(a) || (b.star - a.star) || a.received - b.received,
   newest: (a, b) => b.received - a.received,
   oldest: (a, b) => a.received - b.received,
   due: (a, b) => (a.due || "9999").localeCompare(b.due || "9999") || b.priority - a.priority,
   sender: (a, b) => a.sender.localeCompare(b.sender),
 };
+/* Automated mail the user has not touched: bulk, low priority, no due date. It folds into one row in the plain to-do view. */
+const foldable = t => !!(t.signals && t.signals.bulk) && maxp(t) <= 2 && !t.star && !t.urgent && !t.due && !t.draft && !t._anyDraft;
+let autoOpen = false, goneOpen = false, curIdx = 0;
+const folding = () => view === "todo" && flt.cat === "all" && !flt.only && !flt.q.trim();
 /* the tasks that belong to the current tab, before filters */
 function baseList() {
   if (view === "done") return S.tasks.filter(t => t.status === "done");
@@ -58,7 +66,31 @@ function baseList() {
   const active = open.filter(t => !isSnoozed(t));
   return view === "star" ? active.filter(t => t.star) : active;
 }
-function listFor() {
+/* Conversations: messages that share a thread key sit in one row, the newest message, showing the highest priority
+   and a count. Actions on the row (done, star, snooze) apply to every message of it that is shown in this tab and not
+   newer than the row, so mail that arrived after the screen was drawn is never closed unseen. */
+const sameTabNow = x => view === "done" ? x.status === "done" : x.status !== "done" && (view === "snoozed" ? isSnoozed(x) : !isSnoozed(x));
+let groupOf = {}; // row uid -> the messages that row stands for, as grouped from the list the user is looking at
+const members = t => (groupOf[t.uid] || [find(t.uid)].filter(Boolean)).filter(x => sameTabNow(x) && x.received <= t.received);
+/* The row is the newest message; what is true of any message in the conversation shows on it: highest priority,
+   star, urgent, needs a reply, earliest due date; it is "gone" or "automated" only when every message is. */
+function groupThreads(l, record) {
+  const by = new Map();
+  for (const t of l) { if (!by.has(t.thread)) by.set(t.thread, []); by.get(t.thread).push(t) }
+  return [...by.values()].map(ms => {
+    if (ms.length === 1) return ms[0];
+    ms.sort((a, b) => b.received - a.received || b.uid - a.uid);
+    const n = ms[0];
+    if (record) record[n.uid] = ms;
+    return {
+      ...n, _thread: ms, _max: Math.max(...ms.map(x => x.priority)), _anyDraft: ms.some(x => x.draft),
+      star: ms.some(x => x.star), urgent: ms.some(x => x.urgent), needs_reply: ms.some(x => x.needs_reply),
+      due: ms.map(x => x.due).filter(Boolean).sort()[0] || "", gone: ms.every(x => x.gone),
+      signals: { ...n.signals, bulk: ms.every(x => x.signals && x.signals.bulk) },
+    };
+  });
+}
+function filtered() {
   let l = baseList();
   if (view === "todo" || view === "star") {
     if (flt.cat !== "all") l = l.filter(t => t.category === flt.cat);
@@ -67,24 +99,33 @@ function listFor() {
     const q = flt.q.trim().toLowerCase();
     if (q) l = l.filter(t => [t.sender, t.addr, t.subject, t.action, t.excerpt].join(" ").toLowerCase().includes(q));
   }
-  return [...l].sort(view === "done" ? SORTS.newest : SORTS[flt.sort] || SORTS.priority);
+  groupOf = {};
+  return groupThreads(l, groupOf);
 }
+/* the rows of this tab: the main list, plus the two folds (automated mail, and mail that left the inbox) */
+function parts() {
+  const l = filtered(), sort = view === "done" ? SORTS.newest : SORTS[flt.sort] || SORTS.priority;
+  if (!folding()) return { main: [...l].sort(sort), auto: [], gone: [] };
+  return { main: l.filter(t => !t.gone && !foldable(t)).sort(sort), auto: l.filter(t => !t.gone && foldable(t)).sort(sort), gone: l.filter(t => t.gone).sort(sort) };
+}
+function listFor() { const p = parts(); return [...p.main, ...(autoOpen ? p.auto : []), ...(goneOpen ? p.gone : [])] }
 
 /* ───────── render ───────── */
 function rowHTML(t) {
   const sg = t.signals || {}, why = [sg.known && "Someone you write to", sg.reply && "Replying to you", sg.bulk && "Automated or bulk"].filter(Boolean).join(" · ") || "Unknown sender";
   return `<div class="row ${t.uid === cur ? "cur" : ""} ${t.uid === openUid ? "open" : ""} ${t.status === "done" ? "isdone" : ""}" data-uid="${t.uid}">
     <button class="chk" data-act="done" aria-label="${t.status === "done" ? "Reopen" : "Mark done"}"><b>X</b>${CHECK}</button>
-    <div class="mid" data-act="open"><div class="t">${esc(label(t))}</div><div class="s">${t.urgent ? "<b>Urgent</b> · " : ""}${tagsHTML(t)}${esc(t.sender)} · ${esc(t.subject)} · ${ago(t.received)}</div></div>
+    <div class="mid" data-act="open" role="button" tabindex="0" aria-expanded="${t.uid === openUid}"><div class="t">${esc(label(t))}</div><div class="s">${t.urgent ? "<b>Urgent</b> · " : ""}${tagsHTML(t)}${esc(t.sender)} · ${esc(t.subject)} · ${ago(t.received)}</div></div>
     <button class="star ${t.star ? "on" : ""}" data-act="star" aria-label="Star">${t.star ? "★" : "☆"}</button>
     <div class="pri ${t.priority >= 4 ? "hi" : ""}" role="group" aria-label="Priority">${[1, 2, 3, 4, 5].map(n => `<button data-p="${n}" class="${t.priority >= n ? "lit" : ""}" aria-label="Priority ${n}"></button>`).join("")}</div>
-    <div class="more"><p>${esc(t.excerpt) || "No text."}</p><div class="spec">${isLocal(t) ? "" : `<div><span>From</span><b>${esc(t.sender)} · ${esc(t.addr)}</b></div><div><span>Signals</span><b>${esc(why)}</b></div><div><span>Why</span><b>${esc(t.why)}</b></div><div><span>Mailbox</span><b>${S.settings.writeback ? "Done files it away" : "Write-back off · changes stay here"}</b></div>`}</div>${replyHTML(t)}</div>
+    <div class="more">${t.closed_by === "replied" ? '<div class="note">Closed automatically because you replied. Press X or the circle to reopen it if it still needs you.</div>' : ""}${t.gone && t.status !== "done" ? '<div class="note">This message is no longer in your inbox. You may have archived or moved it somewhere else.</div>' : ""}<p>${esc(t.excerpt) || "No text."}</p>${t._thread ? `<div class="thread"><span class="lbl">Earlier in this conversation</span>${t._thread.slice(1, 9).map(x => `<div>${esc(x.sender)} · ${esc(x.subject)} · ${ago(x.received)}</div>`).join("")}${t._thread.length > 9 ? `<div>and ${t._thread.length - 9} more</div>` : ""}</div>` : ""}<div class="spec">${isLocal(t) ? "" : `<div><span>From</span><b>${esc(t.sender)} · ${esc(t.addr)}</b></div><div><span>Signals</span><b>${esc(why)}</b></div><div><span>Why</span><b>${esc(t.why)}</b></div><div><span>Mailbox</span><b>${S.settings.writeback ? "Done files it away" : "Write-back off · changes stay here"}</b></div>`}</div>${replyHTML(t)}</div>
   </div>`;
 }
 function render() {
   const open = S.tasks.filter(t => t.status !== "done" && !isSnoozed(t)), snoozed = S.tasks.filter(t => t.status !== "done" && isSnoozed(t)), st = S.status || "";
   const ok = st === "idle" || st === "syncing", err = st.startsWith("error") || st === "no password";
-  const tabs = [["todo", "To-do", open.length], ["star", "Starred", open.filter(t => t.star).length], ["snoozed", "Snoozed", snoozed.length], ["done", "Done", S.tasks.filter(t => t.status === "done").length], ["log", "Log", ""]];
+  const rows = list => groupThreads(list).length;
+  const tabs = [["todo", "To-do", rows(open)], ["star", "Starred", rows(open.filter(t => t.star))], ["snoozed", "Snoozed", rows(snoozed)], ["done", "Done", S.tasks.filter(t => t.status === "done").length], ["log", "Log", ""]];
   $("#bar").innerHTML = `<div class="brand"><span class="mark">要</span><span class="dot ${ok ? "" : err ? "err" : "off"}" title="${esc(st)}"></span></div>
     <nav>${tabs.map(([k, n, c]) => `<button class="${view === k ? "on" : ""}" data-view="${k}">${n}${c !== "" && c !== 0 ? `<i>${c}</i>` : ""}</button>`).join("")}</nav><span class="sp"></span><button class="gear" data-act="addtask">Add task</button>${isHub ? "" : '<button class="gear" data-act="settings">Settings</button>'}`;
   const names = { todo: "To<em>-do</em>", star: "Starred", snoozed: "Snoozed", done: "Done", log: "Log" };
@@ -93,18 +134,33 @@ function render() {
   if (view === "log") {
     h += `<p class="sub2">Everything the agent does, in order.</p><div class="log">${S.log.map(l => `<div><b>${new Date(l.at * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</b>${esc(l.msg)}</div>`).join("") || "<div>Nothing yet.</div>"}</div>`;
   } else {
-    const l = listFor();
-    if (!l.some(t => t.uid === cur)) cur = l[0]?.uid ?? null;
-    const hi = l.filter(t => t.priority >= 4).length, ur = l.filter(t => t.urgent).length, dr = l.filter(t => t.draft).length;
-    h += l.length ? `<div class="stats"><div class="stat">${dm(l.length)}<em>${view === "done" ? "done" : view === "snoozed" ? "resting" : "open"}</em></div>${view === "done" || view === "snoozed" ? "" : `<div class="stat">${dm(hi, hi ? "r" : "")}<em>high</em></div><div class="stat">${dm(ur, ur ? "r" : "")}<em>urgent</em></div><div class="stat">${dm(dr)}<em>drafts</em></div>`}${S.pending ? `<div class="stat">${dm(S.pending)}<em>syncing</em></div>` : ""}</div>` : "";
+    const P = parts(), l = listFor();
+    if (!l.some(t => t.uid === cur)) {
+      // keep the cursor where it was: on the same conversation if its newest message changed, else the nearest row
+      const th = find(cur)?.thread, same = th && l.find(t => t.thread === th);
+      cur = same ? same.uid : (l[Math.min(curIdx, l.length - 1)]?.uid ?? null);
+    }
+    curIdx = Math.max(0, l.findIndex(t => t.uid === cur));
+    const nAuto = P.auto.length, nGone = P.gone.length, shown = P.main;
+    const hi = shown.filter(t => maxp(t) >= 4).length, ur = shown.filter(t => t.urgent).length, dr = shown.filter(t => t.draft).length;
+    h += shown.length ? `<div class="stats"><div class="stat">${dm(shown.length)}<em>${view === "done" ? "done" : view === "snoozed" ? "resting" : "open"}</em></div>${view === "done" || view === "snoozed" ? "" : `<div class="stat">${dm(hi, hi ? "r" : "")}<em>high</em></div><div class="stat">${dm(ur, ur ? "r" : "")}<em>urgent</em></div><div class="stat">${dm(dr)}<em>drafts</em></div>`}${S.pending ? `<div class="stat">${dm(S.pending)}<em>to file</em></div>` : ""}</div>` : "";
     if ((view === "todo" || view === "star") && (baseList().length || flt.q)) h += filterHTML();
     let last = -1;
-    for (const t of l) {
-      const s = view === "todo" && flt.sort === "priority" ? sect(t.priority) : -2;
-      if (s >= 0 && s !== last) h += `<div class="sec ${SECT[s][1]}"><span>0${s + 1} // ${SECT[s][0]}</span><i>${l.filter(x => sect(x.priority) === s).length}</i></div>`;
+    for (const t of shown) {
+      const s = view === "todo" && flt.sort === "priority" ? sect(ep(t)) : -2;
+      if (s >= 0 && s !== last) h += `<div class="sec ${SECT[s][1]}"><span>0${s + 1} // ${SECT[s][0]}</span><i>${shown.filter(x => sect(ep(x)) === s).length}</i></div>`;
       last = s; h += rowHTML(t);
     }
-    if (!l.length) h += `<div class="empty">${view === "done" ? "Nothing done yet" : view === "snoozed" ? "Nothing resting" : flt.q || flt.cat !== "all" || flt.only ? "No matches" : ok ? "All clear" : "Waiting for mail"}<small>${view === "todo" && ok ? "The agent is still watching your inbox." : ""}</small></div>`;
+    if (nAuto) {
+      h += `<div class="fold"><button class="mini" data-act="autofold" aria-expanded="${autoOpen}">${autoOpen ? "Hide" : "Show"} automated · ${nAuto}</button>${nAuto > 1 ? '<button class="mini" data-autodone="1">Done all automated</button>' : ""}</div>`;
+      if (autoOpen) for (const t of P.auto) h += rowHTML(t);
+    }
+    if (nGone) {
+      h += `<div class="fold"><button class="mini" data-act="gonefold" aria-expanded="${goneOpen}">${goneOpen ? "Hide" : "Show"} left your inbox · ${nGone}</button>${nGone > 1 ? '<button class="mini" data-gonedone="1">Done all left your inbox</button>' : ""}</div>`;
+      if (goneOpen) for (const t of P.gone) h += rowHTML(t);
+    }
+    const reading = st === "syncing" || st === "connecting";
+    if (!l.length && !nAuto && !nGone) h += `<div class="empty">${view === "done" ? "Nothing done yet" : view === "snoozed" ? "Nothing resting" : flt.q || flt.cat !== "all" || flt.only ? "No matches" : reading ? "Reading your latest mail…" : ok ? "All clear" : "Waiting for mail"}<small>${reading && view === "todo" ? "The first sync can take a minute." : view === "todo" && ok ? "The agent is still watching your inbox." : ""}</small></div>`;
   }
   const wasSearching = document.activeElement?.id === "q", caret = wasSearching ? document.activeElement.selectionStart : 0;
   $("#view").innerHTML = h;
@@ -129,12 +185,20 @@ function twice(btn, label) {
 async function call(cmd, args) { busy++; try { await rpc(cmd, args) } catch (e) { toast("Couldn't save: " + e) } finally { busy-- } }
 function showUndo(msg) { $("#undoMsg").textContent = msg; $("#undo").style.display = "flex"; clearTimeout(window.ut); window.ut = setTimeout(() => $("#undo").style.display = "none", 5000) }
 function setDone(t) {
-  const el = document.querySelector(`.row[data-uid="${t.uid}"]`), v = t.status !== "done";
-  const go = () => { t.status = v ? "done" : "open"; undoStack.push(() => { t.status = v ? "open" : "done"; call("set_done", { uid: t.uid, done: !v }) }); call("set_done", { uid: t.uid, done: v }); showUndo(v ? "Done" : "Reopened"); render() };
+  const uid = t.uid, el = document.querySelector(`.row[data-uid="${uid}"]`), v = t.status !== "done", ids = members(t).map(x => x.uid);
+  const go = () => {
+    ids.forEach(u => { const x = find(u); if (x) x.status = v ? "done" : "open"; call("set_done", { uid: u, done: v }) });
+    undoStack.push(() => ids.forEach(u => { const x = find(u); if (x) x.status = v ? "open" : "done"; call("set_done", { uid: u, done: !v }) }));
+    showUndo(v ? (ids.length > 1 ? `Done · ${ids.length} messages` : "Done") : "Reopened"); render();
+  };
   if (el && v && view !== "done") { el.classList.add("gone"); setTimeout(go, 280) } else go();
 }
-function setPri(t, n) { if (t.priority === n) return; const o = t.priority, s = t.star; undoStack.push(() => { t.priority = o; t.star = s; call("set_priority", { uid: t.uid, priority: o }); if (!s && n >= 4) call("set_star", { uid: t.uid, star: false }) }); t.priority = n; if (n >= 4) t.star = true; call("set_priority", { uid: t.uid, priority: n }); render() }
-function toggleStar(t) { const v = !t.star; t.star = v; undoStack.push(() => { t.star = !v; call("set_star", { uid: t.uid, star: !v }) }); call("set_star", { uid: t.uid, star: v }); render() }
+function setPri(t, n) { if (t.priority === n) return; const uid = t.uid, o = t.priority, s = t.star; undoStack.push(() => { const x = find(uid); if (x) { x.priority = o; x.star = s } call("set_priority", { uid, priority: o }); if (!s && n >= 4) call("set_star", { uid, star: false }) }); t.priority = n; if (n >= 4) t.star = true; call("set_priority", { uid, priority: n }); render() }
+function toggleStar(t) {
+  const ms = members(t), v = !ms.some(x => x.star), before = ms.map(x => [x.uid, !!x.star]);
+  before.forEach(([u]) => { const x = find(u); if (x) x.star = v; call("set_star", { uid: u, star: v }) });
+  undoStack.push(() => before.forEach(([u, was]) => { const x = find(u); if (x) x.star = was; call("set_star", { uid: u, star: was }) })); render();
+}
 function move(d) { const l = listFor(); let i = l.findIndex(t => t.uid === cur); i = Math.max(0, Math.min(l.length - 1, i + d)); cur = l[i]?.uid ?? null; render(); document.querySelector(".row.cur")?.scrollIntoView({ block: "nearest" }) }
 
 document.addEventListener("click", e => {
@@ -144,6 +208,8 @@ document.addEventListener("click", e => {
   const a = e.target.closest("[data-act]")?.dataset.act;
   if (a === "settings") return openSettings();
   if (a === "addtask") return openAdd();
+  if (a === "autofold") { autoOpen = !autoOpen; render(); return }
+  if (a === "gonefold") { goneOpen = !goneOpen; render(); return }
   const row = e.target.closest(".row"); if (!row) return;
   const t = find(+row.dataset.uid); if (!t) return; cur = t.uid;
   const pb = e.target.closest("[data-p]");
@@ -152,11 +218,14 @@ document.addEventListener("click", e => {
   if (pb) setPri(t, +pb.dataset.p);
   else if (a === "done") setDone(t);
   else if (a === "star") toggleStar(t);
-  else { openUid = openUid === t.uid ? null : t.uid; render() }
+  else if (!e.target.closest(".more")) { openUid = openUid === t.uid ? null : t.uid; render() }
 });
 document.addEventListener("keydown", e => {
   if (e.metaKey || e.ctrlKey || e.altKey || $("#veil").classList.contains("show") || /INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) return;
+  const focusedRow = e.target.closest ? e.target.closest(".row") : null;
+  if (focusedRow && +focusedRow.dataset.uid !== cur) cur = +focusedRow.dataset.uid;
   const t = find(cur), k = e.key;
+  if ((k === "Enter" || k === " ") && e.target.closest && e.target.closest("button, a")) return;
   if (k === "j" || k === "ArrowDown") { e.preventDefault(); move(1) } else if (k === "k" || k === "ArrowUp") { e.preventDefault(); move(-1) }
   else if (t && (k === "x" || k === "e")) setDone(t);
   else if (t && /^[1-5]$/.test(k)) setPri(t, +k);

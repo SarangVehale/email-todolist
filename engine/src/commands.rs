@@ -3,7 +3,7 @@
 use crate::ai::make_triager;
 use crate::core::Core;
 use crate::drafts;
-use crate::jobs::snooze_until;
+use crate::jobs::{snooze_on, snooze_until};
 use crate::mail::{valid_address, Email};
 use crate::secrets;
 use crate::store::Task;
@@ -24,10 +24,17 @@ pub const PUBLIC: &[&str] = &[
     "draft_discard",
     "set_note",
     "add_task",
+    "set_due",
+    "set_title",
 ];
 
 /// Task commands that only the desktop window may use.
-const DESKTOP_ONLY: &[&str] = &["draft_generate", "draft_to_mailbox", "export_markdown"];
+const DESKTOP_ONLY: &[&str] = &[
+    "draft_generate",
+    "draft_to_mailbox",
+    "export_markdown",
+    "read_body",
+];
 
 /// Automatic drafting runs one message at a time so the daily budget cannot be overshot.
 static AUTO_DRAFT: Mutex<()> = Mutex::new(());
@@ -77,6 +84,7 @@ pub fn generate_draft(core: &Core, uid: u32, instruction: &str) -> Result<(Strin
         attachment_count: 0,
         attachments: vec![],
         unsubscribe: String::new(),
+        thread: String::new(),
     };
     let s = core.settings();
     let triager = make_triager(&s.ai, secrets::get("anthropic-key"), vec![]);
@@ -184,9 +192,24 @@ pub fn run(core: &Arc<Core>, cmd: &str, a: &Value) -> Option<Result<Value>> {
                 store.set_priority(uid, a["priority"].as_u64().unwrap_or(0) as u8)?
             )),
             "set_snooze" => {
-                let until = snooze_until(a["preset"].as_str().unwrap_or(""), chrono::Local::now())
-                    .ok_or_else(|| anyhow!("unknown snooze option"))?;
+                let now = chrono::Local::now();
+                let until = match a["date"].as_str() {
+                    Some(d) => snooze_on(d, now)
+                        .ok_or_else(|| anyhow!("Pick a day from tomorrow to a year ahead"))?,
+                    None => snooze_until(a["preset"].as_str().unwrap_or(""), now)
+                        .ok_or_else(|| anyhow!("unknown snooze option"))?,
+                };
                 Ok(json!(store.set_snooze(uid, until)?))
+            }
+            "set_due" => Ok(json!(store.set_due(uid, a["due"].as_str().unwrap_or("x"))?)),
+            "set_title" => Ok(json!(
+                store.set_title(uid, a["title"].as_str().unwrap_or(""))?
+            )),
+            "read_body" => {
+                if store.get(uid).is_none() {
+                    return Err(anyhow!("no such task"));
+                }
+                Ok(json!(store.body(uid)))
             }
             "set_pref" => {
                 let t = store.get(uid).ok_or_else(|| anyhow!("no such task"))?;
