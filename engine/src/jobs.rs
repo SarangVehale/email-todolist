@@ -158,6 +158,12 @@ fn tick(core: &Arc<Core>) {
             core.notify_user("Back from snooze", &label);
         }
     }
+    // reminders you set: announced once each, whatever the quiet hours (you chose the time)
+    if let Ok(due) = store.due_reminders(crate::reminders::now_local()) {
+        for (title, body) in crate::reminders::notices(&due) {
+            core.notify_user(&title, &body);
+        }
+    }
     let today = now.format("%Y-%m-%d").to_string();
     if prune_due(store.meta_get("last_prune").as_deref(), &today) {
         let _ = store.prune(90, 30);

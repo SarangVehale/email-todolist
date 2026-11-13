@@ -26,6 +26,7 @@ pub const PUBLIC: &[&str] = &[
     "add_task",
     "set_due",
     "set_title",
+    "set_reminder",
 ];
 
 /// Task commands that only the desktop window may use.
@@ -37,6 +38,8 @@ const DESKTOP_ONLY: &[&str] = &[
     "diagnostics",
     "rules_save",
     "rules_apply",
+    "search",
+    "save_event",
 ];
 
 /// Automatic drafting runs one message at a time so the daily budget cannot be overshot.
@@ -88,6 +91,7 @@ pub fn generate_draft(core: &Core, uid: u32, instruction: &str) -> Result<(Strin
         attachments: vec![],
         unsubscribe: String::new(),
         thread: String::new(),
+        event: None,
     };
     let s = core.settings();
     let triager = make_triager(&s.ai, secrets::get("anthropic-key"), vec![]);
@@ -176,6 +180,26 @@ fn markdown_export(tasks: &[Task]) -> String {
     out
 }
 
+/// Writes the event a message invited you to as a new `.ics` file in `dir` (the Downloads folder, for the command) and
+/// returns where. Refused for a task without an event and for a cancelled one. Never opens or sends the file.
+pub fn save_event_in(core: &Core, uid: u32, dir: &std::path::Path) -> Result<std::path::PathBuf> {
+    let task = core
+        .store()?
+        .get(uid)
+        .ok_or_else(|| anyhow!("no such task"))?;
+    let event = task
+        .event
+        .ok_or_else(|| anyhow!("This message has no event to save"))?;
+    if event.cancelled {
+        return Err(anyhow!(
+            "This event was cancelled, so there is nothing to add to a calendar"
+        ));
+    }
+    let stamp = chrono::Utc::now().naive_utc();
+    crate::calendar::save_to(dir, &event, stamp, &task.message_id)
+        .map_err(|e| anyhow!("Could not save the file: {e}"))
+}
+
 /// Handles the task commands. Returns None when `cmd` is not one of them.
 pub fn run(core: &Arc<Core>, cmd: &str, a: &Value) -> Option<Result<Value>> {
     if !PUBLIC.contains(&cmd) && !DESKTOP_ONLY.contains(&cmd) {
@@ -205,6 +229,15 @@ pub fn run(core: &Arc<Core>, cmd: &str, a: &Value) -> Option<Result<Value>> {
                 Ok(json!(store.set_snooze(uid, until)?))
             }
             "set_due" => Ok(json!(store.set_due(uid, a["due"].as_str().unwrap_or("x"))?)),
+            "set_reminder" => {
+                store.set_reminder(
+                    uid,
+                    a["at"].as_str().unwrap_or(""),
+                    a["repeat"].as_str().unwrap_or(""),
+                    crate::reminders::now_local(),
+                )?;
+                Ok(json!(true))
+            }
             "set_title" => Ok(json!(
                 store.set_title(uid, a["title"].as_str().unwrap_or(""))?
             )),
@@ -274,6 +307,12 @@ pub fn run(core: &Arc<Core>, cmd: &str, a: &Value) -> Option<Result<Value>> {
                 }
                 Ok(json!(true))
             }
+            "save_event" => {
+                let dir = crate::calendar::downloads_dir()
+                    .ok_or_else(|| anyhow!("The app could not find your Downloads folder"))?;
+                Ok(json!(save_event_in(core, uid, &dir)?.to_string_lossy()))
+            }
+            "search" => Ok(json!(store.search(a["q"].as_str().unwrap_or(""))?)),
             "rules_save" => {
                 let rules: Vec<crate::rules::Rule> = serde_json::from_value(a["rules"].clone())
                     .map_err(|_| anyhow!("Those rules couldn't be read"))?;

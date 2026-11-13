@@ -1,5 +1,6 @@
 //! Parsed view of one RECEIVED message. Every field here is attacker-controlled, so parsing
 //! drops anything that could be abused downstream (IMAP commands, deep MIME, forged headers).
+use crate::calendar::{self, Event};
 use mailparse::{addrparse, DispositionType, MailAddr, MailHeaderMap, ParsedMail};
 
 /// More multipart containers than any real message has; beyond this we refuse to parse (stack-depth DoS).
@@ -41,6 +42,9 @@ pub struct Email {
     /// The conversation this message belongs to: the first id in References (the oldest message), else the id it
     /// replies to, else its own Message-ID. Empty when the message has no usable id at all.
     pub thread: String,
+    /// The first event of a calendar invitation in the message (`text/calendar`, `application/ics` or a `.ics` file), if
+    /// there is one and it is readable. See `calendar::parse`.
+    pub event: Option<Event>,
 }
 
 /// A Message-ID is used in IMAP SEARCH commands, so only a strict `<token>` of visible ASCII is kept.
@@ -340,6 +344,30 @@ fn clean_file_name(s: &str) -> String {
         .to_string()
 }
 
+/// The first readable event in any part of the message. A calendar part over the size limit is ignored (it is decoded first, which the 5 MB message limit bounds).
+fn find_event(m: &ParsedMail, depth: usize) -> Option<Event> {
+    if depth > MAX_TEXT_DEPTH {
+        return None;
+    }
+    if !m.subparts.is_empty() {
+        return m.subparts.iter().find_map(|p| find_event(p, depth + 1));
+    }
+    let named_ics = m
+        .get_content_disposition()
+        .params
+        .get("filename")
+        .or_else(|| m.ctype.params.get("name"))
+        .is_some_and(|n| n.to_ascii_lowercase().ends_with(".ics"));
+    if !(matches!(
+        m.ctype.mimetype.as_str(),
+        "text/calendar" | "application/ics"
+    ) || named_ics)
+    {
+        return None;
+    }
+    calendar::parse(&m.get_body().ok()?) // refuses anything over the size limit itself
+}
+
 fn collect_attachments(m: &ParsedMail, depth: usize, names: &mut Vec<String>, count: &mut usize) {
     if depth > MAX_TEXT_DEPTH {
         return;
@@ -494,6 +522,7 @@ fn parse_inner(uid: u32, raw: &[u8]) -> anyhow::Result<Email> {
     let (mut attachments, mut attachment_count) = (vec![], 0);
     collect_attachments(&m, 0, &mut attachments, &mut attachment_count);
     let unsubscribe = unsubscribe_link(&get("List-Unsubscribe"));
+    let event = find_event(&m, 0);
     let plain = plain_text(&m, 0);
     // HTML-only mail is the norm today: fall back to a text rendering of the HTML part
     let text = if plain.trim().is_empty() {
@@ -549,6 +578,7 @@ fn parse_inner(uid: u32, raw: &[u8]) -> anyhow::Result<Email> {
         attachments,
         unsubscribe,
         thread,
+        event,
     })
 }
 

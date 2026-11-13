@@ -34,7 +34,7 @@ async function rpc(cmd, args = {}) {
 /* ───────── state ───────── */
 let S = { settings: { onboarded: true, ai: {}, alerts: {}, hub: {}, account: {} }, tasks: [], log: [], status: "starting", pending: 0 };
 let view = "todo", cur = null, openUid = null, undoStack = [], lastSnap = "", busy = 0, pendingRender = false;
-let flt = { cat: "all", only: "", q: "", sort: "priority" }; // category / reply / draft filters, search text, sort order
+let flt = { cat: "all", only: "", q: "", sort: "priority", hits: new Set(), hitsFor: "" }; // category / reply / draft filters, search text, sort order
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 /* Nothing-style dot-matrix numerals: 5x7 glyphs drawn as dots (lit = on, unlit = faint) */
@@ -46,6 +46,12 @@ const dm = (n, cls = "") => {
 };
 const ago = t => { const h = (Date.now() / 1000 - t) / 3600; return h < 1 ? Math.max(1, Math.round(h * 60)) + "m" : h < 24 ? Math.round(h) + "h" : Math.round(h / 24) + "d" };
 const label = t => t.action || t.subject;
+/* search: what the list can see itself, and what the engine found inside the stored message text (desktop only) */
+const textMatch = (t, q) => {
+  const hay = [t.sender, t.addr, t.subject, t.action, t.excerpt, t.note].join(" ").toLowerCase(), words = q.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  return words.length ? words.every(w => hay.includes(w)) : hay.includes(q);
+};
+const bodyHit = (t, q) => !isHub && flt.hitsFor === q && flt.hits.has(t.uid);
 const CHECK = '<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 6.5l2.5 2.5 4.5-5.5"/></svg>';
 function toast(msg) { const e = document.createElement("div"); e.className = "toast"; e.textContent = msg; $("#toasts").prepend(e); setTimeout(() => e.remove(), 4000) }
 
@@ -109,7 +115,7 @@ function filtered() {
     if (flt.only === "reply") l = l.filter(t => t.needs_reply || t.draft);
     if (flt.only === "drafts") l = l.filter(t => t.draft);
     const q = flt.q.trim().toLowerCase();
-    if (q) l = l.filter(t => [t.sender, t.addr, t.subject, t.action, t.excerpt].join(" ").toLowerCase().includes(q));
+    if (q) l = l.filter(t => textMatch(t, q) || bodyHit(t, q));
   }
   groupOf = {};
   return groupThreads(l, groupOf);
@@ -201,7 +207,18 @@ function twice(btn, label) {
 }
 async function call(cmd, args) { busy++; try { await rpc(cmd, args) } catch (e) { toast("Couldn't save: " + e) } finally { busy-- } }
 function showUndo(msg) { $("#undoMsg").textContent = msg; $("#undo").style.display = "flex"; clearTimeout(window.ut); window.ut = setTimeout(() => $("#undo").style.display = "none", 5000) }
+/* A repeating task of yours does not go to Done: the engine moves it to its next time. There is no undo for that. */
+const repeating = new Set(); // ids being finished right now
+async function repeatDone(list) {
+  list = list.filter(t => !repeating.has(t.uid)); if (!list.length) return;
+  list.forEach(t => repeating.add(t.uid)); busy++;
+  try { for (const t of list) await rpc("set_done", { uid: t.uid, done: true }) } catch (e) { toast("Couldn't save: " + e) } finally { busy-- }
+  lastSnap = ""; await load(); list.forEach(t => repeating.delete(t.uid));
+  const next = list.map(t => find(t.uid)).filter(Boolean).map(t => t.remind || t.due).filter(Boolean).sort()[0];
+  toast(list.length > 1 ? `${list.length} repeating tasks moved to their next time` : next ? `Done for now. Next: ${next.replace(" ", " at ")}` : "Done for now");
+}
 function setDone(t) {
+  if (isLocal(t) && t.repeat && t.status !== "done") { repeatDone([t]); return }
   const uid = t.uid, el = document.querySelector(`.row[data-uid="${uid}"]`), v = t.status !== "done", ids = members(t).map(x => x.uid);
   const go = () => {
     ids.forEach(u => { const x = find(u); if (x) x.status = v ? "done" : "open"; call("set_done", { uid: u, done: v }) });

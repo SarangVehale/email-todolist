@@ -23,6 +23,9 @@ and alerts you only when something is important.
   conversation you started that nobody answered into a task that closes itself when a reply arrives.
 - **Select many.** `v` (or the Select button) lets you pick several rows, then done, star, priority, snooze or mute
   for all of them at once; one undo takes back a batch (muting a sender is the exception: you reverse it from a task).
+- **Reminders, search inside messages, calendar invitations.** Give a task of your own a time to be reminded and let it
+  repeat daily, weekly or monthly. Search finds words inside the stored message text, not only in the subject. An
+  invitation shows its event, and "Save .ics" writes a calendar file you open yourself.
 - **Keyboard first.** `j` `k` or the arrow keys move, `Enter` opens a task, `x` (or `e`) done, `1`-`5` priority,
   `s` star, `r` reply draft (mail only), `h` snooze, `v` select several, `a` add task, `/` search, `z` undo, `,` settings, `?` for the full
   list. Capitals work too.
@@ -60,7 +63,7 @@ IMAP_HOST=imap.example.com IMAP_USER=you@example.com IMAP_PASS=... cargo run --e
 
 ## Status
 
-Built and tested: engine (303 tests, including protocol tests against a scripted mock IMAP server and a dedicated edge-case suite), UI in a browser, phone hub, installer build.
+Built and tested: engine (366 tests, including protocol tests against a scripted mock IMAP server and a dedicated edge-case suite), UI in a browser, phone hub, installer build.
 The IMAP sync and write-back are tested against a scripted mock server, which proves what the client sends and how it parses
 standard responses, but a real Gmail or other server may differ. Not yet exercised against a live mailbox, and releases are unsigned.
 See [SECURITY.md](SECURITY.md) for the full list of limits.

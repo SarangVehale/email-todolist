@@ -8,6 +8,17 @@ versions may change behaviour.
 First public build.
 
 ### Added
+- Reminders for tasks you add yourself: a date and time, announced once by a desktop notification (and ntfy if you use it),
+  and an optional repeat (daily, weekly, monthly). Finishing a repeating task moves it to its next time instead of closing it
+  (also when it is done ahead of time); there is no undo for that, and a batch's undo does not include repeating tasks.
+- Search inside messages (desktop): words in the first 3,000 characters of the stored message text are found, all of them, in
+  any order, accents and case ignored (up to 8 words and 100 characters). Rows that only the index found, not the list's own
+  search of sender, subject, excerpt and note, are tagged "In text".
+- Calendar invitations: the event in an invitation is shown on its task (UTC times in your time; Outlook's Windows zone names
+  understood; an unknown zone is said to be unknown; a repeating invitation is marked, only its first time is kept), its day
+  where you are becomes the due date if there is none, and "Save .ics" (desktop) writes a calendar file into Downloads, or your
+  user folder if there is none, for you to open. The file is built by the app; it never replaces an existing file and nothing
+  is sent to any calendar.
 - Select several tasks at once (`v` or the Select button) and mark them done, star them, set a priority, snooze them or
   mute their senders in one step. One undo takes back a batch; muting a sender is reversed from one of its tasks.
 - Your own rules: "if the address is, the domain is or the subject contains this, set the priority or category, or file
@@ -59,7 +70,7 @@ First public build.
 - Third review (Opus, 2026-11-13): one bad unsubscribe link could blank the list; a crashing message could crash the app on every start; hostile HTML could stall the watcher; sign-out left mail text in the database files; the hub answered public networks; mail data sat in Roaming AppData. All fixed with tests; see SECURITY.md.
 - A damaged database is set aside and rebuilt, newer data is refused, and a `crash.log` records internal errors (no telemetry).
 - Two independent security reviews; all confirmed findings fixed with regression tests. See SECURITY.md.
-- 241 automated tests, including protocol tests against a scripted mock IMAP server and a dedicated edge-case suite.
+- 366 automated tests, including protocol tests against a scripted mock IMAP server and a dedicated edge-case suite.
 
 ### Known limitations
 - Microsoft (Outlook, Microsoft 365) accounts are not supported: Microsoft turned off password sign-in for IMAP.

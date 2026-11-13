@@ -2,7 +2,7 @@
 /* ───────── demo backend (design preview; also the fallback when no engine is present) ───────── */
 const M = (() => {
   const H = 3600, now = () => Date.now() / 1000;
-  const mk = (uid, sender, addr, subject, hrs, p, category, action, urgent, star, excerpt, why, sig) => ({ uid, message_id: "<" + uid + ">", sender, addr, subject, received: now() - hrs * H, priority: p, category, action, urgent, status: "open", star, excerpt, why, signals: sig, needs_reply: false, due: "", snooze_until: 0, reply_to: addr, reply_warn: false, draft: null, pref: "", attachments: [], attachment_count: 0, unsubscribe: "", note: "", thread: "uid:" + uid, closed_by: "", gone: false, learned: 0, kind: "" });
+  const mk = (uid, sender, addr, subject, hrs, p, category, action, urgent, star, excerpt, why, sig) => ({ uid, message_id: "<" + uid + ">", sender, addr, subject, received: now() - hrs * H, priority: p, category, action, urgent, status: "open", star, excerpt, why, signals: sig, needs_reply: false, due: "", snooze_until: 0, reply_to: addr, reply_warn: false, draft: null, pref: "", attachments: [], attachment_count: 0, unsubscribe: "", note: "", thread: "uid:" + uid, closed_by: "", gone: false, learned: 0, kind: "", remind: "", repeat: "", event: null });
   return {
     mk, // used below to add the conversation demo data
     settings: { onboarded: new URLSearchParams(location.search).get("demo") !== null, account: { host: "imap.gmail.com", user: "you@example.com", port: 993 }, ai: { mode: "rules", ollama_model: "" }, alerts: { desktop: true, ntfy_topic: "" }, hub: { enabled: false, port: 8787, token: "" }, writeback: false },
@@ -37,6 +37,10 @@ Object.assign(M.tasks[2], { needs_reply: true, due: "2026-11-11", reply_to: "rav
 M.settings.followups = { days: 3 };
 M.rules = [{ id: "demo0001", field: "domain", text: "digest.example", priority: 1, category: null, file: false }];
 M.tasks.push(Object.assign(M.mk(2000000100, "You", "", "Follow up: Quote for the kitchen", 90, 3, "personal", "Follow up: Quote for the kitchen", false, false, "You wrote to ana@builder.example on 9 Nov about “Quote for the kitchen”. Nobody has replied yet.", "Nobody has replied to something you sent", {}), { message_id: "", reply_to: "", kind: "followup", thread: "uid:2000000100" }));
+// a repeating reminder of your own, and an invitation with an event, for the preview
+M.tasks.push(Object.assign(M.mk(2000000200, "You", "", "Put the bins out", 30, 3, "personal", "Put the bins out", false, false, "", "Added by you", {}), { message_id: "", reply_to: "", thread: "uid:2000000200", remind: "2026-11-17 07:00", repeat: "weekly", due: "2026-11-17" }));
+Object.assign(M.tasks.find(t => t.uid === 7), { event: { summary: "Appointment at Riverside Clinic", start: "20991120T103000Z", end: "20991120T110000Z", tzid: "", location: "Riverside Clinic, 2nd floor", all_day: false, cancelled: false } });
+const BODIES = { 12: "Sending three options. The boiler flight is the cheapest one, tell me which works.", 15: "Statement attached. Your direct debit for the boiler service plan is due." };
 M.settings.drafts = { auto: false, tone: "friendly", signature: "Best,\nSam", min_priority: 3, daily_cap: 25 };
 Object.assign(M.settings.alerts, { quiet_start: "", quiet_end: "", digest_time: "", categories: [] });
 const TEMPLATES = { thanks: "Thanks for your message. I've received it and will get back to you shortly.", confirm: "Thanks, that works for me. Consider it confirmed.", decline: "Thank you for thinking of me. Unfortunately I can't make this work, so I'll have to decline.", later: "Thanks for reaching out. I need a little more time and will reply properly by [date]." };
@@ -45,7 +49,7 @@ function mock(cmd, a) {
   const t = () => M.tasks.find(x => x.uid === a.uid);
   switch (cmd) {
     case "state": return Promise.resolve(JSON.parse(JSON.stringify({ ...M, has_anthropic_key: false, rules: M.rules })));
-    case "set_done": t().status = a.done ? "done" : "open"; log((a.done ? "archived “" : "reopened “") + (t().action || t().subject) + "”"); return Promise.resolve(true);
+    case "set_done": if (t().repeat && a.done && t().uid >= 2000000000) { const nx = (t().remind || t().due || "2026-11-17").slice(0, 10); const d = new Date(nx + "T12:00:00"); d.setDate(d.getDate() + (t().repeat === "daily" ? 1 : t().repeat === "weekly" ? 7 : 30)); const iso = d.toISOString().slice(0, 10); if (t().remind) t().remind = iso + t().remind.slice(10); if (t().due) t().due = iso; return Promise.resolve(true) } t().status = a.done ? "done" : "open"; log((a.done ? "archived “" : "reopened “") + (t().action || t().subject) + "”"); return Promise.resolve(true);
     case "set_snooze": if (a.date) { if (!/^\d{4}-\d{2}-\d{2}$/.test(a.date) || new Date(a.date + "T09:00:00") <= new Date()) return Promise.reject("Pick a day from tomorrow to a year ahead"); t().snooze_until = new Date(a.date + "T09:00:00").getTime() / 1000; return Promise.resolve(true) } { const p = a.preset; if (!["3h", "tomorrow", "nextweek", "clear"].includes(p)) return Promise.reject("unknown snooze option"); t().snooze_until = p === "clear" ? 0 : Date.now() / 1000 + (p === "3h" ? 10800 : p === "tomorrow" ? 86400 : 604800); log((p === "clear" ? "unsnoozed “" : "snoozed “") + (t().action || t().subject) + "”"); return Promise.resolve(true) }
     case "set_pref": { const x = t(); M.tasks.filter(y => y.addr === x.addr && y.status !== "done").forEach(y => { y.pref = a.level === "normal" ? "" : a.level; if (a.level === "important") y.priority = Math.max(y.priority, 4); if (a.level === "mute") { y.priority = 1; y.urgent = false } }); return Promise.resolve(true) }
     case "draft_generate": if (t().draft && t().draft.source === "user" && !a.force) return Promise.reject("This draft has your edits. Confirm to replace it."); return new Promise(res => setTimeout(() => {
@@ -64,7 +68,7 @@ function mock(cmd, a) {
     case "add_task": {
       const title = String(a.title || "").trim(); if (!title || title.length > 200) return Promise.reject("Give the task a title (up to 200 characters)");
       const uid = Math.max(2000000000, ...M.tasks.map(x => x.uid)) + (M.tasks.some(x => x.uid >= 2000000000) ? 1 : 0);
-      M.tasks.push({ uid, message_id: "", sender: "You", addr: "", subject: title, received: Date.now() / 1000, priority: a.priority || 3, category: "personal", action: title, urgent: false, status: "open", star: false, excerpt: "", why: "Added by you", signals: {}, needs_reply: false, due: a.due || "", snooze_until: 0, reply_to: "", reply_warn: false, draft: null, pref: "", attachments: [], attachment_count: 0, unsubscribe: "", note: "", thread: "uid:" + uid, closed_by: "", gone: false, learned: 0, kind: "" });
+      M.tasks.push({ uid, message_id: "", sender: "You", addr: "", subject: title, received: Date.now() / 1000, priority: a.priority || 3, category: "personal", action: title, urgent: false, status: "open", star: false, excerpt: "", why: "Added by you", signals: {}, needs_reply: false, due: a.due || "", snooze_until: 0, reply_to: "", reply_warn: false, draft: null, pref: "", attachments: [], attachment_count: 0, unsubscribe: "", note: "", thread: "uid:" + uid, closed_by: "", gone: false, learned: 0, kind: "", remind: "", repeat: "", event: null });
       return Promise.resolve(uid);
     }
     case "draft_discard": t().draft = null; return Promise.resolve(true);
@@ -75,6 +79,17 @@ function mock(cmd, a) {
     case "test_account": return new Promise((res, rej) => setTimeout(() => /@/.test(a.user) && a.password ? res({ ok: true, sent: "[Gmail]/Sent Mail" }) : rej("login failed: enter an address and app password"), 900));
     case "save_account": M.settings.account = { host: a.host, port: a.port, user: a.user }; return Promise.resolve(true);
     case "save_settings": { const mg = (x, y) => { for (const k in y) { if (y[k] && typeof y[k] === "object") mg(x[k] ??= {}, y[k]); else x[k] = y[k] } }; mg(M.settings, a.patch); if (M.settings.hub.enabled && !M.settings.hub.token) M.settings.hub.token = "demo"; return Promise.resolve(M.settings) }
+    case "set_reminder": {
+      const x = t(); if (!x || x.uid < 2000000000) return Promise.reject(x ? "Reminders are for tasks you added yourself. To see a message later, snooze it" : "no such task");
+      const at = a.at || "", rep = a.repeat || "";
+      if (!["", "daily", "weekly", "monthly"].includes(rep)) return Promise.reject("A task can repeat daily, weekly or monthly");
+      if (at && !/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(at)) return Promise.reject("Pick a date and a time");
+      if (at && at < nowLocal()) return Promise.reject("Pick a time that has not passed");
+      if (!at && rep && !x.due) return Promise.reject("A repeat needs a reminder time or a due date");
+      x.remind = at; x.repeat = at || rep ? rep : ""; return Promise.resolve(true);
+    }
+    case "search": { const q = String(a.q || "").toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean); return Promise.resolve(q.length ? M.tasks.filter(x => { const hay = [x.sender, x.addr, x.subject, x.excerpt, x.note, BODIES[x.uid] || ""].join(" ").toLowerCase(); return q.every(w => hay.includes(w)) }).map(x => x.uid) : []); }
+    case "save_event": { const x = t(); if (!x) return Promise.reject("no such task"); if (!x.event) return Promise.reject("This message has no event to save"); if (x.event.cancelled) return Promise.reject("This event was cancelled, so there is nothing to add to a calendar"); return Promise.resolve("C:\\Users\\you\\Downloads\\invite-appointment-at-riverside-clinic-20991120.ics"); }
     case "rules_save": {
       const rs = a.rules;
       if (!Array.isArray(rs) || rs.length > 50) return Promise.reject("At most 50 rules are allowed");

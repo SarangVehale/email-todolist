@@ -116,3 +116,25 @@ a case changes mail. Record the result and, for any failure, the **Activity log*
 | MT-79 | On Gmail, with a Waiting task open, send yourself a nudge inside the same thread | The task stays open: your own mail is not an answer |
 | MT-80 | The person you wrote to has an out-of-office reply | It does not close the task or stop one being made |
 | MT-81 | A rule "Address is" with a look-alike address in the From line | The look-alike mail is not raised by the rule |
+
+## I. Reminders, search inside messages, calendar invitations
+
+| ID | Case | Expected |
+| --- | --- | --- |
+| MT-82 | Add a task, open it, set a reminder two minutes ahead | A desktop notification appears once at that minute, and not again after a restart |
+| MT-83 | Close the app, let a reminder pass, start the app | The overdue reminder is announced at start; five overdue at once give one notice |
+| MT-84 | A weekly reminder: press `x` on it | It stays in the list with next week's date and time; there is no undo |
+| MT-85 | A monthly reminder on the 31st, finish it in January | Next one is 28 or 29 February, then 31 March |
+| MT-86 | Set a reminder on a mail task | There is no reminder control; snooze is what mail has |
+| MT-87 | Search for a word that is in the body of a message but not in its first 400 characters, subject or sender | The message is found and tagged "In text"; typing on quickly never shows an older answer |
+| MT-88 | Search with quotes, `OR`, `*`, `body:x` | Nothing breaks; they behave as plain words |
+| MT-89 | Sign out, then look at the data folder | No message text remains in the database files |
+| MT-90 | Open the app after upgrading from the earlier build | Old mail is searchable straight away; a copy `agent.db.bak` was made first |
+| MT-91 | A Google invitation (UTC time) and an Outlook one (a named zone) | The Google one shows your local time; the Outlook one shows the hour as written with its zone's name; "Save .ics" writes a file that opens in your calendar at the right time |
+| MT-92 | Save the same invitation twice | A second file with `-2` in its name; the first is untouched; adding both does not make two events |
+| MT-93 | A cancelled invitation | It says cancelled and offers no save |
+| MT-94 | An invitation with a Windows time zone name | The time is saved as a floating local time, not in a wrong zone |
+| MT-95 | An Outlook invitation sent from another time zone | The saved file opens in your calendar at the hour the sender meant (the zone was understood) |
+| MT-96 | A recurring invitation | The card says only the first time is kept |
+| MT-97 | A due-date-only monthly task (rent): finish it a few days early | It moves to next month's date and stays in the list |
+| MT-98 | Change only the repeat of a reminder that already fired | The change is accepted and nothing fires again |

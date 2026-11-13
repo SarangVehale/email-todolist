@@ -266,6 +266,26 @@ Accepted, with the reasons in `docs/designs/phase4.md`: a reply moved to another
 autoresponder that does not mark itself, a substring `FROM` match, a reopened follow-up not counting toward the cap, and a
 list reply not closing an open follow-up.
 
+## Review 6 (Phase 5: reminders, search inside messages, calendar invitations; council, drift passes and an Opus review loop, 2026-11-13)
+
+An Opus seat and a Sonnet seat answered "should this ship?" blind: **do not ship** and **ship with caveats**. Two fresh-eyes
+passes (17 and 13 problems) compared documents and promises with the code. An Opus reviewer then went through the fixed
+tree in two rounds and approved it. Full ledger: `docs/2026-11-13_PHASE5_REVIEW.md`.
+
+| Finding | Fix |
+| --- | --- |
+| **Words of deleted messages stayed readable in the database file.** A delete in a full-text index only writes a tombstone; the removed words stay in the index segments until a merge, which for an old index may never happen. Pruned, replaced and edited text, and a mailbox switch, all left words behind, although PRIVACY.md said the index goes with the task list | The index is set to overwrite deleted entries (`secure-delete`), written once, not on every open; a test reads the database and journal files after each way a task can disappear |
+| **A repeating task with only a due date could not be finished before that date** (rent paid on the 28th for the 1st stayed put) | The due date is the floor for the next occurrence, like the reminder is |
+| **Invitation times in a Windows zone name (what Outlook writes) were dropped**, so the app showed and saved the wrong hour for meetings across zones, with no hint | About sixty Windows names are understood; any other zone is said to be unknown in the card |
+| **UTC invitations took the UTC day** for the tag and the due date (23:30Z on the 14th is the 15th in India) | The day is the day where you are |
+| **An invitation's `DURATION`, an end time in another zone, and recurrence were lost silently**, so a saved file could have the wrong length (3 hours instead of 8) or hide that it repeats | A duration gives the end; an end in another zone is dropped rather than misread; a repeating invitation is marked and only its first time is kept |
+| **U+2028, U+2029 and bidirectional or zero-width marks passed the cleaning** of calendar text, so a summary could end a line for a program that splits on U+2028 or reorder what a reader sees | They are removed on reading and again when the file is built; the builder does not rely on the parser |
+| A reminder could not be re-saved or given a repeat once its time had passed; one edited at the instant it fired could be lost | The time the task already has is accepted and not announced again; the announcement marks only the time that was selected |
+| App-made follow-up tasks accepted reminders; "Done all N" ignored the repeat handling and could leave an Undo bar that reversed an unrelated action; finishing a repeating task twice quickly skipped a period | Refused, routed, and guarded |
+
+Accepted, in `docs/designs/phase5.md`: a repeating invitation is saved as its first occurrence only, and a zoned event is
+written without a `VTIMEZONE` block (Google and Apple accept that, some other calendars may not).
+
 ## Reporting a vulnerability
 
 Please report privately to the maintainer rather than opening a public issue. Add a contact address

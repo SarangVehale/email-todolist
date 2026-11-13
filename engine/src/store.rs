@@ -1,9 +1,11 @@
 //! SQLite store: tasks, reply drafts, user corrections, activity log and the mailbox write-back outbox.
 //! Each thread opens its own connection (WAL + busy timeout), so no shared locking is needed.
 use crate::mail::Email;
+use crate::reminders;
 use crate::rules::{self, Rule};
 use crate::signals::{SentMsg, Signals};
 use crate::triage::Triage;
+use chrono::{NaiveDateTime, Timelike};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 use std::path::Path;
@@ -11,7 +13,7 @@ use std::path::Path;
 pub const MAX_DRAFT_CHARS: usize = 8000;
 pub const MAX_NOTE_CHARS: usize = 2000;
 /// Bumped whenever the database layout changes in a way an older app cannot read.
-pub const SCHEMA_VERSION: i32 = 1;
+pub const SCHEMA_VERSION: i32 = 2;
 /// Tasks you add yourself live above this number, so they never collide with a mail server's UIDs.
 pub const LOCAL_UID_BASE: u32 = 2_000_000_000;
 
@@ -72,6 +74,12 @@ pub struct Task {
     pub pref: String,
     /// "followup" for a task the app made because nobody answered something you sent; empty otherwise.
     pub kind: String,
+    /// Local "YYYY-MM-DD HH:MM" at which to remind you about a task you added; empty = none.
+    pub remind: String,
+    /// "daily", "weekly" or "monthly" for a task that comes back after you complete it; empty = never.
+    pub repeat: String,
+    /// The calendar event the message invited you to, if it carried one.
+    pub event: Option<crate::calendar::Event>,
 }
 
 /// What `apply_rules` did, or with a dry run would do.
@@ -133,6 +141,45 @@ CREATE TABLE IF NOT EXISTS followups (
 );
 ";
 
+/// Full-text search over what a task holds, kept in step by triggers (so anything that adds, edits or deletes a task is
+/// reflected, "Sign out and reset" included). External-content index: the words live only in the index, the text only in
+/// `tasks`. Created after the columns it reads exist, so it is separate from `SCHEMA`.
+const FTS_SCHEMA: &str = "
+CREATE VIRTUAL TABLE IF NOT EXISTS tasks_fts USING fts5(
+  subject, sender, addr, body, note, content='tasks', content_rowid='uid', tokenize='unicode61 remove_diacritics 2'
+);
+CREATE TRIGGER IF NOT EXISTS tasks_fts_ai AFTER INSERT ON tasks BEGIN
+  INSERT INTO tasks_fts(rowid, subject, sender, addr, body, note)
+  VALUES (new.uid, new.subject, new.sender, new.addr, new.body, new.note);
+END;
+CREATE TRIGGER IF NOT EXISTS tasks_fts_ad AFTER DELETE ON tasks BEGIN
+  INSERT INTO tasks_fts(tasks_fts, rowid, subject, sender, addr, body, note)
+  VALUES ('delete', old.uid, old.subject, old.sender, old.addr, old.body, old.note);
+END;
+CREATE TRIGGER IF NOT EXISTS tasks_fts_au AFTER UPDATE OF subject, sender, addr, body, note ON tasks BEGIN
+  INSERT INTO tasks_fts(tasks_fts, rowid, subject, sender, addr, body, note)
+  VALUES ('delete', old.uid, old.subject, old.sender, old.addr, old.body, old.note);
+  INSERT INTO tasks_fts(rowid, subject, sender, addr, body, note)
+  VALUES (new.uid, new.subject, new.sender, new.addr, new.body, new.note);
+END;
+";
+
+/// What you type, turned into a query the index cannot misread: only letters and digits survive, each word is quoted, the
+/// last one also matches as a prefix. At most 100 characters and 8 words; None when nothing is left. A column name, `OR`,
+/// `NEAR`, a quote or a `*` in the input is just text.
+pub fn fts_query(q: &str) -> Option<String> {
+    let text: String = q.chars().take(100).collect();
+    let words: Vec<&str> = text
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .take(8)
+        .collect();
+    let (last, rest) = words.split_last()?;
+    let mut out: Vec<String> = rest.iter().map(|w| format!("\"{w}\"")).collect();
+    out.push(format!("\"{last}\"*"));
+    Some(out.join(" "))
+}
+
 /// Columns added after the first release. Existing databases are upgraded in place.
 const ADDED_COLUMNS: &[(&str, &str)] = &[
     ("body", "TEXT DEFAULT ''"),
@@ -158,6 +205,13 @@ const ADDED_COLUMNS: &[(&str, &str)] = &[
     ("learned", "INTEGER DEFAULT 0"),
     // "followup" for tasks the app made because a message you sent got no reply
     ("kind", "TEXT DEFAULT ''"),
+    // reminders: the time, the repeat, the first occurrence (repeats are counted from it) and the time already announced
+    ("remind", "TEXT DEFAULT ''"),
+    ("repeat", "TEXT DEFAULT ''"),
+    ("repeat_base", "TEXT DEFAULT ''"),
+    ("reminded", "TEXT DEFAULT ''"),
+    // the first calendar event of the message, as JSON; empty when there is none
+    ("event", "TEXT DEFAULT ''"),
 ];
 
 /// Same idea for the corrections table.
@@ -165,7 +219,7 @@ const ADDED_OVERRIDE_COLUMNS: &[(&str, &str)] =
     &[("addr", "TEXT DEFAULT ''"), ("uid", "INTEGER DEFAULT 0")];
 
 const SELECT: &str = "SELECT t.uid,t.message_id,t.sender,t.addr,t.subject,t.received,t.priority,t.category,t.action,t.urgent,t.status,t.star,\
-t.excerpt,t.why,t.signals,t.needs_reply,t.due,t.snooze_until,t.reply_to,d.body,d.source,d.saved,d.updated,p.level,t.auth_fail,t.attachments,t.attachment_count,t.unsubscribe,t.note,t.thread,t.closed_by,t.gone,t.learned,t.kind \
+t.excerpt,t.why,t.signals,t.needs_reply,t.due,t.snooze_until,t.reply_to,d.body,d.source,d.saved,d.updated,p.level,t.auth_fail,t.attachments,t.attachment_count,t.unsubscribe,t.note,t.thread,t.closed_by,t.gone,t.learned,t.kind,t.remind,t.repeat,t.event \
 FROM tasks t LEFT JOIN drafts d ON d.uid=t.uid LEFT JOIN sender_prefs p ON p.addr=t.addr";
 
 fn domain(a: &str) -> String {
@@ -225,7 +279,40 @@ fn row(r: &rusqlite::Row) -> rusqlite::Result<Task> {
         draft,
         pref: r.get::<_, Option<String>>(23)?.unwrap_or_default(),
         kind: r.get(33)?,
+        remind: r.get(34)?,
+        repeat: r.get(35)?,
+        event: serde_json::from_str(&r.get::<_, Option<String>>(36)?.unwrap_or_default()).ok(),
     })
+}
+
+/// A delete in an FTS5 index only writes a tombstone: the removed words stay readable in the file until a later merge,
+/// which for an old index may never come. With `secure-delete` the index overwrites them. The setting lives in the index's
+/// own config table, so it is written once, not on every open (an open that writes can fail when another thread holds
+/// the database).
+fn ensure_secure_delete(db: &Connection) -> anyhow::Result<()> {
+    let set: Option<i64> = db
+        .query_row(
+            "SELECT v FROM tasks_fts_config WHERE k='secure-delete'",
+            [],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if set != Some(1) {
+        db.execute(
+            "INSERT INTO tasks_fts(tasks_fts, rank) VALUES('secure-delete', 1)",
+            [],
+        )?;
+    }
+    Ok(())
+}
+
+fn has_index(db: &Connection) -> bool {
+    db.query_row(
+        "SELECT 1 FROM sqlite_master WHERE name='tasks_fts'",
+        [],
+        |_| Ok(()),
+    )
+    .is_ok()
 }
 
 fn migrate(db: &Connection) -> anyhow::Result<()> {
@@ -313,6 +400,8 @@ impl Store {
         let _ = db.query_row("PRAGMA journal_mode=WAL", [], |_| Ok(()));
         // deleted rows are overwritten with zeros, so a wipe does not leave mail text in free pages
         db.pragma_update(None, "secure_delete", "ON")?;
+        // the app replaces rows (INSERT OR REPLACE); a replace must delete the old row's index entry too
+        db.pragma_update(None, "recursive_triggers", "ON")?;
         let version: i32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         if version > SCHEMA_VERSION {
             return Err(TooNew(version).into());
@@ -331,8 +420,15 @@ impl Store {
                 let _ = std::fs::copy(path, bak);
             }
         }
+        let had_index = has_index(&db);
         db.execute_batch(SCHEMA)?;
         migrate(&db)?;
+        db.execute_batch(FTS_SCHEMA)?;
+        ensure_secure_delete(&db)?;
+        if !had_index {
+            // a database from before the index existed: index what is already there
+            db.execute("INSERT INTO tasks_fts(tasks_fts) VALUES('rebuild')", [])?;
+        }
         if version != SCHEMA_VERSION {
             db.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }
@@ -379,9 +475,24 @@ impl Store {
 
     pub fn memory() -> anyhow::Result<Self> {
         let db = Connection::open_in_memory()?;
+        db.pragma_update(None, "recursive_triggers", "ON")?;
         db.execute_batch(SCHEMA)?;
         migrate(&db)?;
+        db.execute_batch(FTS_SCHEMA)?;
+        ensure_secure_delete(&db)?;
         Ok(Self { db })
+    }
+
+    /// Ids of the tasks that match what the user typed, best match first, at most 500. See `fts_query`.
+    pub fn search(&self, q: &str) -> anyhow::Result<Vec<u32>> {
+        let Some(query) = fts_query(q) else {
+            return Ok(vec![]);
+        };
+        let mut st = self.db.prepare(
+            "SELECT rowid FROM tasks_fts WHERE tasks_fts MATCH ?1 ORDER BY rank LIMIT 500",
+        )?;
+        let rows = st.query_map([query], |r| r.get::<_, u32>(0))?;
+        Ok(rows.collect::<Result<_, _>>()?)
     }
 
     pub fn seen(&self, uid: u32) -> bool {
@@ -490,15 +601,30 @@ impl Store {
                 }
             }
         }
+        // an invitation with no other date gives the task the day of the event, when that is still ahead
+        if t.due.is_empty() {
+            let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+            if let Some(day) = e
+                .event
+                .as_ref()
+                .and_then(|ev| crate::calendar::upcoming_day(ev, &today))
+            {
+                t.due = day;
+            }
+        }
+        let event_json = match &e.event {
+            Some(ev) => serde_json::to_string(ev)?,
+            None => String::new(),
+        };
         self.db.execute(
-            "INSERT OR REPLACE INTO tasks(uid,message_id,sender,addr,subject,received,priority,category,action,urgent,excerpt,why,signals,body,needs_reply,due,reply_to,refs,auth_fail,attachments,attachment_count,unsubscribe,thread,learned)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24)",
+            "INSERT OR REPLACE INTO tasks(uid,message_id,sender,addr,subject,received,priority,category,action,urgent,excerpt,why,signals,body,needs_reply,due,reply_to,refs,auth_fail,attachments,attachment_count,unsubscribe,thread,learned,event)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25)",
             params![
                 e.uid, e.message_id, e.sender_name, e.sender_addr, e.subject, e.received, t.priority, t.category,
                 t.action, t.urgent as i32, e.excerpt, t.why, serde_json::to_string(s)?, e.body,
                 t.needs_reply as i32, t.due, e.reply_to, e.references, e.auth_fail as i32,
                 serde_json::to_string(&e.attachments)?, e.attachment_count as i64, e.unsubscribe, e.thread,
-                learned
+                learned, event_json
             ],
         )?;
         // news in a snoozed conversation wakes it: the snooze was for the old state of the thread
@@ -677,9 +803,18 @@ impl Store {
 
     // ---- user actions: update locally, log, queue the mailbox change ----
     pub fn set_done(&self, uid: u32, done: bool) -> anyhow::Result<bool> {
+        self.set_done_at(uid, done, reminders::now_local())
+    }
+
+    /// `set_done` with the clock given. Completing a repeating task of your own does not close it: it moves to the next
+    /// occurrence and stays open.
+    pub fn set_done_at(&self, uid: u32, done: bool, now: NaiveDateTime) -> anyhow::Result<bool> {
         let Some(t) = self.get(uid) else {
             return Ok(false);
         };
+        if done && uid >= LOCAL_UID_BASE && !t.repeat.is_empty() && t.status == "open" {
+            return self.advance_repeat(&t, now);
+        }
         // Reopening a task the app closed by itself (you had replied): the mailbox was never changed, so there is
         // nothing to unarchive, and the task must not be closed again by the next pass.
         let auto = !done && !t.closed_by.is_empty();
@@ -960,11 +1095,28 @@ impl Store {
     // ---- editable fields ----
     /// Sets or clears (empty string) the due date of any task. Only a real `YYYY-MM-DD` is accepted.
     pub fn set_due(&self, uid: u32, due: &str) -> anyhow::Result<bool> {
-        if self.get(uid).is_none() || !(due.is_empty() || crate::dates::valid_iso(due)) {
+        let Some(t) = self.get(uid) else {
+            return Ok(false);
+        };
+        if !(due.is_empty() || crate::dates::valid_iso(due)) {
             return Ok(false);
         }
         self.db
             .execute("UPDATE tasks SET due=?1 WHERE uid=?2", params![due, uid])?;
+        // a repeat that has no reminder counts from the due date, so it follows the date you chose
+        if uid >= LOCAL_UID_BASE && !t.repeat.is_empty() && t.remind.is_empty() {
+            if due.is_empty() {
+                self.db.execute(
+                    "UPDATE tasks SET repeat='', repeat_base='' WHERE uid=?1",
+                    [uid],
+                )?;
+            } else {
+                self.db.execute(
+                    "UPDATE tasks SET repeat_base=?1 WHERE uid=?2",
+                    params![format!("{due} 00:00"), uid],
+                )?;
+            }
+        }
         Ok(true)
     }
 
@@ -1026,6 +1178,162 @@ impl Store {
         let uid = self.db.last_insert_rowid() as u32;
         self.log(&format!("added task “{title}”"))?;
         Ok(Some(uid))
+    }
+
+    // ---- reminders and repeats (your own tasks) ----
+    /// Sets or clears the reminder and the repeat of a task you added. `at` is a local "YYYY-MM-DD HH:MM" that has not
+    /// passed (the minute `now` is in still counts); empty clears it, and a repeat with it. A repeat needs a reminder, or a
+    /// due date when `at` is empty (it then only moves the due date).
+    pub fn set_reminder(
+        &self,
+        uid: u32,
+        at: &str,
+        repeat: &str,
+        now: NaiveDateTime,
+    ) -> anyhow::Result<()> {
+        use anyhow::{anyhow, bail};
+        let t = self.get(uid).ok_or_else(|| anyhow!("no such task"))?;
+        if uid < LOCAL_UID_BASE {
+            bail!("Reminders are for tasks you added yourself. To see a message later, snooze it");
+        }
+        if t.kind == "followup" {
+            bail!("Reminders are for tasks you added yourself, not the ones the app made for you");
+        }
+        if !reminders::valid_repeat(repeat) {
+            bail!("A task can repeat daily, weekly or monthly");
+        }
+        if at.is_empty() {
+            if repeat.is_empty() {
+                self.db.execute(
+                    "UPDATE tasks SET remind='', repeat='', repeat_base='', reminded='' WHERE uid=?1",
+                    [uid],
+                )?;
+                return Ok(());
+            }
+            if t.due.is_empty() {
+                bail!("A repeat needs a reminder time or a due date");
+            }
+            self.db.execute(
+                "UPDATE tasks SET remind='', repeat=?1, repeat_base=?2, reminded='' WHERE uid=?3",
+                params![repeat, format!("{} 00:00", t.due), uid],
+            )?;
+            return Ok(());
+        }
+        let when = reminders::parse_local(at).ok_or_else(|| anyhow!("Pick a date and a time"))?;
+        if !reminders::year_ok(when) {
+            bail!("Pick a date between 2000 and 2100");
+        }
+        let this_minute = now
+            .with_second(0)
+            .and_then(|n| n.with_nanosecond(0))
+            .unwrap_or(now);
+        // choosing the time the task already has (to change only its repeat, say) is not a new request: it may be in the
+        // past, and it is not announced again
+        let unchanged = t.remind == at;
+        if when < this_minute && !unchanged {
+            bail!("Pick a time that has not passed");
+        }
+        let stored: String = self
+            .db
+            .query_row("SELECT repeat_base FROM tasks WHERE uid=?1", [uid], |r| {
+                r.get(0)
+            })
+            .unwrap_or_default();
+        let base = if repeat.is_empty() {
+            String::new()
+        } else if unchanged && t.repeat == repeat && !stored.is_empty() {
+            stored
+        } else {
+            at.to_string()
+        };
+        self.db.execute(
+            "UPDATE tasks SET remind=?1, repeat=?2, repeat_base=?3, reminded=CASE WHEN remind=?1 THEN reminded ELSE '' END WHERE uid=?4",
+            params![at, repeat, base, uid],
+        )?;
+        Ok(())
+    }
+
+    /// Open tasks of yours whose reminder time has come and has not been announced for that time yet. Each is marked
+    /// announced before it is returned, so a restart never repeats a notice.
+    pub fn due_reminders(&self, now: NaiveDateTime) -> anyhow::Result<Vec<Task>> {
+        let stamp = reminders::fmt_local(now);
+        let due: Vec<(u32, String)> = {
+            let mut q = self.db.prepare(
+                "SELECT uid, remind FROM tasks WHERE uid>=?1 AND status='open' AND remind<>'' AND remind<=?2 AND reminded<>remind ORDER BY remind, uid",
+            )?;
+            let rows = q.query_map(params![LOCAL_UID_BASE, stamp], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })?;
+            rows.filter_map(Result::ok).collect()
+        };
+        let mut out = vec![];
+        for (uid, remind) in due {
+            // only the time that was selected is marked: if another thread changed it in between, the new time is
+            // left alone and gets its own announcement
+            let n = self.db.execute(
+                "UPDATE tasks SET reminded=remind WHERE uid=?1 AND remind=?2 AND reminded<>remind",
+                params![uid, remind],
+            )?;
+            if n == 0 {
+                continue;
+            }
+            if let Some(t) = self.get(uid) {
+                out.push(t);
+            }
+        }
+        Ok(out)
+    }
+
+    /// Completing a repeating task: it stays open, and its reminder (and due date, if it had one) move to the first
+    /// occurrence after both now and the current reminder.
+    fn advance_repeat(&self, t: &Task, now: NaiveDateTime) -> anyhow::Result<bool> {
+        let stored: String = self
+            .db
+            .query_row("SELECT repeat_base FROM tasks WHERE uid=?1", [t.uid], |r| {
+                r.get(0)
+            })
+            .unwrap_or_default();
+        let current = reminders::parse_local(&t.remind);
+        let anchor = reminders::parse_local(&stored)
+            .or(current)
+            .or_else(|| reminders::parse_local(&format!("{} 00:00", t.due)));
+        let Some(base) = anchor else {
+            return Ok(false);
+        };
+        // the current reminder, or for a repeat that has only a due date that date, is the floor: finishing early
+        // moves past it, and finishing late moves past now
+        let floor = current.or_else(|| reminders::parse_local(&format!("{} 00:00", t.due)));
+        let after = floor.filter(|c| *c > now).unwrap_or(now);
+        let Some(next) = reminders::next_occurrence(base, &t.repeat, after) else {
+            return Ok(false);
+        };
+        // a due date that sat a few days after the reminder keeps that distance
+        let due = match (crate::dates::parse_iso(&t.due), current) {
+            (Some(d), Some(c)) => (next.date() + (d - c.date()))
+                .format("%Y-%m-%d")
+                .to_string(),
+            (Some(_), None) => next.date().format("%Y-%m-%d").to_string(),
+            (None, _) => String::new(),
+        };
+        let remind = if t.remind.is_empty() {
+            String::new()
+        } else {
+            reminders::fmt_local(next)
+        };
+        self.db.execute(
+            "UPDATE tasks SET remind=?1, due=?2, reminded='', snooze_until=0 WHERE uid=?3",
+            params![remind, due, t.uid],
+        )?;
+        self.log(&format!(
+            "“{}” done for now; next on {}",
+            self.label(t.uid),
+            next.format(if t.remind.is_empty() {
+                "%-d %b"
+            } else {
+                "%-d %b %H:%M"
+            })
+        ))?;
+        Ok(true)
     }
 
     // ---- follow-ups: "waiting on a reply" ----
@@ -1374,7 +1682,7 @@ impl Store {
     /// Sign-out: forget everything this app stored about the mailbox and the user's corrections.
     pub fn wipe_all(&self) -> anyhow::Result<()> {
         self.db.execute_batch(
-            "DELETE FROM tasks; DELETE FROM drafts; DELETE FROM outbox; DELETE FROM meta; DELETE FROM log; DELETE FROM overrides; DELETE FROM sender_prefs; DELETE FROM rules; DELETE FROM followups;",
+            "DELETE FROM tasks; DELETE FROM drafts; DELETE FROM outbox; DELETE FROM meta; DELETE FROM log; DELETE FROM overrides; DELETE FROM sender_prefs; DELETE FROM rules; DELETE FROM followups; INSERT INTO tasks_fts(tasks_fts) VALUES('delete-all');",
         )?;
         // Best effort: fold the journal into the file and rewrite it, so no copy of the deleted rows is left
         // in the write-ahead log or in unused pages. A busy database skips this; secure_delete already zeroed rows.

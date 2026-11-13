@@ -44,7 +44,7 @@ function drawWizard() {
     if (W.ai !== "rules") h += `<div class="foot"><button class="btn sm" data-w="aitest">Test</button><span>${W.aiTest ? (W.aiTest.ok ? `<span class="ok">Works · P${W.aiTest.priority} · ${esc(W.aiTest.action)}</span>` : `<span class="bad">${esc(W.aiTest.error)} (rules will be used)</span>`) : ""}</span></div>`;
   }
   if (n === 3) {
-    h += `<h2>Alerts</h2><label class="sw"><input type="checkbox" data-c="desktop" ${W.desktop ? "checked" : ""}><div><b>Desktop notifications</b><span>Only for priority 4–5 and urgent mail.</span></div></label>
+    h += `<h2>Alerts</h2><label class="sw"><input type="checkbox" data-c="desktop" ${W.desktop ? "checked" : ""}><div><b>Desktop notifications</b><span>Priority 4–5 and urgent mail, and your reminders, the daily digest and snooze notices.</span></div></label>
       <label class="sw"><input type="checkbox" data-c="autostart" ${W.autostart ? "checked" : ""}><div><b>Start with this computer</b><span>Keeps watching your inbox from the tray.</span></div></label>
       <label class="f" for="w-topic">Phone alerts with ntfy (optional)</label><div class="row2" style="grid-template-columns:1fr auto"><input id="w-topic" type="text" data-f="topic" value="${esc(W.topic)}" placeholder="a private topic name"><button class="btn sm" data-w="topic">Generate</button></div>
       <p>Install the free ntfy app on your phone and subscribe to the same topic. Treat the topic like a password.</p>`;

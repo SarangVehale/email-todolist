@@ -62,7 +62,8 @@ pub fn valid_iso(s: &str) -> bool {
     parse_iso(s).is_some()
 }
 
-fn parse_iso(s: &str) -> Option<NaiveDate> {
+/// A real `YYYY-MM-DD` between 2000 and 2100 as a date, or None.
+pub fn parse_iso(s: &str) -> Option<NaiveDate> {
     let b = s.as_bytes();
     if b.len() != 10 || b[4] != b'-' || b[7] != b'-' || !s.is_ascii() {
         return None;

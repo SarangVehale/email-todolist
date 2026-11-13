@@ -1,5 +1,6 @@
 //! Mail engine: IMAP watcher, signals, pluggable triage, SQLite store, write-back, phone hub.
 pub mod ai;
+pub mod calendar;
 pub mod commands;
 pub mod core;
 pub mod dates;
@@ -9,6 +10,7 @@ pub mod followup;
 pub mod hub;
 pub mod jobs;
 pub mod mail;
+pub mod reminders;
 pub mod rules;
 pub mod secrets;
 pub mod settings;

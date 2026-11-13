@@ -209,6 +209,82 @@ an address), replies and forwards you sent, a Date in the future, ids that could
 more than twenty open, sign-out in the middle of a check, the feature switched off while follow-ups are open —
 `phase4.rs` and the `followups` module of `imap_flows.rs`.
 
+## 5e. Reminders and repeats (`reminders.rs`, `store.rs: set_reminder, due_reminders, advance_repeat`)
+
+```
+times are local wall-clock text "YYYY-MM-DD HH:MM" (exactly that shape; seconds, one-digit hours, stray spaces refused)
+set_reminder(uid, at, repeat):                 # your own tasks only; also from the phone
+    mail task or no such task: refuse
+    repeat must be "", daily, weekly or monthly
+    at == "":  repeat == ""  -> clear reminder, repeat, first occurrence, and the announced mark
+               repeat != ""  -> needs a due date; the first occurrence is that date at 00:00; no reminder time
+    task made by the app (a follow-up): refuse
+    at != "":  a real time, year 2000..2100, not earlier than the current minute -- unless it is the time the task already has
+               store it; the first occurrence is `at` when it repeats (kept if unchanged);
+               clear the announced mark, unless the time did not change
+scheduler, every 20 s:
+    tasks of yours, open, reminder <= now (as text), announced mark != reminder:
+        mark announced first (only the time that was selected), then notify (desktop when on, and ntfy); quiet hours and snooze do not apply
+        1 to 3 due: one notice each; more than 3: one notice "N reminders are due"
+complete a repeating task of yours (set_done true, from a click, `x`, "Done all N" or a bulk selection):
+    it stays open; there is no undo; a second activation while the first is saving is ignored
+    after = the later of now and the current reminder (or the due date at 00:00 for a repeat with only a due date)
+    next  = first occurrence counted from the FIRST one (daily / weekly: whole days; monthly: whole months, day clamped
+            to the month's length each time, so the 31st returns after February) that is later than `after`
+    reminder = next (if it had one);  due = the same distance after it as before (or the date of next, with no reminder);
+    clear the snooze and the announced mark; log it
+the reminder box on the phone says "computer's time": a time is always the desktop's wall clock
+editing the due date of a repeat that has no reminder moves its first occurrence; clearing that date drops the repeat
+```
+Edge cases: month ends and leap days, completing early or weeks late, a restart, tasks done or cleared, a long absence,
+mail tasks, bad times —
+`phase5.rs` (reminder tests).
+
+## 5f. Search inside message text (`store.rs: search, fts_query`)
+
+```
+index: SQLite FTS5 table over subject, sender, addr, body, note, content='tasks', tokenizer unicode61 (accents folded)
+       kept by AFTER INSERT / DELETE / UPDATE OF those columns triggers; recursive_triggers is ON so a replace deletes
+       the old entry; created after the columns exist; an older database gets 'rebuild' once, after the one-time copy
+fts_query(q):  first 100 characters; split on anything that is not a letter or digit; first 8 words;
+               each word quoted, the last also a prefix  ->  "a" "b" "c"*     (nothing left: no query)
+search(q):     SELECT rowid ... MATCH query ORDER BY rank LIMIT 500           # desktop-only command
+the index is set to secure-delete, so a deleted entry's words are overwritten, not left until a merge
+only the first 3000 characters of a message are stored, so only they can be found
+wipe / reset / prune delete tasks, which deletes their index entries; sign-out also issues delete-all
+```
+Edge cases: operators, column filters, quotes and `*` in what is typed; stale words after a replace; notes and renames;
+a version-1 database; text left on disk after sign-out — `phase5.rs` (search tests).
+
+## 5g. Calendar invitations (`calendar.rs`, `mail.rs: find_event`, `commands.rs: save_event_in`)
+
+```
+parse (mail): each text/calendar, application/ics or *.ics part in turn (depth up to 24): decode, give it to
+              calendar::parse; the first that yields an event is used
+calendar::parse(text):
+    over 64 KB: nothing;  unfold lines;  only inside BEGIN:VCALENDAR; METHOD:REPLY: nothing
+    the first VEVENT only (no END:VEVENT: nothing); BEGIN of anything else inside it (alarms) is skipped to its END
+    DTSTART required and valid (date, or date-time floating / with a zone / UTC; year 2000..2100)
+    zone: an IANA name is kept; one of about sixty Windows names becomes its IANA name; any other is dropped and only its
+          cleaned text (64 characters) is kept to say the zone is not known
+    DTEND kept only if it is the same kind as the start, in the same zone, and not earlier; otherwise DURATION (PT.. P..D P..W,
+          up to a year, whole days when all-day) gives one
+    summary and location: unescaped; control characters, U+2028/2029, zero-width and bidi marks removed; cut at 200;
+          empty summary: "(no title)"
+    cancelled: METHOD:CANCEL or STATUS:CANCELLED;  recurring: RRULE or RDATE present (only the first time is kept)
+the task keeps the event; with no due date it gets the event's day (for a UTC time, the day where you are) if today or
+later and not cancelled
+save_event(uid)  (desktop only):  no event / cancelled: refuse
+    build the file from the fields:  VCALENDAR / VEVENT with a stable UID, DTSTAMP, DTSTART, DTEND (an all-day event with no
+    end ends the next day), SUMMARY, LOCATION; text escaped, control characters dropped, lines folded at 75 octets
+    write it as a NEW file in <home>/Downloads (the home folder itself if there is none): create_new, name
+    invite-<lowercase ascii words, 40 characters>-<YYYYMMDD>.ics,
+    -2, -3 ... if taken; never overwrite, never open, return the path
+```
+Edge cases: Windows zone names, folded and escaped lines, alarms, a second event, a reply, hostile and oversized input,
+random garbage, injection through the summary or place, file names from hostile summaries, an existing file —
+`phase5.rs` (calendar tests).
+
 ## 6. Changing the real mailbox (`writeback.rs`) — only when the user turned it on
 
 ```
@@ -278,6 +354,7 @@ Edge cases: stalled clients, floods, hostile headers, odd methods — `stalled_c
 ```
 every 20 s:
     for tasks whose snooze time has passed: clear the snooze, notify once ("Back from snooze")
+    for your reminders that have come due: notify once each up to three, one summary for more (section 5e)
     once a day: the clean-up of old data (done tasks past 90 days, log past 30, corrections past 365, follow-up records past 60)
     if digest time is set, now >= that time, and no digest has been sent today:
         record today; if anything is open: notify "N open · H high · D due [· U urgent] · R draft(s) ready"

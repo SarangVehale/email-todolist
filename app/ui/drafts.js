@@ -11,6 +11,23 @@ const SOURCE_LABEL = { ai: "Written by AI", template: "Quick reply", user: "Edit
 const isoToday = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 const dueLabel = iso => { const [, m, d] = iso.split("-"); return `${+d} ${MONTHS[+m - 1]}`; };
 const isLocal = t => t.uid >= 2000000000;
+const nowLocal = () => { const d = new Date(), p = n => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}` };
+/* a calendar event's day and a readable "when": UTC times are shown in this computer's time, others as written */
+const evDay = ev => {
+  const p = n => String(n).padStart(2, "0");
+  if (ev.start.endsWith("Z")) { const d = new Date(Date.UTC(+ev.start.slice(0, 4), +ev.start.slice(4, 6) - 1, +ev.start.slice(6, 8), +ev.start.slice(9, 11), +ev.start.slice(11, 13))); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}` }
+  return `${ev.start.slice(0, 4)}-${ev.start.slice(4, 6)}-${ev.start.slice(6, 8)}`;
+};
+function evWhen(ev) {
+  const at = v => {
+    if (v.length === 8) return new Date(+v.slice(0, 4), +v.slice(4, 6) - 1, +v.slice(6, 8)).toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" });
+    const parts = [+v.slice(0, 4), +v.slice(4, 6) - 1, +v.slice(6, 8), +v.slice(9, 11), +v.slice(11, 13)];
+    const d = v.endsWith("Z") ? new Date(Date.UTC(...parts)) : new Date(...parts);
+    return d.toLocaleString([], { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  };
+  const hm = v => v.length === 8 ? "" : at(v).split(", ").pop();
+  return at(ev.start) + (ev.end && !ev.all_day ? " to " + hm(ev.end) : "") + (ev.tzid ? ` (${ev.tzid})` : "");
+}
 const editing = () => document.activeElement?.closest?.("#view textarea, #view input");
 
 /* small tags in the row's meta line */
@@ -26,6 +43,10 @@ function tagsHTML(t) {
   else if (t.needs_reply) out.push('<span class="tg">↩ Reply</span>');
   if (t.due) out.push(`<span class="tg ${t.due <= isoToday() ? "r" : ""}">Due ${dueLabel(t.due)}</span>`);
   if (t.attachment_count) out.push(`<span class="tg">Files ${t.attachment_count}</span>`);
+  if (t.remind) out.push(`<span class="tg ${t.remind <= nowLocal() ? "r" : ""}" title="${esc(t.repeat ? "Repeats " + t.repeat : "Reminder")}">${t.repeat ? "↻ " : ""}Remind ${dueLabel(t.remind.slice(0, 10))} ${t.remind.slice(11)}</span>`);
+  else if (t.repeat) out.push(`<span class="tg" title="Moves to the next date when you finish it">↻ ${esc(t.repeat)}</span>`);
+  if (t.event) out.push(`<span class="tg ${t.event.cancelled ? "r" : ""}">${t.event.cancelled ? "Event cancelled" : "Event " + dueLabel(evDay(t.event))}</span>`);
+  if (flt.q.trim() && bodyHit(t, flt.q.trim().toLowerCase()) && !textMatch(t, flt.q.trim().toLowerCase())) out.push('<span class="tg" title="The words are in the message text">In text</span>');
   if (isLocal(t) && t.kind !== "followup") out.push('<span class="tg">Mine</span>');
   if (t.pref === "important") out.push('<span class="tg">★ Sender</span>');
   if (t.pref === "mute") out.push('<span class="tg">Muted</span>');
@@ -57,8 +78,22 @@ function extraHTML(t) {
   const read = !isLocal(t) && !isHub
     ? `<div class="drow"><button class="mini" data-act="read-body" aria-expanded="${bodies[t.uid] !== undefined}">${bodies[t.uid] !== undefined ? "Hide message" : "Read message"}</button>${gmail}</div>${bodies[t.uid] !== undefined ? `<pre class="bodytext" tabindex="0" aria-label="Message text">${esc(bodies[t.uid] || "No text.")}</pre>` : ""}`
     : "";
+  const ev = t.event ? `<div class="spec"><div><span>Event</span><b>${esc(t.event.summary)}${t.event.cancelled ? " · cancelled" : ""}<br>${esc(evWhen(t.event))}${t.event.location ? "<br>" + esc(t.event.location) : ""}${t.event.zone_name ? `<br>Time zone “${esc(t.event.zone_name)}” is not one this app knows, so the time is shown as written` : ""}${t.event.recurring ? "<br>This invitation repeats; only the first time is kept" : ""}</b></div></div>${!t.event.cancelled && !isHub ? '<div class="drow"><button class="mini" data-act="save-ics">Save .ics</button><span class="lbl">into Downloads (or your user folder if there is none); you open it</span></div>' : ""}` : "";
+  const remind = isLocal(t) && t.kind !== "followup" ? remindHTML(t) : "";
   const note = `<label class="lbl nl" for="n${t.uid}">Note</label><textarea id="n${t.uid}" class="dtext note" data-note="${t.uid}" rows="2" maxlength="2000" placeholder="Anything to remember about this" aria-label="Note">${esc(t.note || "")}</textarea>`;
-  return files + unsub + title + due + read + note;
+  return files + ev + unsub + title + due + remind + read + note;
+}
+
+/* a reminder time and a repeat, for tasks you added */
+function remindHTML(t) {
+  const opts = [["", "Doesn’t repeat"], ["daily", "Every day"], ["weekly", "Every week"], ["monthly", "Every month"]];
+  return `<div class="drow"><label class="lbl" for="rm${t.uid}" ${isHub ? 'title="Times are on the computer that holds your mail"' : ""}>Remind${isHub ? " (computer’s time)" : ""}</label><input id="rm${t.uid}" class="mini dateinp" type="datetime-local" data-remind="${t.uid}" min="${nowLocal().replace(" ", "T")}" value="${esc((t.remind || "").replace(" ", "T"))}" aria-label="Remind me at"><select class="mini" data-repeat="${t.uid}" aria-label="Repeat">${opts.map(([v, l]) => `<option value="${v}" ${(t.repeat || "") === v ? "selected" : ""}>${l}</option>`).join("")}</select>${t.remind || t.repeat ? '<button class="mini" data-act="remind-clear">Clear</button>' : ""}</div>`;
+}
+async function saveReminder(t, at, repeat, revert) {
+  busy++;
+  try { await rpc("set_reminder", { uid: t.uid, at, repeat }); t.remind = at; t.repeat = repeat; toast(at ? "Reminder set" : repeat ? "Repeat set" : "Reminder cleared") }
+  catch (err) { toast(String(err).replace(/^Error: /, "")); revert && revert() }
+  finally { busy--; lastSnap = ""; render(); load() }
 }
 
 /* the controls inside an expanded row */
@@ -143,6 +178,10 @@ function handleExtra(e, t, act) {
       genDraft(t, el.dataset.ins || "", edited); return true;
     }
     case "copy-unsub": copyText(t.unsubscribe || ""); return true;
+    case "remind-clear": saveReminder(t, "", "", null); return true;
+    case "save-ics":
+      (async () => { busy++; try { const p = await rpc("save_event", { uid: t.uid }); toast("Saved " + p) } catch (err) { toast(String(err).replace(/^Error: /, "")) } finally { busy-- } })();
+      return true;
     case "copy-gmail": copyText("https://mail.google.com/mail/u/0/#search/" + encodeURIComponent("rfc822msgid:" + String(t.message_id).replace(/^<|>$/g, ""))); return true;
     case "due-clear": setDue(t, ""); return true;
     case "read-body":
@@ -182,7 +221,7 @@ document.addEventListener("click", e => {
   render();
 });
 document.addEventListener("input", e => {
-  if (e.target.id === "q") { flt.q = e.target.value; render() }
+  if (e.target.id === "q") { flt.q = e.target.value; render(); queueSearch() }
   else if (e.target.dataset?.draft) saveDraftText(+e.target.dataset.draft, e.target.value, false);
   else if (e.target.dataset?.note) saveNote(+e.target.dataset.note, e.target.value, false);
 });
@@ -190,7 +229,12 @@ document.addEventListener("change", e => {
   const x = e.target;
   if (x.id === "sort") { flt.sort = x.value; render() }
   else if (x.dataset?.due) { const t = find(+x.dataset.due), id = x.id; if (t) { setDue(t, x.value); document.getElementById(id)?.focus() } }
-  else if (x.dataset?.title) {
+  else if (x.dataset?.remind || x.dataset?.repeat) {
+    const t = find(+(x.dataset.remind || x.dataset.repeat)); if (!t) return;
+    const box = document.getElementById("rm" + t.uid), sel = document.querySelector(`select[data-repeat="${t.uid}"]`);
+    const at = (box?.value || "").replace("T", " "), repeat = sel?.value || "";
+    saveReminder(t, at, repeat, () => { if (box) box.value = (t.remind || "").replace(" ", "T"); if (sel) sel.value = t.repeat || "" });
+  } else if (x.dataset?.title) {
     const t = find(+x.dataset.title), title = x.value.trim(); if (!t || !title || title === t.subject) { if (t) x.value = t.subject; return }
     const old = t.subject; t.subject = t.action = title;
     undoStack.push(() => { const y = find(t.uid); if (y) y.subject = y.action = old; call("set_title", { uid: t.uid, title: old }) });
@@ -210,6 +254,22 @@ document.addEventListener("focusout", e => {
   if (pendingRender && !editing()) { pendingRender = false; render() }
 });
 document.addEventListener("keydown", e => { if (e.target.id === "q" && e.key === "Escape") { flt.q = ""; e.target.blur(); render() } });
+
+/* full-text search inside the stored message text (desktop only: the phone may not read message text) */
+let searchTimer, searchSeq = 0;
+function queueSearch() {
+  clearTimeout(searchTimer);
+  const q = flt.q.trim().toLowerCase();
+  if (!q || isHub) { flt.hits = new Set(); flt.hitsFor = ""; return }
+  searchTimer = setTimeout(async () => {
+    const mine = ++searchSeq;
+    try {
+      const ids = await rpc("search", { q });
+      if (mine !== searchSeq || flt.q.trim().toLowerCase() !== q) return; // typed on since: this answer is stale
+      flt.hits = new Set(ids); flt.hitsFor = q; render();
+    } catch { /* the list still filters on what it can see */ }
+  }, 160);
+}
 
 /* mark all folded automated mail as done (one undo restores all) */
 document.addEventListener("click", e => {
@@ -235,10 +295,12 @@ document.addEventListener("click", e => {
 document.addEventListener("click", e => {
   const b = e.target.closest("[data-bulk]"); if (!b) return;
   const rows = listFor(); if (rows.length < 2 || !twice(b, `Click again: ${rows.length} done`)) return;
-  const l = rows.flatMap(members), ids = l.map(t => t.uid);
+  const all = rows.flatMap(members), rep = all.filter(t => isLocal(t) && t.repeat), l = all.filter(t => !rep.includes(t)), ids = l.map(t => t.uid);
   l.forEach(t => { t.status = "done"; call("set_done", { uid: t.uid, done: true }) });
-  undoStack.push(() => ids.forEach(u => { const t = find(u); if (t) { t.status = "open"; call("set_done", { uid: u, done: false }) } }));
-  showUndo(`${ids.length} done`); render();
+  if (ids.length) undoStack.push(() => ids.forEach(u => { const t = find(u); if (t) { t.status = "open"; call("set_done", { uid: u, done: false }) } }));
+  if (rep.length) repeatDone(rep);
+  if (ids.length) showUndo(`${ids.length} done${rep.length ? ` · ${rep.length} repeating moved on` : ""}`); // nothing to undo for repeating ones
+  render();
 });
 
 /* ───────── add a task of your own, and the shortcuts card ───────── */
@@ -338,10 +400,11 @@ function bulk(k, el) {
   const ms = [...new Map(rows.flatMap(members).map(x => [x.uid, x])).values()], ids = ms.map(x => x.uid);
   if (!ms.length) return;
   if (k === "done") {
-    const v = view !== "done", was = ms.map(x => [x.uid, x.status]);
-    ms.forEach(x => { x.status = v ? "done" : "open"; call("set_done", { uid: x.uid, done: v }) });
-    undoStack.push(() => was.forEach(([u, s]) => { const x = find(u); if (x) { x.status = s; call("set_done", { uid: u, done: s === "done" }) } }));
-    showUndo(`${ids.length} ${v ? "done" : "reopened"}`);
+    const v = view !== "done", rep = v ? ms.filter(x => isLocal(x) && x.repeat) : [], rest = ms.filter(x => !rep.includes(x)), was = rest.map(x => [x.uid, x.status]);
+    rest.forEach(x => { x.status = v ? "done" : "open"; call("set_done", { uid: x.uid, done: v }) });
+    if (rest.length) undoStack.push(() => was.forEach(([u, s]) => { const x = find(u); if (x) { x.status = s; call("set_done", { uid: u, done: s === "done" }) } }));
+    if (rep.length) repeatDone(rep);
+    if (rest.length) showUndo(`${rest.length} ${v ? "done" : "reopened"}${rep.length ? ` · ${rep.length} repeating moved on` : ""}`);
   } else if (k === "star") {
     const v = !ms.every(x => x.star), was = ms.map(x => [x.uid, !!x.star]);
     ms.forEach(x => { x.star = v; call("set_star", { uid: x.uid, star: v }) });
