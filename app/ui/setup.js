@@ -104,7 +104,60 @@ veil.addEventListener("click", async e => {
 });
 
 const ALERT_CATS = ["work", "personal", "finance", "travel", "notification", "promo", "reading", "other"];
-function openSettings() { veil.dataset.kind = "settings"; veil.classList.add("show"); drawSettings().then(() => dialogOpened("Settings")) }
+function openSettings() { rulesDraft = null; rulesDirty = false; veil.dataset.kind = "settings"; veil.classList.add("show"); drawSettings().then(() => dialogOpened("Settings")) }
+
+/* ───────── your rules (the edits live in rulesDraft until Save) ───────── */
+let rulesDraft = null, rulesDirty = false;
+const FIELDS = [["sender", "Address is"], ["domain", "Domain is"], ["subject", "Subject contains"]];
+function rulesHTML() {
+  if (!rulesDraft) rulesDraft = JSON.parse(JSON.stringify(S.rules || []));
+  if (!rulesDraft.length) return "<p>No rules yet.</p>";
+  const out = r => r.file ? "file" : r.priority ? String(r.priority) : "";
+  return rulesDraft.map((r, i) => `<div class="rule" data-i="${i}"><div class="rrow"><select data-r="field" aria-label="Look at">${FIELDS.map(([v, l]) => `<option value="${v}" ${r.field === v ? "selected" : ""}>${l}</option>`).join("")}</select><input type="text" data-r="text" maxlength="100" value="${esc(r.text)}" placeholder="text to look for" aria-label="Text to look for" autocomplete="off"></div>
+    <div class="rrow"><span class="lbl">then</span><select data-r="outcome" aria-label="Priority">${[["", "Keep priority"], ["1", "Priority 1"], ["2", "Priority 2"], ["3", "Priority 3"], ["4", "Priority 4"], ["5", "Priority 5"], ["file", "File away (mark done)"]].map(([v, l]) => `<option value="${v}" ${out(r) === v ? "selected" : ""}>${l}</option>`).join("")}</select>
+    <select data-r="category" aria-label="Category"><option value="">Keep category</option>${ALERT_CATS.map(c => `<option ${r.category === c ? "selected" : ""}>${c}</option>`).join("")}</select></div>
+    <div class="rrow"><button class="mini" data-r="up" ${i === 0 ? "disabled" : ""} aria-label="Move rule up">Up</button><button class="mini" data-r="down" ${i === rulesDraft.length - 1 ? "disabled" : ""} aria-label="Move rule down">Down</button><button class="mini" data-r="del">Remove</button></div></div>`).join("");
+}
+function rulesNote(html) { const r = $("#rulesres"); if (r) r.innerHTML = html }
+function ruleEdit(el) {
+  const row = el.closest(".rule"); if (!row || !rulesDraft) return;
+  const r = rulesDraft[+row.dataset.i]; if (!r) return;
+  const v = el.value, k = el.dataset.r;
+  if (k === "field") r.field = v;
+  else if (k === "text") r.text = v;
+  else if (k === "outcome") { r.file = v === "file"; r.priority = v && v !== "file" ? +v : null }
+  else if (k === "category") r.category = v || null;
+  rulesDirty = true; rulesNote("Not saved yet");
+}
+async function ruleClick(b) {
+  const k = b.dataset.r, row = b.closest(".rule"), i = row ? +row.dataset.i : -1;
+  const redraw = () => { const box = $("#rules"); if (box) box.innerHTML = rulesHTML() };
+  if (k === "add") {
+    if (rulesDraft.length >= 50) { rulesNote('<span class="bad">At most 50 rules</span>'); return }
+    rulesDraft.push({ id: rand(8), field: "sender", text: "", priority: null, category: null, file: false }); rulesDirty = true; redraw(); rulesNote("Not saved yet"); return;
+  }
+  if (k === "up" && i > 0) { [rulesDraft[i - 1], rulesDraft[i]] = [rulesDraft[i], rulesDraft[i - 1]]; rulesDirty = true; redraw(); rulesNote("Not saved yet"); return }
+  if (k === "down" && i >= 0 && i < rulesDraft.length - 1) { [rulesDraft[i + 1], rulesDraft[i]] = [rulesDraft[i], rulesDraft[i + 1]]; rulesDirty = true; redraw(); rulesNote("Not saved yet"); return }
+  if (k === "del" && i >= 0) { rulesDraft.splice(i, 1); rulesDirty = true; redraw(); rulesNote("Not saved yet"); return }
+  if (k === "save") {
+    try { await rpc("rules_save", { rules: rulesDraft }); S.rules = JSON.parse(JSON.stringify(rulesDraft)); rulesDirty = false; rulesNote('<span class="ok">Saved. New mail follows these rules.</span>') }
+    catch (err) { rulesNote(`<span class="bad">${esc(String(err).replace(/^Error: /, ""))}</span>`) }
+    return;
+  }
+  if (k === "apply") {
+    if (rulesDirty) { rulesNote('<span class="bad">Save the rules first</span>'); return }
+    try {
+      const d = await rpc("rules_apply", { dry: true });
+      if (!d.changed) { rulesNote("No open task would change."); return }
+      if (!twice(b, `Click again: change ${d.changed}${d.filed ? `, file ${d.filed}` : ""}`)) { rulesNote(`${d.changed} of ${d.matched} matching tasks would change${d.filed ? `; ${d.filed} would be marked done` : ""}.`); return }
+      const r = await rpc("rules_apply", { dry: false });
+      b.textContent = "Apply to my list"; // twice() leaves its "click again" wording on the button
+      lastSnap = ""; await load();
+      rulesNote(`<span class="ok">Changed ${r.changed}${r.filed ? `, filed ${r.filed}` : ""}.</span>`);
+    } catch (err) { rulesNote(`<span class="bad">${esc(String(err).replace(/^Error: /, ""))}</span>`) }
+  }
+}
+veil.addEventListener("input", e => { if (veil.dataset.kind === "settings" && e.target.dataset?.r === "text") ruleEdit(e.target) });
 async function drawSettings() {
   const s = S.settings, a = s.alerts || {}, ai = s.ai || {}, dr = s.drafts || { auto: false, tone: "friendly", signature: "", min_priority: 3, daily_cap: 25 };
   let hub = null; if (s.hub?.enabled) hub = await rpc("hub_info").catch(() => null);
@@ -132,6 +185,15 @@ async function drawSettings() {
     <label class="f">Tone</label><select data-s="draft_tone">${["friendly", "concise", "formal"].map(x => `<option ${dr.tone === x ? "selected" : ""}>${x}</option>`).join("")}</select>
     <label class="f">Signature</label><textarea class="dtext" style="min-height:80px" rows="3" data-s="draft_sig" placeholder="Best,&#10;Your name">${esc(dr.signature)}</textarea>
     <div class="row2" style="grid-template-columns:1fr 1fr"><div><label class="f">Only for priority</label><select data-s="draft_min">${[1, 2, 3, 4, 5].map(n => `<option value="${n}" ${dr.min_priority === n ? "selected" : ""}>${n} and up</option>`).join("")}</select></div><div><label class="f">Daily limit</label><input type="number" min="0" max="200" data-s="draft_cap" value="${dr.daily_cap}"></div></div>
+    <div class="sect">Follow-ups</div>
+    <label class="f" for="s-follow">Remind me when nobody has answered</label>
+    <select id="s-follow" data-s="follow_days">${[[0, "Off"], [2, "After 2 days"], [3, "After 3 days"], [5, "After 5 days"], [7, "After 7 days"]].map(([v, l]) => `<option value="${v}" ${(s.followups?.days || 0) === v ? "selected" : ""}>${l}</option>`).join("")}</select>
+    <p>Looks at conversations you started in the last two weeks. If nobody has replied, a “Waiting” task appears in your list, and it closes itself when a reply arrives. The app only asks your mail server whether a reply exists, in your Inbox and in All Mail or Archive when there is one. Your own messages and automatic out-of-office replies do not count. It never sends anything.</p>
+    <div class="sect">Your rules</div>
+    <p>“If the address, domain or subject matches, then set the priority or category, or file the mail.” The first rule that matches is used. A sender you marked “always important” or “mute” skips the rules. A rule on the subject can only raise mail from people you write to, and no rule can raise mail that failed its sender check.</p>
+    <p>Rules also run on mail read when you first connect a mailbox. With “Let Inbox Agent file mail” on, a rule that files mail archives it in your mailbox, and priority changes become labels there.</p>
+    <div id="rules">${rulesHTML()}</div>
+    <div class="foot" style="margin-top:12px"><button class="btn sm" data-r="add">Add a rule</button><button class="btn sm" data-r="save">Save rules</button><button class="btn sm" data-r="apply">Apply to my list</button><span id="rulesres"></span></div>
     <div class="sect">Mailbox</div>
     <label class="sw"><input type="checkbox" data-s="writeback" ${s.writeback ? "checked" : ""}><div><b>Let Inbox Agent file mail</b><span>Done archives, star flags, priorities label (Gmail). ${S.pending ? S.pending + " change(s) waiting." : ""}</span></div></label>
     ${S.update_feature ? `<div class="sect">Updates</div><label class="sw"><input type="checkbox" data-s="update_check" ${s.updates?.check !== false ? "checked" : ""}><div><b>Check for a newer version</b><span>Once a day the app asks GitHub for the latest release. Nothing is downloaded or installed; you only see a notice and a link. GitHub sees your network address, like any web request.</span></div></label>` : ""}
@@ -142,10 +204,11 @@ async function drawSettings() {
     <div class="foot"><span class="sp"></span><button class="btn pri" data-vc="1">Close</button></div>`);
 }
 async function settingsChange(t) {
+  if (t.dataset.r) return ruleEdit(t);
   const k = t.dataset.s; if (!k) return;
   const patch = { aimode: { ai: { mode: t.value } }, ollama_model: { ai: { ollama_model: t.value } }, desktop: { alerts: { desktop: t.checked } }, topic: { alerts: { ntfy_topic: t.value.trim() } }, writeback: { writeback: t.checked }, hub: { hub: { enabled: t.checked } },
     digest_time: { alerts: { digest_time: t.value } }, draft_auto: { drafts: { auto: t.checked } }, draft_tone: { drafts: { tone: t.value } },
-    draft_sig: { drafts: { signature: t.value } }, update_check: { updates: { check: t.checked } }, draft_min: { drafts: { min_priority: +t.value } }, draft_cap: { drafts: { daily_cap: +t.value || 0 } } }[k];
+    draft_sig: { drafts: { signature: t.value } }, update_check: { updates: { check: t.checked } }, draft_min: { drafts: { min_priority: +t.value } }, follow_days: { followups: { days: +t.value } }, draft_cap: { drafts: { daily_cap: +t.value || 0 } } }[k];
   if (k === "quiet_start" || k === "quiet_end") {
     const st = veil.querySelector("[data-s=quiet_start]").value, en = veil.querySelector("[data-s=quiet_end]").value;
     if (!!st !== !!en) { toast("Set both a start and an end for quiet hours"); return }
@@ -157,6 +220,7 @@ async function settingsChange(t) {
   try { S.settings = await rpc("save_settings", { patch }); drawSettings() } catch (e) { toast("Couldn't save: " + e) }
 }
 async function settingsClick(e) {
+  const rb = e.target.closest("button[data-r]"); if (rb) return ruleClick(rb);
   const k = e.target.closest("[data-s]")?.dataset.s;
   if (k === "aitest") { const r = $("#aitres"); r.textContent = "Testing…"; try { const x = await rpc("test_ai"); r.innerHTML = `<span class="ok">Works · P${x.priority} · ${esc(x.action)}</span>` } catch (err) { r.innerHTML = `<span class="bad">${esc(String(err))}</span>` } }
   if (k === "alertcat") {

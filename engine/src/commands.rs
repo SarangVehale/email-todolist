@@ -35,6 +35,8 @@ const DESKTOP_ONLY: &[&str] = &[
     "export_markdown",
     "read_body",
     "diagnostics",
+    "rules_save",
+    "rules_apply",
 ];
 
 /// Automatic drafting runs one message at a time so the daily budget cannot be overshot.
@@ -272,6 +274,15 @@ pub fn run(core: &Arc<Core>, cmd: &str, a: &Value) -> Option<Result<Value>> {
                 }
                 Ok(json!(true))
             }
+            "rules_save" => {
+                let rules: Vec<crate::rules::Rule> = serde_json::from_value(a["rules"].clone())
+                    .map_err(|_| anyhow!("Those rules couldn't be read"))?;
+                store.set_rules(&rules)?;
+                Ok(json!(true))
+            }
+            "rules_apply" => Ok(serde_json::to_value(
+                store.apply_rules(a["dry"].as_bool().unwrap_or(true))?,
+            )?),
             "export_markdown" => Ok(json!(markdown_export(&store.all_tasks()?))),
             "diagnostics" => {
                 let s = core.settings();

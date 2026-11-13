@@ -458,6 +458,15 @@ const RECONCILE_EVERY: Duration = Duration::from_secs(120);
 const RETRY: Duration = Duration::from_secs(30);
 const SIGN_IN_RETRY: Duration = Duration::from_secs(300);
 
+/// What the sync loop needs besides the account and the triager.
+#[derive(Debug, Clone, Copy)]
+pub struct SyncOptions {
+    /// How many messages to read the very first time.
+    pub first_run_limit: usize,
+    /// Days to wait before an unanswered conversation you started becomes a task; 0 = off.
+    pub follow_days: u32,
+}
+
 /// Brings the Sent index up to date and lets finished tasks close. A failure here is logged and ignored: it must
 /// never take down the connection that delivers new mail.
 fn maintain<T: Read + Write>(
@@ -466,6 +475,7 @@ fn maintain<T: Read + Write>(
     folder: Option<&str>,
     sent: &mut SentIndex,
     stop: &AtomicBool,
+    follow: (&str, u32),
 ) {
     // with no Sent folder there is nothing to refresh, but mail that left the inbox is still worth noticing
     if let Some(folder) = folder {
@@ -486,6 +496,29 @@ fn maintain<T: Read + Write>(
         }
         _ => {}
     }
+    let (own, days) = follow;
+    if days > 0 && !stop.load(Ordering::Relaxed) {
+        let now = chrono::Utc::now().timestamp() as f64;
+        match crate::followup::check(s, store, sent, own, days, now, stop) {
+            Ok(r) => {
+                let _ = store.meta_set("followup_error", "");
+                if r.created > 0 || r.closed > 0 {
+                    let _ = store.log(&format!(
+                        "checked for replies to what you sent: {} waiting, {} answered since",
+                        r.created, r.closed
+                    ));
+                }
+            }
+            // "unknown" never creates a task. The same complaint is logged once, not every two minutes.
+            Err(e) => {
+                let msg = format!("could not check for replies to what you sent: {e}");
+                if store.meta_get("followup_error").as_deref() != Some(msg.as_str()) {
+                    let _ = store.log(&msg);
+                    let _ = store.meta_set("followup_error", &msg);
+                }
+            }
+        }
+    }
 }
 
 /// Runs until `stop` is set. Reconnects after errors. IDLE is re-issued every minute so `stop` is
@@ -494,11 +527,13 @@ pub fn run(
     a: &Account,
     store: &Store,
     triager: &dyn Triager,
-    first_run_limit: usize,
+    opts: SyncOptions,
     stop: &AtomicBool,
     status: &dyn Fn(&str),
     on_new: &mut dyn FnMut(&Email, &Triage),
 ) {
+    let first_run_limit = opts.first_run_limit;
+    let follow = (a.user.as_str(), opts.follow_days);
     while !stop.load(Ordering::Relaxed) {
         status("connecting");
         // a panic anywhere in a connection attempt becomes an ordinary error and goes through the retry path
@@ -512,7 +547,7 @@ pub fn run(
             ))?;
             status("syncing");
             process_new_until(&mut s, store, triager, &sent, first_run_limit, on_new, stop)?;
-            maintain(&mut s, store, folder.as_deref(), &mut sent, stop);
+            maintain(&mut s, store, folder.as_deref(), &mut sent, stop, follow);
             let mut last_check = std::time::Instant::now();
             status("idle");
             while !stop.load(Ordering::Relaxed) {
@@ -536,13 +571,13 @@ pub fn run(
                     )?;
                     // a busy mailbox changes all the time: do the extra checks at most every 20 seconds then
                     if last_check.elapsed() >= Duration::from_secs(20) {
-                        maintain(&mut s, store, folder.as_deref(), &mut sent, stop);
+                        maintain(&mut s, store, folder.as_deref(), &mut sent, stop, follow);
                         last_check = std::time::Instant::now();
                     }
                     status("idle");
                 } else if last_check.elapsed() >= RECONCILE_EVERY {
                     // nothing arrived, but you may have replied or archived elsewhere
-                    maintain(&mut s, store, folder.as_deref(), &mut sent, stop);
+                    maintain(&mut s, store, folder.as_deref(), &mut sent, stop, follow);
                     last_check = std::time::Instant::now();
                 }
             }

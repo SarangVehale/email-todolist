@@ -121,6 +121,14 @@ impl Default for UpdateCfg {
     }
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(default)]
+pub struct FollowCfg {
+    /// Make a task for a conversation you started when nobody has answered after this many days: 2, 3, 5 or 7.
+    /// 0 turns the feature off.
+    pub days: u32,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct Settings {
@@ -131,6 +139,7 @@ pub struct Settings {
     pub hub: HubCfg,
     pub drafts: DraftCfg,
     pub updates: UpdateCfg,
+    pub followups: FollowCfg,
     /// Apply done/star/priority changes to the real mailbox. Off until the user opts in.
     pub writeback: bool,
     pub first_run_limit: usize,
@@ -145,6 +154,7 @@ impl Default for Settings {
             hub: HubCfg::default(),
             drafts: DraftCfg::default(),
             updates: UpdateCfg::default(),
+            followups: FollowCfg::default(),
             writeback: false,
             first_run_limit: 50,
         }
@@ -282,6 +292,9 @@ impl Settings {
         }
         if !(1..=5).contains(&d.min_priority) || d.daily_cap > 200 {
             bail!("Draft limits are out of range");
+        }
+        if !crate::followup::valid_days(self.followups.days) {
+            bail!("Follow-up reminders can wait 2, 3, 5 or 7 days, or be off");
         }
         if self.hub.port < 1024 {
             bail!("Phone hub port must be 1024 or higher");

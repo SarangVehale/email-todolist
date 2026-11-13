@@ -8,6 +8,15 @@ versions may change behaviour.
 First public build.
 
 ### Added
+- Select several tasks at once (`v` or the Select button) and mark them done, star them, set a priority, snooze them or
+  mute their senders in one step. One undo takes back a batch; muting a sender is reversed from one of its tasks.
+- Your own rules: "if the address is, the domain is or the subject contains this, set the priority or category, or file
+  the mail". The first matching rule is used; a sender you marked important or muted skips them. A rule never raises mail
+  that failed its sender check, a rule on the subject raises only mail from people you write to, and a display name is never
+  matched. "Apply to my list" shows a count first.
+- Follow-up reminders (off by default; 2, 3, 5 or 7 days): a conversation you started that nobody answered becomes a
+  "Waiting" task, and closes itself when a reply arrives. The app only searches your Inbox, and All Mail or Archive when the
+  server has them, for the reply; your own follow-up messages and automatic out-of-office replies do not count as answers.
 - A new app password can be saved in Settings without losing the list, notes or your own tasks.
 
 - Update notice: once the project has a GitHub repository the app asks GitHub once a day whether a newer version exists and

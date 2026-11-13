@@ -27,15 +27,16 @@ Edge cases: restarting after every settings save must not leave two hubs fightin
 run():
     loop until stop:
         connect over TLS (15 s connect, 60 s read/write limits); login
-        sent_folder = folder flagged \Sent  (else common names)
-        sent_index  = recipients and Message-IDs of the last 500 sent messages     # read-only
+        sent_folder = folder flagged \Sent  (else common names; none found: log it and carry on with an empty index)
+        sent_index  = recipients and Message-IDs of the last 500 sent messages, and the conversations you
+                      started among them (subject, first recipient, date)     # read-only
         process_new()
         maintain()                            # section 5b
         loop until stop:
             EXAMINE INBOX (read-only); IDLE for up to 60 s
             if the mailbox changed: process_new(), then maintain() at most every 20 s
             otherwise, every 120 s: maintain()
-        on any error: status = "error"; wait 30 s; reconnect
+        on any error: status = "error"; wait 30 s; reconnect   (300 s, with a plain message, when the server refused the sign-in)
 ```
 Edge cases: network drops, server hangs — timeouts; `a_failing_server…`, IMAP flow tests.
 
@@ -57,8 +58,9 @@ process_new():
             email = parse(raw)           # section 4; failure -> log, continue
             signals = compute(email, sent_index)
             triage  = AI or rules, falling back to rules on any error
-            triage  = apply sender preference (important / mute) unless the sender check failed
-            triage  = rules only, no preference, sender check not failed: shift priority by what the last three
+            triage  = apply sender preference: "important" is not applied to mail that failed its sender check, "mute" always is
+            triage  = no sender preference: apply the first matching user rule (section 5c)
+            triage  = rules only, no preference, no rule set the priority, sender check not failed: shift priority by what the last three
                       corrections of this ADDRESS taught (>= 2, same direction, 1-2 steps); undo removes a correction
             a new message in a snoozed conversation wakes it
             store task; callback(alert, label, auto-draft)
@@ -139,6 +141,74 @@ Edge cases: server errors and odd replies, renumbered folders, forwards, reopene
 `a_task_closes_itself_when_you_replied…`, `forwarding_a_message_is_not_replying_to_it`, `a_server_error_means_unknown…`,
 `a_large_batch_vanishing…`, `a_reopened_task_stays_open…`.
 
+## 5c. Your own rules (`rules.rs`, `store.rs: add, apply_rules`)
+
+```
+rule = { id, field: sender | domain | subject, text, priority?, category?, file }
+valid: <= 50 rules, unique short ids, text 1-100 characters with no control characters, a known field, priority 1-5,
+       a known category, at least one outcome, and `file` never together with a priority
+match: sender  -> the ADDRESS is exactly the text (case-insensitive); a display name or a longer address never matches
+       domain  -> the address is that domain or a sub-domain of it; a leading "@" is ignored ("notacme.com" is not "acme.com")
+       subject -> the subject contains the text          # plain text only: no regular expressions
+may_raise: not for mail that failed its sender check; a `subject` rule only when the sender is known or replying to you
+
+on arrival (Store::add), after the model or rules ranker and the sender preference:
+    if the sender has a preference: skip rules entirely
+    r = first rule that matches (the order is the order in Settings)
+    if r.priority: apply it when it lowers or keeps the priority, or when may_raise; below 4 it also clears urgent
+    if r.category: set it
+    if r.file:     priority = min(priority, 2); urgent = false; needs_reply = false; after storing, mark the task done
+                   (the same call as pressing X, so with write-back on the message is archived)
+    the reason says "A rule of yours ..." without the rule's text (the phone sees reasons)
+    the learned shift is skipped when a rule set the priority
+
+apply to the list (rules_apply, dry run counts only, dry defaults to true):
+    for each open mail task with no sender preference and no correction of its own on record:
+        r = first match; same guards as on arrival; compute the new priority / category / filed state;
+        a rule with a priority of 3 or less also takes urgent off, even when the number already matches
+        count it; change it unless dry; a changed priority resets "learned" and queues the Gmail label
+        nothing is recorded as a correction
+```
+Rules run on every message read, including a new mailbox's first sync; with write-back off, archive and label changes wait
+in the outbox like any other. Edge cases: look-alike addresses and domains, a display name, empty text, the forged-sender
+guard, a stranger's subject, a muted sender, urgent mail ranked low by a rule, filed mail never alerting or drafting,
+hand-corrected tasks left alone, a refused rule set changing nothing, the reason never repeating the rule —
+`phase4.rs` (rules tests).
+
+## 5d. Follow-ups (`followup.rs`, `signals.rs: note_started`, `store.rs`)
+
+```
+off by default (settings.followups.days = 0); 2, 3, 5 or 7 turns it on
+SentIndex.started: every sent message with a clean Message-ID, no In-Reply-To, a subject that is not a forward, at least
+                   one valid recipient (first ten To and Cc) and a Date; newest 200 kept; subject cleaned and cut at 150
+SentIndex.from_addrs: up to 8 addresses your sent mail came from
+own = from_addrs + the login name when it is an address
+
+check(days, stop):                               # inside maintain(), after the Sent index is topped up
+    if days == 0 or stop: return                 # no commands at all, not even for follow-ups already open
+    for each open follow-up (not reopened by the user):
+        if a stored mail replies to it (thread or References has its id; not its own copy, not from `own`, not bulk):
+            close it, closed_by = "replied", remember "answered"        # no search, no server round trip
+    room = 20 - open follow-ups
+    candidates = started messages sent between 14 days and `days` days ago, not yet in the `followups` table,
+                 with a recipient that is not in `own` (the first such one is the subject of the task)
+    for each candidate, newest first, at most 10 per pass; stop if `stop` is set before each step and before each write:
+        answered = a stored mail already replies to it
+                   or, asking the server (folders: INBOX, \All, \Archive when present):
+                      EXAMINE; UID SEARCH NOT FROM "<own>"... NOT HEADER Auto-Submitted "auto-"
+                                          OR HEADER In-Reply-To "<id>" HEADER References "<id>"     # id is a clean <token>
+        any error: stop the pass, remember nothing for this message         # unknown never makes a task
+        answered:       remember "answered"            (never searched again)
+        not answered:   if room > 0: remember "waiting"; make a task of your own "Follow up: <subject>", priority 3,
+                        kind "followup" (the task and its record are written together); room -= 1
+prune follow-up records older than 60 days at start and once a day; sign-out and an account change delete them with their tasks
+```
+Edge cases: server cannot search, replies archived to All Mail or Archive, a reply read and filed by the app, your own
+nudge, an out-of-office notice, a task you closed, a task you reopened, messages to yourself (also with a login that is not
+an address), replies and forwards you sent, a Date in the future, ids that could break a command, more than ten candidates,
+more than twenty open, sign-out in the middle of a check, the feature switched off while follow-ups are open —
+`phase4.rs` and the `followups` module of `imap_flows.rs`.
+
 ## 6. Changing the real mailbox (`writeback.rs`) — only when the user turned it on
 
 ```
@@ -208,6 +278,7 @@ Edge cases: stalled clients, floods, hostile headers, odd methods — `stalled_c
 ```
 every 20 s:
     for tasks whose snooze time has passed: clear the snooze, notify once ("Back from snooze")
+    once a day: the clean-up of old data (done tasks past 90 days, log past 30, corrections past 365, follow-up records past 60)
     if digest time is set, now >= that time, and no digest has been sent today:
         record today; if anything is open: notify "N open · H high · D due [· U urgent] · R draft(s) ready"
         N counts conversations, not messages; snoozed tasks and ones that left the inbox are left out; the urgent
@@ -229,7 +300,8 @@ save_settings(patch):
     validate: server host = letters digits . - only; ports 1..65535, hub port >= 1024;
               ntfy topic = letters digits _ - only; ntfy and Ollama URLs must be http(s) without whitespace;
               times "HH:MM"; quiet hours need both ends; draft tone, signature length, limits in range;
-              alert categories only from the eight known names (empty = all; urgent mail always alerts)
+              alert categories only from the eight known names (empty = all; urgent mail always alerts);
+              follow-up wait 0 (off), 2, 3, 5 or 7 days
     hub disabled -> clear its access code;  hub enabled with no code -> make a new random one
     write atomically (temp file then rename)
 ```

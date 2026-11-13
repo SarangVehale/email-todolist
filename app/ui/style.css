@@ -205,3 +205,22 @@ input::placeholder,textarea::placeholder{color:var(--mute)}
 .thread div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .notice{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:14px 0 0;padding:10px 14px;border:1px solid var(--line2);border-radius:6px;font:400 12.5px var(--mono);color:var(--soft)}
 .notice span{margin-right:auto}
+
+/* select many */
+#bar .gear.on{color:var(--ink);border-color:var(--ink)}
+.selbar{position:sticky;top:0;z-index:4;display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 0;margin:12px 0 4px;background:var(--bg);border-top:1px solid var(--line2);border-bottom:1px solid var(--line2)}
+.selbar b{font:500 11px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--ink);margin-right:8px}
+.selbar .sp{flex:1}
+.selbar .lbl{min-width:0;margin-left:8px}
+.row.selmode .mid{cursor:pointer}
+.row.selmode .star,.row.selmode .pri{opacity:.3;pointer-events:none}
+.row.chosen{background:#ffffff0a}
+.row.chosen .chk{background:var(--ink);border-color:var(--ink);color:var(--bg)}
+.row.chosen .chk svg{display:block}
+
+/* rules editor */
+.rule{padding:12px 0;border-bottom:1px solid var(--line)}
+.rrow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:6px 0}
+.rrow select{width:auto;flex:1;min-width:120px}
+.rrow input[type=text]{flex:2;min-width:150px}
+.rrow .lbl{min-width:0}

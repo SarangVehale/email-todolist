@@ -4,8 +4,32 @@ use mailparse::MailHeaderMap;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
+/// How many of the newest conversations-you-started the index keeps for the follow-up check.
+const MAX_STARTED: usize = 200;
+/// How many of your own sending addresses are remembered.
+const MAX_OWN: usize = 8;
+
+/// A message you sent that began a conversation (it replies to nothing), with enough to ask the server whether anybody
+/// answered it. The Message-ID is always a clean `<token>`, so it can be placed in a search command.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SentMsg {
+    pub message_id: String,
+    /// The recipient the follow-up is about (lower-case address): the first one who is not you.
+    pub to: String,
+    /// Every recipient (To and Cc, lower-case, at most ten), so the check can leave out your own address.
+    pub recipients: Vec<String>,
+    pub subject: String,
+    /// Unix seconds from the Date header.
+    pub sent_at: f64,
+}
+
 #[derive(Default)]
 pub struct SentIndex {
+    /// Newest first, at most MAX_STARTED; see `SentMsg`.
+    pub started: Vec<SentMsg>,
+    /// The addresses your sent mail was written from (at most MAX_OWN): a login name is not always an address, and
+    /// aliases exist, so the follow-up check needs these to tell your own mail from a reply.
+    pub from_addrs: HashSet<String>,
     pub recipients: HashSet<String>,
     pub message_ids: HashSet<String>,
     /// Message-IDs the user has answered: what the In-Reply-To of a sent message names. References is deliberately
@@ -32,6 +56,17 @@ impl SentIndex {
             if let Some(id) = headers.get_first_value("Message-ID") {
                 self.message_ids.insert(id.trim().to_string());
             }
+            if self.from_addrs.len() < MAX_OWN {
+                if let Some((_, a)) =
+                    addresses(&headers.get_first_value("From").unwrap_or_default())
+                        .into_iter()
+                        .next()
+                {
+                    if crate::mail::valid_address(&a) {
+                        self.from_addrs.insert(a);
+                    }
+                }
+            }
             let subject = headers.get_first_value("Subject").unwrap_or_default();
             // Only In-Reply-To names the message that was answered. References lists the whole conversation, and
             // replying to the newest message does not answer the older ones in it.
@@ -39,7 +74,51 @@ impl SentIndex {
                 for v in headers.get_all_values("In-Reply-To") {
                     self.replied_to.extend(crate::mail::header_ids(&v));
                 }
+                self.note_started(&headers, &subject);
             }
+        }
+    }
+
+    /// A message with no In-Reply-To is one you started: remember it for the follow-up check.
+    fn note_started(&mut self, headers: &[mailparse::MailHeader], subject: &str) {
+        if !headers.get_all_values("In-Reply-To").is_empty() {
+            return;
+        }
+        let id = crate::mail::clean_message_id(
+            &headers.get_first_value("Message-ID").unwrap_or_default(),
+        );
+        let recipients: Vec<String> = ["To", "Cc"]
+            .iter()
+            .flat_map(|k| headers.get_all_values(k))
+            .flat_map(|v| addresses(&v))
+            .map(|(_, a)| a)
+            .filter(|a| crate::mail::valid_address(a))
+            .take(10)
+            .collect();
+        let sent_at =
+            mailparse::dateparse(&headers.get_first_value("Date").unwrap_or_default()).ok();
+        let (Some(to), Some(sent_at)) = (recipients.first().cloned(), sent_at) else {
+            return;
+        };
+        if id.is_empty() || self.started.iter().any(|m| m.message_id == id) {
+            return;
+        }
+        // The subject comes out of a header the sender chose, and ends up in a task title: no control characters.
+        let subject: String = subject
+            .chars()
+            .filter(|c| !c.is_control())
+            .take(150)
+            .collect();
+        self.started.push(SentMsg {
+            message_id: id,
+            to,
+            recipients,
+            subject: subject.trim().to_string(),
+            sent_at: sent_at as f64,
+        });
+        if self.started.len() > MAX_STARTED {
+            self.started.sort_by(|a, b| b.sent_at.total_cmp(&a.sent_at));
+            self.started.truncate(MAX_STARTED);
         }
     }
 }

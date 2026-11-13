@@ -31,6 +31,12 @@ pub fn digest_due(digest_time: &str, now: u32, last_sent_date: Option<&str>, tod
     clock_minutes(digest_time).is_some_and(|t| now >= t) && last_sent_date != Some(today)
 }
 
+/// The clean-up of old data runs once a day, not only when the app starts: a session left open for weeks must not
+/// keep finished tasks, log lines and follow-up records past what PRIVACY.md says.
+pub fn prune_due(last_run_date: Option<&str>, today: &str) -> bool {
+    last_run_date != Some(today)
+}
+
 pub fn now_minutes() -> u32 {
     use chrono::Timelike;
     let n = Local::now();
@@ -153,6 +159,10 @@ fn tick(core: &Arc<Core>) {
         }
     }
     let today = now.format("%Y-%m-%d").to_string();
+    if prune_due(store.meta_get("last_prune").as_deref(), &today) {
+        let _ = store.prune(90, 30);
+        let _ = store.meta_set("last_prune", &today);
+    }
     check_for_update(core, &store, &s, &today);
     if digest_due(
         &s.alerts.digest_time,

@@ -1,7 +1,8 @@
 //! SQLite store: tasks, reply drafts, user corrections, activity log and the mailbox write-back outbox.
 //! Each thread opens its own connection (WAL + busy timeout), so no shared locking is needed.
 use crate::mail::Email;
-use crate::signals::Signals;
+use crate::rules::{self, Rule};
+use crate::signals::{SentMsg, Signals};
 use crate::triage::Triage;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
@@ -69,6 +70,19 @@ pub struct Task {
     pub draft: Option<Draft>,
     /// "important", "mute" or empty (normal) for this sender.
     pub pref: String,
+    /// "followup" for a task the app made because nobody answered something you sent; empty otherwise.
+    pub kind: String,
+}
+
+/// What `apply_rules` did, or with a dry run would do.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Serialize)]
+pub struct RuleReport {
+    /// Open mail tasks a rule applies to.
+    pub matched: usize,
+    /// Of those, the ones whose priority, category or status would change.
+    pub changed: usize,
+    /// Of those, the ones that would be marked done.
+    pub filed: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -110,6 +124,13 @@ CREATE TABLE IF NOT EXISTS outbox (
   id INTEGER PRIMARY KEY AUTOINCREMENT, uid INTEGER, op TEXT, arg TEXT DEFAULT '', tries INTEGER DEFAULT 0, at REAL
 );
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS rules (
+  id TEXT PRIMARY KEY, ord INTEGER NOT NULL, field TEXT NOT NULL, text TEXT NOT NULL,
+  priority INTEGER, category TEXT, file INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS followups (
+  message_id TEXT PRIMARY KEY, state TEXT NOT NULL, at REAL NOT NULL, task_uid INTEGER NOT NULL DEFAULT 0
+);
 ";
 
 /// Columns added after the first release. Existing databases are upgraded in place.
@@ -135,6 +156,8 @@ const ADDED_COLUMNS: &[(&str, &str)] = &[
     ("gone", "INTEGER DEFAULT 0"),
     // priority steps added or removed because of the user's earlier corrections of this sender
     ("learned", "INTEGER DEFAULT 0"),
+    // "followup" for tasks the app made because a message you sent got no reply
+    ("kind", "TEXT DEFAULT ''"),
 ];
 
 /// Same idea for the corrections table.
@@ -142,7 +165,7 @@ const ADDED_OVERRIDE_COLUMNS: &[(&str, &str)] =
     &[("addr", "TEXT DEFAULT ''"), ("uid", "INTEGER DEFAULT 0")];
 
 const SELECT: &str = "SELECT t.uid,t.message_id,t.sender,t.addr,t.subject,t.received,t.priority,t.category,t.action,t.urgent,t.status,t.star,\
-t.excerpt,t.why,t.signals,t.needs_reply,t.due,t.snooze_until,t.reply_to,d.body,d.source,d.saved,d.updated,p.level,t.auth_fail,t.attachments,t.attachment_count,t.unsubscribe,t.note,t.thread,t.closed_by,t.gone,t.learned \
+t.excerpt,t.why,t.signals,t.needs_reply,t.due,t.snooze_until,t.reply_to,d.body,d.source,d.saved,d.updated,p.level,t.auth_fail,t.attachments,t.attachment_count,t.unsubscribe,t.note,t.thread,t.closed_by,t.gone,t.learned,t.kind \
 FROM tasks t LEFT JOIN drafts d ON d.uid=t.uid LEFT JOIN sender_prefs p ON p.addr=t.addr";
 
 fn domain(a: &str) -> String {
@@ -201,6 +224,7 @@ fn row(r: &rusqlite::Row) -> rusqlite::Result<Task> {
         learned: r.get(32)?,
         draft,
         pref: r.get::<_, Option<String>>(23)?.unwrap_or_default(),
+        kind: r.get(33)?,
     })
 }
 
@@ -406,11 +430,56 @@ impl Store {
             }
             _ => {}
         }
+        // The user's own rules. A sender with a saved preference skips them (that is the more specific instruction).
+        // Mail that failed its sender check only receives what lowers it, so a forged From address cannot use an
+        // "this address matters" rule to climb.
+        let (mut by_rule_priority, mut file) = (false, false);
+        if pref.is_none() {
+            let all = self.rules();
+            if let Some(r) = rules::first_match(&all, &e.sender_addr, &e.subject) {
+                let mut note = String::new();
+                if let Some(p) = r.priority {
+                    if p <= t.priority || rules::may_raise(r, e.auth_fail, s.known || s.reply) {
+                        t.priority = p;
+                        if p <= 3 {
+                            t.urgent = false; // urgent bypasses quiet hours; "this is unimportant" must not leave it on
+                        }
+                        by_rule_priority = true;
+                        note = format!("A rule of yours set the priority to {p}.");
+                    }
+                }
+                if let Some(c) = &r.category {
+                    t.category = c.clone();
+                    if note.is_empty() {
+                        note = format!(
+                            "{} (category set by a rule of yours).",
+                            t.why.trim_end_matches('.')
+                        );
+                    }
+                }
+                if r.file {
+                    // filed mail is ranked low and never alerts or gets an automatic draft
+                    t.priority = t.priority.min(2);
+                    t.urgent = false;
+                    t.needs_reply = false;
+                    file = true;
+                    note = "Filed by a rule of yours.".into();
+                }
+                if !note.is_empty() {
+                    t.why = note;
+                }
+            }
+        }
         // What the user taught by correcting this sender before. Only the rules ranker is shifted (a model already
-        // sees the corrections in its prompt), never a sender with an explicit preference, never mail that failed its
-        // sender check, and it never makes anything urgent.
+        // sees the corrections in its prompt), never a sender with an explicit preference or a rule that set the
+        // priority, never mail that failed its sender check, and it never makes anything urgent.
         let mut learned = 0;
-        if pref.is_none() && !e.auth_fail && t.why.starts_with("Rule-based") {
+        if pref.is_none()
+            && !by_rule_priority
+            && !file
+            && !e.auth_fail
+            && t.why.starts_with("Rule-based")
+        {
             let shift = self.learned_shift(&e.sender_addr);
             if shift != 0 {
                 let new = (t.priority as i32 + shift).clamp(1, 5) as u8;
@@ -447,7 +516,143 @@ impl Store {
             if t.urgent { ", urgent" } else { "" },
             if t.needs_reply { ", needs reply" } else { "" }
         ))?;
+        if file {
+            self.set_done(e.uid, true)?; // exactly what pressing X does, including the archive with write-back on
+        }
         Ok(t)
+    }
+
+    // ---- your rules ----
+    pub fn rules(&self) -> Vec<Rule> {
+        let Ok(mut q) = self
+            .db
+            .prepare("SELECT id,field,text,priority,category,file FROM rules ORDER BY ord")
+        else {
+            return vec![];
+        };
+        q.query_map([], |r| {
+            Ok(Rule {
+                id: r.get(0)?,
+                field: r.get(1)?,
+                text: r.get(2)?,
+                priority: r.get(3)?,
+                category: r.get(4)?,
+                file: r.get::<_, i32>(5)? != 0,
+            })
+        })
+        .map(|rows| rows.filter_map(Result::ok).collect())
+        .unwrap_or_default()
+    }
+
+    /// Replaces the whole rule list, in order. A list that fails validation changes nothing.
+    pub fn set_rules(&self, list: &[Rule]) -> anyhow::Result<()> {
+        rules::validate(list)?;
+        let tx = self.db.unchecked_transaction()?;
+        tx.execute("DELETE FROM rules", [])?;
+        for (i, r) in list.iter().enumerate() {
+            tx.execute(
+                "INSERT INTO rules(id,ord,field,text,priority,category,file) VALUES(?1,?2,?3,?4,?5,?6,?7)",
+                params![r.id, i as i64, r.field, r.text.trim(), r.priority, r.category, r.file as i32],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    fn auth_failed(&self, uid: u32) -> bool {
+        self.db
+            .query_row("SELECT auth_fail FROM tasks WHERE uid=?1", [uid], |r| {
+                r.get::<_, i32>(0)
+            })
+            .unwrap_or(0)
+            != 0
+    }
+
+    /// Runs the rules over the open mail in the list. `dry` only counts. Tasks with a sender preference, tasks whose
+    /// priority the user already corrected by hand and tasks you added yourself are left alone, and nothing here is
+    /// recorded as a correction, so rules never teach the ranker.
+    pub fn apply_rules(&self, dry: bool) -> anyhow::Result<RuleReport> {
+        let mut report = RuleReport::default();
+        let all = self.rules();
+        if all.is_empty() {
+            return Ok(report);
+        }
+        let corrected: std::collections::HashSet<u32> = {
+            let mut q = self
+                .db
+                .prepare("SELECT DISTINCT uid FROM overrides WHERE uid<>0")?;
+            let rows = q.query_map([], |r| r.get::<_, u32>(0))?;
+            rows.filter_map(Result::ok).collect()
+        };
+        for t in self.all_tasks()? {
+            if t.status != "open"
+                || t.uid >= LOCAL_UID_BASE
+                || !t.pref.is_empty()
+                || corrected.contains(&t.uid)
+            {
+                continue;
+            }
+            let Some(r) = rules::first_match(&all, &t.addr, &t.subject) else {
+                continue;
+            };
+            report.matched += 1;
+            let forged = self.auth_failed(t.uid);
+            let mut priority = t.priority;
+            let mut applied = false; // the rule's priority was allowed to take effect
+            if let Some(p) = r.priority {
+                if p <= t.priority
+                    || rules::may_raise(r, forged, t.signals.known || t.signals.reply)
+                {
+                    priority = p;
+                    applied = true;
+                }
+            }
+            let category = r.category.clone().unwrap_or_else(|| t.category.clone());
+            if r.file {
+                priority = priority.min(2);
+            }
+            // a rule that sets a priority of 3 or less takes the urgent flag off, as it does for new mail
+            let calms = applied && priority <= 3 && t.urgent;
+            if priority == t.priority && category == t.category && !r.file && !calms {
+                continue;
+            }
+            report.changed += 1;
+            report.filed += r.file as usize;
+            if dry {
+                continue;
+            }
+            let why = if r.file {
+                "Filed by a rule of yours.".to_string()
+            } else if priority != t.priority {
+                format!("A rule of yours set the priority to {priority}.")
+            } else if category != t.category {
+                format!(
+                    "{} (category set by a rule of yours).",
+                    t.why.trim_end_matches('.')
+                )
+            } else {
+                t.why.clone()
+            };
+            self.db.execute(
+                "UPDATE tasks SET priority=?1, category=?2, why=?3, learned=CASE WHEN ?1<>?4 THEN 0 ELSE learned END, \
+                 urgent=CASE WHEN ?7=1 OR ?5=1 THEN 0 ELSE urgent END, \
+                 needs_reply=CASE WHEN ?5=1 THEN 0 ELSE needs_reply END WHERE uid=?6",
+                params![priority, category, why, t.priority, r.file as i32, t.uid, calms as i32],
+            )?;
+            if priority != t.priority {
+                self.queue(t.uid, "label", &format!("AI/P{priority}"))?;
+            }
+            if r.file {
+                self.set_done(t.uid, true)?;
+            }
+        }
+        if !dry && report.changed > 0 {
+            self.log(&format!(
+                "your rules were applied to the list: {} changed, {} filed",
+                report.changed, report.filed
+            ))?;
+        }
+        Ok(report)
     }
 
     pub fn all_tasks(&self) -> anyhow::Result<Vec<Task>> {
@@ -478,9 +683,11 @@ impl Store {
         // Reopening a task the app closed by itself (you had replied): the mailbox was never changed, so there is
         // nothing to unarchive, and the task must not be closed again by the next pass.
         let auto = !done && !t.closed_by.is_empty();
+        // a follow-up you reopen stays open, whoever closed it: the app must not close it again when a reply turns up
+        let keep = auto || (!done && t.kind == "followup");
         self.db.execute(
             "UPDATE tasks SET status=?1, snooze_until=0, closed_by='', keep_open=CASE WHEN ?3=1 THEN 1 ELSE keep_open END, done_at=CASE WHEN ?1='done' THEN CAST(strftime('%s','now') AS INTEGER) ELSE 0 END WHERE uid=?2",
-            params![if done { "done" } else { "open" }, uid, auto as i32],
+            params![if done { "done" } else { "open" }, uid, keep as i32],
         )?;
         if !auto {
             self.queue(uid, if done { "archive" } else { "unarchive" }, "")?;
@@ -810,23 +1017,138 @@ impl Store {
         {
             return Ok(None);
         }
-        let top: Option<u32> = self
-            .db
-            .query_row(
-                "SELECT MAX(uid) FROM tasks WHERE uid >= ?1",
-                [LOCAL_UID_BASE],
-                |r| r.get(0),
-            )
-            .optional()?
-            .flatten();
-        let uid = top.map_or(LOCAL_UID_BASE, |t| t + 1);
+        // The id is chosen inside the INSERT, so two threads adding at the same moment cannot pick the same one.
         self.db.execute(
             "INSERT INTO tasks(uid,message_id,sender,addr,subject,received,priority,category,action,urgent,excerpt,why,signals,body,needs_reply,due,reply_to,refs,auth_fail)
-             VALUES(?1,'','You','',?2,strftime('%s','now'),?3,'personal',?2,0,'','Added by you','{}','',0,?4,'','',0)",
-            params![uid, title, priority, due],
+             VALUES(COALESCE((SELECT MAX(uid)+1 FROM tasks WHERE uid>=?4), ?4),'','You','',?1,strftime('%s','now'),?2,'personal',?1,0,'','Added by you','{}','',0,?3,'','',0)",
+            params![title, priority, due, LOCAL_UID_BASE],
         )?;
+        let uid = self.db.last_insert_rowid() as u32;
         self.log(&format!("added task “{title}”"))?;
         Ok(Some(uid))
+    }
+
+    // ---- follow-ups: "waiting on a reply" ----
+    /// What was decided about a sent message: "waiting" (a task was made), "answered", or None (never looked at).
+    pub fn followup_state(&self, message_id: &str) -> Option<String> {
+        self.db
+            .query_row(
+                "SELECT state FROM followups WHERE message_id=?1",
+                [message_id],
+                |r| r.get(0),
+            )
+            .optional()
+            .ok()
+            .flatten()
+    }
+
+    /// Remembers the outcome for a sent message so it is never looked at again. `at` is when it was first seen.
+    pub fn mark_followup(&self, message_id: &str, state: &str, at: f64) -> anyhow::Result<()> {
+        self.db.execute(
+            "INSERT INTO followups(message_id,state,at) VALUES(?1,?2,?3) ON CONFLICT(message_id) DO UPDATE SET state=excluded.state",
+            params![message_id, state, at],
+        )?;
+        Ok(())
+    }
+
+    /// Makes the task for a sent message nobody answered. Returns None when this message was looked at before, so a
+    /// task you closed is never made again.
+    pub fn add_followup(&self, m: &SentMsg, now: f64) -> anyhow::Result<Option<u32>> {
+        if self.followup_state(&m.message_id).is_some() {
+            return Ok(None);
+        }
+        let subject: String = m.subject.chars().take(150).collect();
+        let title = format!("Follow up: {subject}");
+        let day = chrono::DateTime::from_timestamp(m.sent_at as i64, 0)
+            .map(|d| d.with_timezone(&chrono::Local).format("%-d %b").to_string())
+            .unwrap_or_default();
+        let excerpt = format!(
+            "You wrote to {} on {day} about “{subject}”. Nobody has replied yet.",
+            m.to
+        );
+        // the task and its record are written together or not at all
+        let tx = self.db.unchecked_transaction()?;
+        tx.execute(
+            "INSERT INTO tasks(uid,message_id,sender,addr,subject,received,priority,category,action,urgent,excerpt,why,signals,body,needs_reply,due,reply_to,refs,auth_fail,kind)
+             VALUES(COALESCE((SELECT MAX(uid)+1 FROM tasks WHERE uid>=?4), ?4),'','You','',?1,?2,3,'personal',?1,0,?3,'Nobody has replied to something you sent','{}','',0,'','','',0,'followup')",
+            params![title, now, excerpt, LOCAL_UID_BASE],
+        )?;
+        let uid = tx.last_insert_rowid() as u32;
+        tx.execute(
+            "INSERT INTO followups(message_id,state,at,task_uid) VALUES(?1,'waiting',?2,?3)",
+            params![m.message_id, now, uid],
+        )?;
+        tx.commit()?;
+        self.log(&format!("waiting on a reply: “{subject}”"))?;
+        Ok(Some(uid))
+    }
+
+    /// Has a reply to this sent message already arrived and been stored? Mail the app has read is the best evidence it
+    /// has: it covers a reply that was archived or moved since (by the app's own "done" included), and costs the server
+    /// nothing. Not counted: the sent message's own copy (a Bcc to yourself), anything from one of your own addresses
+    /// (a nudge you sent in the same thread), and automatic replies (out-of-office notices carry bulk headers).
+    pub fn has_local_reply(&self, message_id: &str, own: &[String]) -> bool {
+        let Ok(mut q) = self.db.prepare(
+            "SELECT refs, thread, signals, addr FROM tasks WHERE uid<?1 AND message_id<>?2 AND (thread=?2 OR instr(refs, ?2)>0)",
+        ) else {
+            return false;
+        };
+        q.query_map(params![LOCAL_UID_BASE, message_id], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+            ))
+        })
+        .map(|rows| {
+            rows.filter_map(Result::ok)
+                .any(|(refs, thread, signals, addr)| {
+                    (thread == message_id || refs.split(' ').any(|t| t == message_id))
+                        && !own.contains(&addr)
+                        && !serde_json::from_str::<Signals>(&signals).is_ok_and(|g| g.bulk)
+                })
+        })
+        .unwrap_or(false)
+    }
+
+    /// Open follow-up tasks the app may still close by itself: (task id, Message-ID of the sent message).
+    pub fn open_followups(&self) -> Vec<(u32, String)> {
+        let Ok(mut q) = self.db.prepare(
+            "SELECT t.uid, f.message_id FROM tasks t JOIN followups f ON f.task_uid=t.uid \
+             WHERE t.kind='followup' AND t.status='open' AND t.keep_open=0 ORDER BY t.uid",
+        ) else {
+            return vec![];
+        };
+        q.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .map(|rows| rows.filter_map(Result::ok).collect())
+            .unwrap_or_default()
+    }
+
+    /// Closes a follow-up because a reply arrived. Leaves tasks you reopened, and anything that is not a follow-up,
+    /// alone. Never touches the mailbox.
+    pub fn close_followup(&self, uid: u32) -> anyhow::Result<bool> {
+        let n = self.db.execute(
+            "UPDATE tasks SET status='done', snooze_until=0, closed_by='replied', done_at=CAST(strftime('%s','now') AS INTEGER) \
+             WHERE uid=?1 AND kind='followup' AND status='open' AND keep_open=0",
+            [uid],
+        )?;
+        if n > 0 {
+            self.db.execute(
+                "UPDATE followups SET state='answered' WHERE task_uid=?1",
+                [uid],
+            )?;
+            self.log(&format!("closed “{}”: they replied", self.label(uid)))?;
+        }
+        Ok(n > 0)
+    }
+
+    /// Forgets follow-up records older than 60 days. A sent message that old is outside the 14-day window anyway.
+    pub fn prune_followups(&self, now: f64) -> anyhow::Result<usize> {
+        Ok(self.db.execute(
+            "DELETE FROM followups WHERE at < ?1",
+            [now - 60.0 * 86400.0],
+        )?)
     }
 
     // ---- outbox ----
@@ -1029,6 +1351,10 @@ impl Store {
             "DELETE FROM overrides WHERE at < CAST(strftime('%s','now') AS INTEGER) - 365 * 86400",
             [],
         )?;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0.0, |d| d.as_secs_f64());
+        self.prune_followups(now)?;
         Ok((tasks, logs))
     }
 
@@ -1048,7 +1374,7 @@ impl Store {
     /// Sign-out: forget everything this app stored about the mailbox and the user's corrections.
     pub fn wipe_all(&self) -> anyhow::Result<()> {
         self.db.execute_batch(
-            "DELETE FROM tasks; DELETE FROM drafts; DELETE FROM outbox; DELETE FROM meta; DELETE FROM log; DELETE FROM overrides; DELETE FROM sender_prefs;",
+            "DELETE FROM tasks; DELETE FROM drafts; DELETE FROM outbox; DELETE FROM meta; DELETE FROM log; DELETE FROM overrides; DELETE FROM sender_prefs; DELETE FROM rules; DELETE FROM followups;",
         )?;
         // Best effort: fold the journal into the file and rewrite it, so no copy of the deleted rows is left
         // in the write-ahead log or in unused pages. A busy database skips this; secure_delete already zeroed rows.
@@ -1070,11 +1396,15 @@ impl Store {
         Ok(())
     }
 
-    /// Forget everything tied to a mailbox (used when the account changes). Sender preferences stay.
-    /// The account changed: everything tied to the old mailbox goes, including what was learned about its senders.
+    /// Forget everything tied to a mailbox (used when the account changes). Sender preferences and your rules stay.
+    /// The account changed: everything tied to the old mailbox goes, including what was learned about its senders and
+    /// the follow-ups about mail sent from it.
     pub fn reset_for_new_account(&self) -> anyhow::Result<()> {
         self.reset_mailbox_data()?;
         self.db.execute("DELETE FROM overrides", [])?;
+        self.db
+            .execute("DELETE FROM tasks WHERE kind='followup'", [])?;
+        self.db.execute("DELETE FROM followups", [])?;
         Ok(())
     }
 

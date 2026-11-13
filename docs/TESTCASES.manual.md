@@ -99,3 +99,20 @@ a case changes mail. Record the result and, for any failure, the **Activity log*
 | MT-63 | Start with the computer on | Starts hidden in the tray after sign-in |
 | MT-64 | Second launch | Focuses the running window instead of starting a second copy |
 | MT-65 | Uninstall | Program, shortcut and registry entry removed; data folder remains (documented) |
+
+## H. Select many, your rules, follow-ups
+
+| ID | Case | Expected |
+| --- | --- | --- |
+| MT-70 | Press `v`, move with Shift+`j`, press `x`, then `z` | The rows between are selected, all go to Done, one undo brings them all back |
+| MT-71 | Select rows from three senders, press "Mute senders" twice | Asks twice, all three senders show "Muted", their open mail drops to priority 1 |
+| MT-72 | Add a rule "Domain is <a real sender's domain> then Priority 5", save, send yourself a mail from it | New mail arrives at priority 5 with "Your rule: ..." in its reason |
+| MT-73 | "Apply to my list" with that rule | Shows how many would change, needs a second click, changes only tasks you have not corrected |
+| MT-74 | A rule "File away" with write-back on | New matching mail appears in Done and is archived in the real mailbox, with no alert |
+| MT-75 | Turn follow-ups on (2 days), write a new mail to a second address, wait | After two days a "Waiting" task appears; replying from the other address closes it ("They replied") |
+| MT-76 | Gmail: the reply was archived straight away | The conversation is still found as answered (the All Mail folder is searched) |
+| MT-77 | A server that refuses header searches | No follow-up tasks appear, and the Log says once that replies could not be checked |
+| MT-78 | Turn follow-ups off while one is open | No search is sent any more; the task stays until you close it |
+| MT-79 | On Gmail, with a Waiting task open, send yourself a nudge inside the same thread | The task stays open: your own mail is not an answer |
+| MT-80 | The person you wrote to has an out-of-office reply | It does not close the task or stop one being made |
+| MT-81 | A rule "Address is" with a look-alike address in the From line | The look-alike mail is not raised by the rule |

@@ -243,6 +243,29 @@ quitting the app twice in the middle of one slow message (which counts like a cr
 the hub dropping phones on unusual public-address networks without a log line, manual-task ids sharing the IMAP UID range, and re-matching tasks by Message-ID after a UIDVALIDITY
 change.
 
+## Review 5 (Phase 4: select many, rules, follow-ups; council, drift pass and an Opus review loop, 2026-11-13)
+
+Two model seats (Opus and Sonnet) answered "should this ship?" blind; both said **ship with caveats**, and they agreed on the
+defects. Two fresh-eyes passes then compared every document and in-app promise with the code (29 problems). An Opus reviewer
+then went through the final change in two rounds and approved it. Full ledger: `docs/2026-11-13_PHASE4_REVIEW.md`.
+
+| Finding | Fix |
+| --- | --- |
+| **A `sender` rule matched by substring and on the display name.** A stranger could send from `dana@studio.example.evil.example`, or from any address with the display name "Your Accountant", with valid SPF and DKIM, and climb to priority 5 with an alert. The forged-sender guard only catches `dkim=fail`-style forgeries, not a real message from the attacker's own domain | A `sender` rule is the exact address and a display name is never matched. A rule may raise a priority only for mail that passed its sender check, and a `subject` rule only for someone you write to (anyone can choose a subject). The same guards apply on arrival and in "Apply to my list" |
+| **Your own nudge and out-of-office replies counted as replies to a follow-up.** On Gmail, All Mail holds your own mail, so reminding someone closed the reminder with a false "They replied", or stopped it ever being made | The reply search leaves out your own addresses and anything marked `Auto-Submitted`; a reply the app has already read is recognised locally, even after it was filed away |
+| **On servers without All Mail, a reply you archived (including by pressing X) produced a false "nobody has replied" task** | The `\Archive` folder is searched too, and replies already read by the app are checked first |
+| **Open follow-ups beyond the tenth were never rechecked and every open one cost a search on every pass** | Open follow-ups now close from mail the app has already read, with no search; at most 20 are open at once |
+| **The follow-up check ignored the stop flag**, so it could write a task naming a recipient into a database that "Sign out and reset" had just wiped | The check stops before each step and each write |
+| **The "kept 60 days" promise for follow-up records was false: nothing deleted them**; the same gap meant the 90-day and 30-day clean-up ran only at start-up | The routine clean-up removes them, and the scheduler runs it once a day |
+| **The reason line a rule left on a task repeated the rule's text, and the phone sees task reasons** | The reason says "a rule of yours" without the text |
+| Two threads adding a task at the same moment could pick the same id, and a follow-up's task and record were written separately | The id is chosen inside the `INSERT`, and the follow-up writes are one transaction |
+| Bulk priority changed every message of a conversation, so one click recorded one ranker correction per message | It changes the newest message of each selection, like pressing 1-5 on a row |
+| The select keys skipped the limits the bar enforces (snoozing already-snoozed rows lost their original times on undo) | Keys and buttons go through the same check |
+
+Accepted, with the reasons in `docs/designs/phase4.md`: a reply moved to another folder before the app read it, an
+autoresponder that does not mark itself, a substring `FROM` match, a reopened follow-up not counting toward the cap, and a
+list reply not closing an open follow-up.
+
 ## Reporting a vulnerability
 
 Please report privately to the maintainer rather than opening a public issue. Add a contact address

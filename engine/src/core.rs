@@ -161,7 +161,10 @@ impl Core {
                     &acct,
                     &store,
                     triager.as_ref(),
-                    s.first_run_limit,
+                    watcher::SyncOptions {
+                        first_run_limit: s.first_run_limit,
+                        follow_days: s.followups.days,
+                    },
                     &stop,
                     &status,
                     &mut |e: &Email, t: &Triage| {
@@ -288,7 +291,7 @@ impl Core {
         } else {
             serde_json::to_value(&s)?
         };
-        Ok(json!({
+        let mut state = json!({
             "settings": settings,
             "tasks": store.all_tasks()?,
             "log": store.recent_log(100).into_iter().map(|(at, msg)| json!({"at": at, "msg": msg})).collect::<Vec<_>>(),
@@ -307,7 +310,12 @@ impl Core {
                 )
                 .map(|u| json!({"version": u.version, "url": u.url}))
             },
-        }))
+        });
+        // what the user told the app to look for is private to this computer: the phone never sees it
+        if !public {
+            state["rules"] = serde_json::to_value(store.rules())?;
+        }
+        Ok(state)
     }
 
     /// Commands reachable from the phone hub (everything else is desktop-only).

@@ -41,6 +41,7 @@ struct State {
     omit_uid: bool,
     refuse_login: bool,
     no_body_for: Option<u32>,
+    refuse_search: bool,
 }
 
 struct Server {
@@ -217,6 +218,10 @@ fn serve(stream: TcpStream, st: Arc<Mutex<State>>) {
                 let folder_name = sel.clone().unwrap_or_default();
                 match sub.to_uppercase().as_str() {
                     "SEARCH" => {
+                        if s.refuse_search {
+                            let _ = w.write_all(format!("{tag} NO search refused\r\n").as_bytes());
+                            continue;
+                        }
                         let f = s
                             .folders
                             .iter()
@@ -242,6 +247,44 @@ fn serve(stream: TcpStream, st: Arc<Mutex<State>>) {
                                         h.to_lowercase().starts_with("message-id:")
                                             && h.to_lowercase().contains(&needle)
                                     })
+                                })
+                                .map(|m| m.uid)
+                                .collect()
+                        } else if let Some(at) = a2.find("OR HEADER In-Reply-To ") {
+                            // [NOT FROM "x"]... [NOT HEADER Auto-Submitted "auto-"] OR HEADER In-Reply-To "<id>" HEADER References "<id>"
+                            let (front, v) =
+                                (&a2[..at], &a2[at + "OR HEADER In-Reply-To ".len()..]);
+                            let needle =
+                                unquote(v.split(" HEADER References ").next().unwrap_or(""))
+                                    .to_lowercase();
+                            let not_from: Vec<String> = front
+                                .split("NOT FROM ")
+                                .skip(1)
+                                .map(|x| {
+                                    unquote(x.split(" NOT ").next().unwrap_or("")).to_lowercase()
+                                })
+                                .collect();
+                            let no_auto = front.contains("NOT HEADER Auto-Submitted \"auto-\"");
+                            f.msgs
+                                .iter()
+                                .filter(|m| {
+                                    let head =
+                                        String::from_utf8_lossy(header_of(&m.raw)).to_lowercase();
+                                    let lines: Vec<&str> = head.lines().collect();
+                                    let from = lines
+                                        .iter()
+                                        .find(|h| h.starts_with("from:"))
+                                        .copied()
+                                        .unwrap_or("");
+                                    let auto = lines.iter().any(|h| {
+                                        h.starts_with("auto-submitted:") && h.contains("auto-")
+                                    });
+                                    lines.iter().any(|h| {
+                                        (h.starts_with("in-reply-to:")
+                                            || h.starts_with("references:"))
+                                            && h.contains(&needle)
+                                    }) && !not_from.iter().any(|a| from.contains(a.as_str()))
+                                        && !(no_auto && auto)
                                 })
                                 .map(|m| m.uid)
                                 .collect()
@@ -1620,4 +1663,621 @@ fn a_message_that_never_arrives_does_not_block_the_sync_for_ever() {
             .any(|l| l.contains("message 1") && l.contains("no content")),
         "and it is logged, not silent: {log:?}"
     );
+}
+
+// ───────────────────────── follow-ups (Phase 4) ─────────────────────────
+mod followups {
+    use super::*;
+    use engine::followup::check;
+    use std::sync::atomic::AtomicBool;
+
+    const DAY: f64 = 86400.0;
+
+    fn now() -> f64 {
+        chrono::Utc::now().timestamp() as f64
+    }
+
+    /// A message you sent `ago_days` ago that starts a conversation.
+    fn sent_msg(uid: u32, id: &str, to: &str, ago_days: f64) -> Msg {
+        let date = chrono::DateTime::from_timestamp((now() - ago_days * DAY) as i64, 0)
+            .unwrap()
+            .to_rfc2822();
+        msg(
+            uid,
+            raw_mail(
+                &format!("From: me@example.com\nTo: {to}\nSubject: Quote for {id}\nMessage-ID: {id}\nDate: {date}"),
+                "Could you send a quote?",
+            ),
+        )
+    }
+
+    fn reply_msg(uid: u32, to_id: &str) -> Msg {
+        msg(
+            uid,
+            raw_mail(
+                &format!("From: Bob <bob@x.com>\nSubject: Re: Quote\nMessage-ID: <reply{uid}@x>\nIn-Reply-To: {to_id}\nReferences: {to_id}\nDate: Tue, 10 Nov 2026 09:00:00 +0000"),
+                "Here it is.",
+            ),
+        )
+    }
+
+    fn server(sent: Vec<Msg>, inbox: Vec<Msg>, all_mail: Vec<Msg>) -> Server {
+        let mut f = gmail_folders(inbox, all_mail);
+        f[2].msgs = sent;
+        Server::start(f)
+    }
+
+    fn index(srv: &Server) -> SentIndex {
+        build_sent_index(&mut srv.session(), "[Gmail]/Sent Mail", 500).unwrap()
+    }
+
+    fn searches(srv: &Server) -> Vec<String> {
+        srv.log()
+            .into_iter()
+            .filter(|l| l.contains("SEARCH") && l.contains("OR HEADER In-Reply-To"))
+            .collect()
+    }
+
+    #[test]
+    fn an_unanswered_conversation_you_started_becomes_a_task_and_nothing_is_written() {
+        let srv = server(
+            vec![sent_msg(1, "<s1@me>", "Bob <bob@x.com>", 5.0)],
+            vec![inbox_msg(1, "<m1@acme>", "unrelated")],
+            vec![],
+        );
+        let (store, idx) = (Store::memory().unwrap(), index(&srv));
+        let r = check(
+            &mut srv.session(),
+            &store,
+            &idx,
+            "me@example.com",
+            3,
+            now(),
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        assert_eq!((r.created, r.answered, r.closed), (1, 0, 0));
+        let t = store.all_tasks().unwrap();
+        assert_eq!(t.len(), 1);
+        assert_eq!(t[0].kind, "followup");
+        assert!(t[0].excerpt.contains("bob@x.com"), "{}", t[0].excerpt);
+        let s = searches(&srv);
+        assert_eq!(s.len(), 2, "INBOX and All Mail are both asked: {s:?}");
+        assert!(
+            s[0].contains("\"<s1@me>\" HEADER References \"<s1@me>\""),
+            "the id is sent quoted: {s:?}"
+        );
+        assert!(
+            s[0].contains("NOT FROM \"me@example.com\"")
+                && s[0].contains("NOT HEADER Auto-Submitted \"auto-\""),
+            "your own mail and automatic replies are left out of the search: {s:?}"
+        );
+        let log = srv.log();
+        assert!(
+            log.iter().all(|l| !l.starts_with("SELECT")
+                && !l.contains("STORE")
+                && !l.contains("APPEND")
+                && !l.contains("COPY")
+                && !l.contains("MOVE")
+                && !l.contains("EXPUNGE")),
+            "a follow-up check only reads: {log:?}"
+        );
+    }
+
+    #[test]
+    fn a_conversation_that_was_answered_makes_no_task_and_is_not_searched_again() {
+        let srv = server(
+            vec![sent_msg(1, "<s1@me>", "bob@x.com", 5.0)],
+            vec![reply_msg(1, "<s1@me>")],
+            vec![],
+        );
+        let (store, idx) = (Store::memory().unwrap(), index(&srv));
+        let r = check(
+            &mut srv.session(),
+            &store,
+            &idx,
+            "me@example.com",
+            3,
+            now(),
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        assert_eq!((r.created, r.answered), (0, 1));
+        assert!(store.all_tasks().unwrap().is_empty());
+        assert_eq!(store.followup_state("<s1@me>").as_deref(), Some("answered"));
+        let before = searches(&srv).len();
+        check(
+            &mut srv.session(),
+            &store,
+            &idx,
+            "me@example.com",
+            3,
+            now(),
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        assert_eq!(
+            searches(&srv).len(),
+            before,
+            "an answered message is never searched twice"
+        );
+    }
+
+    #[test]
+    fn a_reply_you_archived_is_found_in_all_mail() {
+        let srv = server(
+            vec![sent_msg(1, "<s1@me>", "bob@x.com", 5.0)],
+            vec![],
+            vec![reply_msg(9, "<s1@me>")],
+        );
+        let (store, idx) = (Store::memory().unwrap(), index(&srv));
+        let r = check(
+            &mut srv.session(),
+            &store,
+            &idx,
+            "me@example.com",
+            3,
+            now(),
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        assert_eq!((r.created, r.answered), (0, 1));
+    }
+
+    #[test]
+    fn a_server_that_cannot_search_is_unknown_never_a_false_followup() {
+        let srv = server(
+            vec![sent_msg(1, "<s1@me>", "bob@x.com", 5.0)],
+            vec![],
+            vec![],
+        );
+        let (store, idx) = (Store::memory().unwrap(), index(&srv));
+        srv.st.lock().unwrap().refuse_search = true;
+        assert!(check(
+            &mut srv.session(),
+            &store,
+            &idx,
+            "me@example.com",
+            3,
+            now(),
+            &AtomicBool::new(false)
+        )
+        .is_err());
+        assert!(store.all_tasks().unwrap().is_empty());
+        assert!(
+            store.followup_state("<s1@me>").is_none(),
+            "nothing is remembered, so it is tried again"
+        );
+        srv.st.lock().unwrap().refuse_search = false;
+        let r = check(
+            &mut srv.session(),
+            &store,
+            &idx,
+            "me@example.com",
+            3,
+            now(),
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        assert_eq!(
+            r.created, 1,
+            "the next pass, with a working server, decides"
+        );
+    }
+
+    #[test]
+    fn an_open_followup_closes_itself_when_the_reply_is_read_and_asks_the_server_nothing() {
+        let srv = server(
+            vec![sent_msg(1, "<s1@me>", "bob@x.com", 5.0)],
+            vec![],
+            vec![],
+        );
+        let (store, idx) = (Store::memory().unwrap(), index(&srv));
+        check(
+            &mut srv.session(),
+            &store,
+            &idx,
+            "me@example.com",
+            3,
+            now(),
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        let uid = store.open_followups()[0].0;
+        // the reply arrives in the inbox and is read like any other new mail
+        srv.st.lock().unwrap().folders[0]
+            .msgs
+            .push(reply_msg(5, "<s1@me>"));
+        let mut s = srv.session();
+        process_new(&mut s, &store, &RulesTriager, &idx, 50, &mut |_, _| {}).unwrap();
+        let before = searches(&srv).len();
+        let r = check(
+            &mut s,
+            &store,
+            &idx,
+            "me@example.com",
+            3,
+            now(),
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        assert_eq!(r.closed, 1);
+        assert_eq!(searches(&srv).len(), before, "closing needs no search");
+        let t = store.get(uid).unwrap();
+        assert_eq!(
+            (t.status.as_str(), t.closed_by.as_str()),
+            ("done", "replied")
+        );
+        assert_eq!(store.followup_state("<s1@me>").as_deref(), Some("answered"));
+    }
+
+    #[test]
+    fn off_means_no_commands_at_all() {
+        let srv = server(
+            vec![sent_msg(1, "<s1@me>", "bob@x.com", 5.0)],
+            vec![],
+            vec![],
+        );
+        let (store, idx) = (Store::memory().unwrap(), index(&srv));
+        let mut s = srv.session();
+        let before = srv.log().len();
+        let r = check(
+            &mut s,
+            &store,
+            &idx,
+            "me@example.com",
+            0,
+            now(),
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        assert_eq!((r.created, r.answered, r.closed), (0, 0, 0));
+        assert_eq!(srv.log().len(), before, "nothing was sent to the server");
+    }
+
+    #[test]
+    fn turning_it_off_stops_even_the_checks_on_follow_ups_that_are_already_open() {
+        let srv = server(
+            vec![sent_msg(1, "<s1@me>", "bob@x.com", 5.0)],
+            vec![],
+            vec![],
+        );
+        let (store, idx) = (Store::memory().unwrap(), index(&srv));
+        check(
+            &mut srv.session(),
+            &store,
+            &idx,
+            "me@example.com",
+            3,
+            now(),
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        assert_eq!(store.open_followups().len(), 1, "set-up: one is open");
+        srv.st.lock().unwrap().folders[0]
+            .msgs
+            .push(reply_msg(5, "<s1@me>"));
+        let mut s = srv.session();
+        let before = srv.log().len();
+        let r = check(
+            &mut s,
+            &store,
+            &idx,
+            "me@example.com",
+            0,
+            now(),
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        assert_eq!((r.created, r.answered, r.closed), (0, 0, 0));
+        assert_eq!(srv.log().len(), before, "off means no commands at all");
+        assert_eq!(store.open_followups().len(), 1, "and nothing was closed");
+    }
+
+    #[test]
+    fn at_most_ten_messages_are_checked_in_one_pass_and_the_rest_next_time() {
+        let sent: Vec<Msg> = (1..=12)
+            .map(|u| sent_msg(u, &format!("<s{u}@me>"), "bob@x.com", 5.0))
+            .collect();
+        let srv = server(sent, vec![], vec![]);
+        let (store, idx) = (Store::memory().unwrap(), index(&srv));
+        let r = check(
+            &mut srv.session(),
+            &store,
+            &idx,
+            "me@example.com",
+            3,
+            now(),
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        assert_eq!(r.created, 10);
+        let r = check(
+            &mut srv.session(),
+            &store,
+            &idx,
+            "me@example.com",
+            3,
+            now(),
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        assert_eq!(r.created, 2);
+        assert_eq!(store.all_tasks().unwrap().len(), 12);
+    }
+
+    #[test]
+    fn mail_to_yourself_and_replies_you_sent_are_not_searched_for() {
+        let mut reply = sent_msg(2, "<s2@me>", "bob@x.com", 5.0);
+        reply.raw = raw_mail(
+            "From: me@example.com\nTo: bob@x.com\nSubject: Re: hi\nMessage-ID: <s2@me>\nIn-Reply-To: <q@x>\nDate: Mon, 09 Nov 2026 09:00:00 +0000",
+            "ok",
+        );
+        let srv = server(
+            vec![sent_msg(1, "<s1@me>", "me@example.com", 5.0), reply],
+            vec![],
+            vec![],
+        );
+        let (store, idx) = (Store::memory().unwrap(), index(&srv));
+        let r = check(
+            &mut srv.session(),
+            &store,
+            &idx,
+            "me@example.com",
+            3,
+            now(),
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        assert_eq!((r.created, r.answered), (0, 0));
+        assert!(searches(&srv).is_empty(), "no candidate, no search");
+    }
+
+    fn raw_from(uid: u32, from: &str, extra: &str, to_id: &str) -> Msg {
+        msg(
+            uid,
+            raw_mail(
+                &format!("From: {from}\nSubject: Re: Quote\nMessage-ID: <x{uid}@x>\nIn-Reply-To: {to_id}\nReferences: {to_id}\nDate: Tue, 10 Nov 2026 09:00:00 +0000{extra}"),
+                "text",
+            ),
+        )
+    }
+
+    #[test]
+    fn your_own_nudge_in_all_mail_is_not_a_reply() {
+        let srv = server(
+            vec![sent_msg(1, "<s1@me>", "bob@x.com", 5.0)],
+            vec![],
+            vec![raw_from(9, "me@example.com", "", "<s1@me>")],
+        );
+        let (store, idx) = (Store::memory().unwrap(), index(&srv));
+        let r = check(
+            &mut srv.session(),
+            &store,
+            &idx,
+            "me@example.com",
+            3,
+            now(),
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        assert_eq!(
+            (r.created, r.answered),
+            (1, 0),
+            "Gmail's All Mail holds your own mail too"
+        );
+    }
+
+    #[test]
+    fn an_out_of_office_reply_is_not_a_reply() {
+        let srv = server(
+            vec![sent_msg(1, "<s1@me>", "bob@x.com", 5.0)],
+            vec![raw_from(
+                4,
+                "Bob <bob@x.com>",
+                "\nAuto-Submitted: auto-replied",
+                "<s1@me>",
+            )],
+            vec![],
+        );
+        let (store, idx) = (Store::memory().unwrap(), index(&srv));
+        let r = check(
+            &mut srv.session(),
+            &store,
+            &idx,
+            "me@example.com",
+            3,
+            now(),
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        assert_eq!((r.created, r.answered), (1, 0));
+    }
+
+    #[test]
+    fn a_reply_filed_in_an_archive_folder_is_found_on_servers_without_all_mail() {
+        let mut sent = folder(
+            "Sent",
+            "\\Sent",
+            vec![sent_msg(1, "<s1@me>", "bob@x.com", 5.0)],
+        );
+        sent.uidvalidity = 7;
+        let srv = Server::start(vec![
+            folder("INBOX", "", vec![]),
+            sent,
+            folder("Archive", "\\Archive", vec![reply_msg(3, "<s1@me>")]),
+        ]);
+        let (store, idx) = (
+            Store::memory().unwrap(),
+            build_sent_index(&mut srv.session(), "Sent", 500).unwrap(),
+        );
+        let r = check(
+            &mut srv.session(),
+            &store,
+            &idx,
+            "me@example.com",
+            3,
+            now(),
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        assert_eq!((r.created, r.answered), (0, 1));
+    }
+
+    #[test]
+    fn a_reply_the_app_already_read_is_found_without_asking_the_server() {
+        let srv = server(
+            vec![sent_msg(1, "<s1@me>", "bob@x.com", 5.0)],
+            vec![],
+            vec![],
+        );
+        let (store, idx) = (Store::memory().unwrap(), index(&srv));
+        // the reply was read earlier and the user has since pressed X on it (it may now live in an Archive folder)
+        let e = mail::parse(
+            7,
+            b"From: Bob <bob@x.com>\r\nSubject: Re: Quote\r\nMessage-ID: <r7@x>\r\nIn-Reply-To: <s1@me>\r\nReferences: <s1@me>\r\n\r\nhere\r\n",
+        )
+        .unwrap();
+        let sig = engine::signals::Signals::default();
+        use engine::triage::Triager;
+        store
+            .add(&e, &RulesTriager.triage(&e, &sig).unwrap(), &sig)
+            .unwrap();
+        store.set_done(7, true).unwrap();
+        let before = searches(&srv).len();
+        let r = check(
+            &mut srv.session(),
+            &store,
+            &idx,
+            "me@example.com",
+            3,
+            now(),
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        assert_eq!((r.created, r.answered), (0, 1));
+        assert_eq!(searches(&srv).len(), before, "no search was needed");
+    }
+
+    #[test]
+    fn check_does_nothing_once_it_is_told_to_stop() {
+        let srv = server(
+            vec![sent_msg(1, "<s1@me>", "bob@x.com", 5.0)],
+            vec![],
+            vec![],
+        );
+        let (store, idx) = (Store::memory().unwrap(), index(&srv));
+        let mut s = srv.session();
+        let before = srv.log().len();
+        let r = check(
+            &mut s,
+            &store,
+            &idx,
+            "me@example.com",
+            3,
+            now(),
+            &AtomicBool::new(true),
+        )
+        .unwrap();
+        assert_eq!((r.created, r.answered, r.closed), (0, 0, 0));
+        assert_eq!(srv.log().len(), before, "no command was sent");
+        assert!(store.all_tasks().unwrap().is_empty() && store.followup_state("<s1@me>").is_none());
+    }
+
+    #[test]
+    fn check_closes_nothing_once_it_is_told_to_stop() {
+        let srv = server(
+            vec![sent_msg(1, "<s1@me>", "bob@x.com", 5.0)],
+            vec![],
+            vec![],
+        );
+        let (store, idx) = (Store::memory().unwrap(), index(&srv));
+        let mut s = srv.session();
+        check(
+            &mut s,
+            &store,
+            &idx,
+            "me@example.com",
+            3,
+            now(),
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        srv.st.lock().unwrap().folders[0]
+            .msgs
+            .push(reply_msg(5, "<s1@me>"));
+        process_new(&mut s, &store, &RulesTriager, &idx, 50, &mut |_, _| {}).unwrap();
+        let r = check(
+            &mut s,
+            &store,
+            &idx,
+            "me@example.com",
+            3,
+            now(),
+            &AtomicBool::new(true),
+        )
+        .unwrap();
+        assert_eq!(r.closed, 0);
+        assert_eq!(
+            store.open_followups().len(),
+            1,
+            "a sign-out must not be followed by writes"
+        );
+        let r = check(
+            &mut s,
+            &store,
+            &idx,
+            "me@example.com",
+            3,
+            now(),
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        assert_eq!(r.closed, 1);
+    }
+
+    #[test]
+    fn follow_ups_beyond_the_tenth_still_close_and_no_more_than_twenty_are_open() {
+        let sent: Vec<Msg> = (1..=25)
+            .map(|u| sent_msg(u, &format!("<s{u}@me>"), "bob@x.com", 5.0))
+            .collect();
+        let srv = server(sent, vec![], vec![]);
+        let (store, idx) = (Store::memory().unwrap(), index(&srv));
+        let mut s = srv.session();
+        for _ in 0..4 {
+            check(
+                &mut s,
+                &store,
+                &idx,
+                "me@example.com",
+                3,
+                now(),
+                &AtomicBool::new(false),
+            )
+            .unwrap();
+        }
+        assert_eq!(store.open_followups().len(), 20, "the cap");
+        let unseen = (1..=25)
+            .filter(|u| store.followup_state(&format!("<s{u}@me>")).is_none())
+            .count();
+        assert_eq!(unseen, 5, "the rest wait until some are closed");
+        // replies to the 11th and 15th sent messages are read; both close, whatever their position in the queue
+        let inbox: Vec<Msg> = [11u32, 15]
+            .iter()
+            .map(|n| reply_msg(*n, &format!("<s{n}@me>")))
+            .collect();
+        srv.st.lock().unwrap().folders[0].msgs = inbox;
+        process_new(&mut s, &store, &RulesTriager, &idx, 50, &mut |_, _| {}).unwrap();
+        let r = check(
+            &mut s,
+            &store,
+            &idx,
+            "me@example.com",
+            3,
+            now(),
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        assert_eq!(r.closed, 2);
+    }
 }

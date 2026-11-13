@@ -18,8 +18,13 @@ and alerts you only when something is important.
   correct it. Newsletters and mail that left your inbox fold away.
 - **Your own tasks and notes.** Add tasks that never came by email (`a`), and keep a note on any task. Attachments and a
   copy-only unsubscribe link show on each message; due dates are found even without AI.
+- **Your own rules and follow-ups.** "If the address, domain or subject matches, set the priority or category, or file
+  it", edited in Settings and applied to new mail and, on request, to the list. Optional follow-up reminders turn a
+  conversation you started that nobody answered into a task that closes itself when a reply arrives.
+- **Select many.** `v` (or the Select button) lets you pick several rows, then done, star, priority, snooze or mute
+  for all of them at once; one undo takes back a batch (muting a sender is the exception: you reverse it from a task).
 - **Keyboard first.** `j` `k` or the arrow keys move, `Enter` opens a task, `x` (or `e`) done, `1`-`5` priority,
-  `s` star, `r` reply draft (mail only), `h` snooze, `a` add task, `/` search, `z` undo, `,` settings, `?` for the full
+  `s` star, `r` reply draft (mail only), `h` snooze, `v` select several, `a` add task, `/` search, `z` undo, `,` settings, `?` for the full
   list. Capitals work too.
 
 ## Repository
@@ -43,8 +48,9 @@ cd engine && cargo clippy --all-targets -- -D warnings
 cd app && npm ci && npx tauri build            # Windows installer; needs Rust, Node, MSVC Build Tools
 ```
 
-Preview the UI with demo data and no engine: serve `app/ui` over HTTP and open `/?demo`.
-The demo backend is used whenever no engine is present; without `?demo` it opens the setup wizard.
+Preview the UI with demo data and no engine: serve `app/ui` over HTTP and open `/demo.html?demo=1`.
+`demo.html` loads the invented-mail backend and accepts any password, so the phone hub refuses to serve it; it is for
+development only.
 
 Read-only check against a real mailbox, without the app:
 
@@ -54,7 +60,7 @@ IMAP_HOST=imap.example.com IMAP_USER=you@example.com IMAP_PASS=... cargo run --e
 
 ## Status
 
-Built and tested: engine (241 tests, including protocol tests against a scripted mock IMAP server and a dedicated edge-case suite), UI in a browser, phone hub, installer build.
+Built and tested: engine (303 tests, including protocol tests against a scripted mock IMAP server and a dedicated edge-case suite), UI in a browser, phone hub, installer build.
 The IMAP sync and write-back are tested against a scripted mock server, which proves what the client sends and how it parses
 standard responses, but a real Gmail or other server may differ. Not yet exercised against a live mailbox, and releases are unsigned.
 See [SECURITY.md](SECURITY.md) for the full list of limits.

@@ -19,13 +19,14 @@ function tagsHTML(t) {
   if (t._thread) out.push(`<span class="tg">${t._thread.length} messages</span>`);
   if (t._max > t.priority) out.push(`<span class="tg" title="An earlier message in this conversation ranks higher">Earlier P${t._max}</span>`);
   if (t.gone && t.status !== "done") out.push('<span class="tg">Left inbox</span>');
-  if (t.closed_by === "replied") out.push('<span class="tg">Replied</span>');
+  if (t.closed_by === "replied") out.push(`<span class="tg">${t.kind === "followup" ? "They replied" : "Replied"}</span>`);
+  if (t.kind === "followup") out.push('<span class="tg" title="You wrote and nobody has answered. It closes itself when a reply arrives.">Waiting</span>');
   if (t.learned) out.push(`<span class="tg" title="Adjusted from your corrections of this sender. Sender → Normal starts over.">Learned ${t.learned > 0 ? "+" : "−"}${Math.abs(t.learned)}</span>`);
   if (t.draft) out.push(`<span class="tg">Draft${t.draft.saved ? " · saved" : ""}</span>`);
   else if (t.needs_reply) out.push('<span class="tg">↩ Reply</span>');
   if (t.due) out.push(`<span class="tg ${t.due <= isoToday() ? "r" : ""}">Due ${dueLabel(t.due)}</span>`);
   if (t.attachment_count) out.push(`<span class="tg">Files ${t.attachment_count}</span>`);
-  if (isLocal(t)) out.push('<span class="tg">Mine</span>');
+  if (isLocal(t) && t.kind !== "followup") out.push('<span class="tg">Mine</span>');
   if (t.pref === "important") out.push('<span class="tg">★ Sender</span>');
   if (t.pref === "mute") out.push('<span class="tg">Muted</span>');
   return out.join("");
@@ -274,7 +275,7 @@ async function submitAdd() {
     view = "todo"; flt.cat = "all"; flt.only = ""; flt.q = ""; cur = uid; closeVeil(); toast("Task added");
   } catch (err) { toast(String(err).replace(/^Error: /, "")) }
 }
-const HELP = [["J K", "Move down / up"], ["Enter", "Open or close a task"], ["X", "Mark done"], ["1–5", "Set priority"], ["S", "Star"], ["R", "Reply draft"], ["H", "Snooze until tomorrow"], ["A", "Add a task"], ["/", "Search"], ["Z", "Undo"], [",", "Settings"], ["?", "This card"]];
+const HELP = [["J K", "Move down / up"], ["Enter", "Open or close a task (while selecting, picks the row)"], ["X", "Mark done"], ["1–5", "Set priority"], ["S", "Star"], ["R", "Reply draft"], ["H", "Snooze until tomorrow"], ["V", "Select several, then X, 1–5, S or H"], ["A", "Add a task"], ["/", "Search"], ["Z", "Undo"], [",", "Settings"], ["?", "This card"]];
 function openHelp() {
   vl().dataset.kind = "help"; vl().classList.add("show");
   vl().innerHTML = `<div class="panel"><h2>Keyboard</h2><div class="keylist">${HELP.map(([k, l]) => `<div><span class="cap">${k}</span><b>${l}</b></div>`).join("")}</div>
@@ -298,4 +299,102 @@ document.addEventListener("keydown", e => {
   // Caps Lock or Shift must not silently turn these off
   const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
   if (key === "a") { e.preventDefault(); openAdd() } else if (key === "?") { e.preventDefault(); openHelp() }
+});
+
+/* ───────── select many, act once ─────────
+   Acts on the same messages a single row would (members()), so mail that arrived after the screen was drawn is
+   never closed unseen. The selection only ever holds rows that are visible now (pruneSel). One undo step per batch. */
+const selRows = () => listFor().filter(t => sel.has(t.uid));
+function pruneSel() {
+  const ids = new Set(listFor().map(t => t.uid));
+  [...sel].forEach(u => { if (!ids.has(u)) sel.delete(u) });
+  if (selAnchor !== null && !ids.has(selAnchor)) selAnchor = null;
+}
+function enterSelect(withCurrent) {
+  selMode = true; openUid = null; sel.clear(); selAnchor = null;
+  if (withCurrent && cur != null) { sel.add(cur); selAnchor = cur }
+  render();
+}
+function exitSelect() { selMode = false; sel.clear(); selAnchor = null; if (view !== "log") render() }
+function selectClick(e, t) {
+  const l = listFor().map(x => x.uid);
+  if (e.shiftKey && selAnchor !== null && l.includes(selAnchor)) {
+    const a = l.indexOf(selAnchor), b = l.indexOf(t.uid);
+    for (let i = Math.min(a, b); i <= Math.max(a, b); i++) sel.add(l[i]);
+  } else { sel.has(t.uid) ? sel.delete(t.uid) : sel.add(t.uid); selAnchor = t.uid }
+  render();
+}
+function selbarHTML() {
+  const n = selRows().length, b = (k, l, x = "") => `<button class="mini ${x}" data-sel="${k}">${l}</button>`;
+  const acts = view === "done" ? b("done", "Reopen")
+    : b("done", "Done") + b("star", "Star") + '<span class="lbl">Priority</span>' + [1, 2, 3, 4, 5].map(p => b("p" + p, p)).join("") + (view === "snoozed" ? b("unsnooze", "Bring back") : b("snooze:tomorrow", "Tomorrow") + b("snooze:nextweek", "Next week")) + b("mute", "Mute senders");
+  return `<div class="selbar" role="toolbar" aria-label="Actions for the selected tasks"><b aria-live="polite">${n ? n + " selected" : "Pick tasks"}</b>${n ? acts : ""}<span class="sp"></span>${b("all", "All " + listFor().length)}${n ? b("none", "None") : ""}${b("exit", "Exit")}</div>`;
+}
+function bulk(k, el) {
+  // the bar offers Reopen only in Done and no snoozing in Snoozed; the keys must obey the same limits (a snooze cannot be
+  // put back as it was, and a done task is not re-ranked)
+  if ((view === "done" && k !== "done") || (view === "snoozed" && k.startsWith("snooze:"))) return;
+  const rows = selRows(); if (!rows.length) { toast("Select something first"); return }
+  const ms = [...new Map(rows.flatMap(members).map(x => [x.uid, x])).values()], ids = ms.map(x => x.uid);
+  if (!ms.length) return;
+  if (k === "done") {
+    const v = view !== "done", was = ms.map(x => [x.uid, x.status]);
+    ms.forEach(x => { x.status = v ? "done" : "open"; call("set_done", { uid: x.uid, done: v }) });
+    undoStack.push(() => was.forEach(([u, s]) => { const x = find(u); if (x) { x.status = s; call("set_done", { uid: u, done: s === "done" }) } }));
+    showUndo(`${ids.length} ${v ? "done" : "reopened"}`);
+  } else if (k === "star") {
+    const v = !ms.every(x => x.star), was = ms.map(x => [x.uid, !!x.star]);
+    ms.forEach(x => { x.star = v; call("set_star", { uid: x.uid, star: v }) });
+    undoStack.push(() => was.forEach(([u, s]) => { const x = find(u); if (x) { x.star = s; call("set_star", { uid: u, star: s }) } }));
+    showUndo(`${ids.length} ${v ? "starred" : "unstarred"}`);
+  } else if (/^p[1-5]$/.test(k)) {
+    // like pressing 1-5 on a row: the newest message of each conversation only. Every change is a correction the ranker
+    // learns from, and one click on a long thread must not count as one correction per message
+    const own = rows.map(r => find(r.uid)).filter(Boolean), n = +k[1], was = own.map(x => [x.uid, x.priority, !!x.star]);
+    own.forEach(x => { if (x.priority !== n) { x.priority = n; if (n >= 4) x.star = true; call("set_priority", { uid: x.uid, priority: n }) } });
+    undoStack.push(() => was.forEach(([u, p, s]) => { const x = find(u); if (!x) return; x.priority = p; call("set_priority", { uid: u, priority: p }); if (!s && n >= 4) { x.star = false; call("set_star", { uid: u, star: false }) } }));
+    showUndo(`${own.length} set to priority ${n}`);
+  } else if (k.startsWith("snooze:")) {
+    const p = k.slice(7), until = Date.now() / 1000 + (p === "tomorrow" ? 86400 : 604800);
+    ms.forEach(x => { x.snooze_until = until; call("set_snooze", { uid: x.uid, preset: p }) });
+    undoStack.push(() => ids.forEach(u => { const x = find(u); if (x) { x.snooze_until = 0; call("set_snooze", { uid: u, preset: "clear" }) } }));
+    showUndo(`${ids.length} snoozed`);
+  } else if (k === "unsnooze") {
+    ms.forEach(x => { x.snooze_until = 0; call("set_snooze", { uid: x.uid, preset: "clear" }) });
+    toast(`${ids.length} brought back. Snooze them again from each task if you change your mind`);
+  } else if (k === "mute") {
+    const addrs = [...new Set(ms.map(x => x.addr).filter(Boolean))];
+    if (!addrs.length) { toast("These are your own tasks. There is no sender to mute"); return }
+    if (el && !twice(el, `Click again: mute ${addrs.length} sender${addrs.length > 1 ? "s" : ""}`)) return;
+    addrs.forEach(a => {
+      const rep = ms.find(x => x.addr === a);
+      S.tasks.filter(x => x.addr === a && x.status !== "done").forEach(x => { x.pref = "mute"; x.priority = 1; x.urgent = false });
+      call("set_pref", { uid: rep.uid, level: "mute" });
+    });
+    toast(`${addrs.length} sender${addrs.length > 1 ? "s" : ""} muted. Open a task and choose Normal to undo`);
+  } else return;
+  sel.clear(); selAnchor = null; render();
+}
+/* keys while selecting; returns true when the key was ours */
+function selKey(e, k, t) {
+  if (k === "Escape") { exitSelect(); return true }
+  if (k === " " || k === "Enter") { if (t) { e.preventDefault(); sel.has(t.uid) ? sel.delete(t.uid) : sel.add(t.uid); selAnchor = t.uid; render() } return true }
+  if (e.shiftKey && (k === "j" || k === "k" || k === "ArrowDown" || k === "ArrowUp")) {
+    e.preventDefault(); if (t) sel.add(t.uid);
+    move(k === "j" || k === "ArrowDown" ? 1 : -1); if (cur != null) { sel.add(cur); render() }
+    return true;
+  }
+  if (k === "x" || k === "e") { bulk("done"); return true }
+  if (/^[1-5]$/.test(k)) { bulk("p" + k); return true }
+  if (k === "s") { bulk("star"); return true }
+  if (k === "h") { bulk("snooze:tomorrow"); return true }
+  return k === "r"; // a reply draft makes no sense for many rows; every other key behaves as usual
+}
+document.addEventListener("click", e => {
+  const b = e.target.closest("[data-sel]"); if (!b) return;
+  const k = b.dataset.sel;
+  if (k === "exit") return exitSelect();
+  if (k === "all") { listFor().forEach(t => sel.add(t.uid)); return render() }
+  if (k === "none") { sel.clear(); selAnchor = null; return render() }
+  bulk(k, b);
 });
