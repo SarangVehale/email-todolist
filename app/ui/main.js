@@ -8,8 +8,18 @@ if (qs.get("token")) {
   history.replaceState(null, "", location.pathname + (qs.toString() ? "?" + qs : ""));
 }
 const TOKEN = localStorage.getItem("tok") || "";
-const MODE = TA ? "tauri" : (TOKEN && qs.get("mock") == null ? "hub" : "mock");
+/* The demo backend is for development only (?demo or ?mock, and it is not shipped to the phone hub). A page opened
+   with no access code and no desktop app behind it is a dead end: it must never show a sign-in form, because anyone
+   on the network can open it and it would be a credential form served from the user's own machine. */
+const DEMO = qs.get("demo") !== null || qs.get("mock") !== null;
+const MODE = TA ? "tauri" : DEMO && typeof mock === "function" ? "mock" : TOKEN ? "hub" : "locked";
 const isHub = MODE === "hub";
+function lockedScreen() {
+  document.querySelector("#bar").innerHTML = '<div class="brand"><span class="mark">要</span></div>';
+  document.querySelector("#view").innerHTML = `<div class="kick">Inbox Agent</div><h1>Not connected</h1>
+    <div class="empty">This page needs the access code from your computer<small>Open Inbox Agent on the computer that holds your mail, go to Settings, and scan the QR code with this device again.</small></div>`;
+  document.querySelector("#foot").innerHTML = "<span>No access code on this device</span>";
+}
 async function rpc(cmd, args = {}) {
   if (MODE === "tauri") return TA.core.invoke("rpc", { cmd, args });
   if (MODE === "hub") {
@@ -227,7 +237,8 @@ document.addEventListener("keydown", e => {
   if (e.metaKey || e.ctrlKey || e.altKey || $("#veil").classList.contains("show") || /INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) return;
   const focusedRow = e.target.closest ? e.target.closest(".row") : null;
   if (focusedRow && +focusedRow.dataset.uid !== cur) cur = +focusedRow.dataset.uid;
-  const t = find(cur), k = e.key;
+  // Caps Lock or Shift must not silently turn every shortcut off
+  const t = find(cur), k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
   if ((k === "Enter" || k === " ") && e.target.closest && e.target.closest("button, a")) return;
   if (k === "j" || k === "ArrowDown") { e.preventDefault(); move(1) } else if (k === "k" || k === "ArrowUp") { e.preventDefault(); move(-1) }
   else if (t && (k === "x" || k === "e")) setDone(t);

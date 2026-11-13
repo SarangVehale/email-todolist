@@ -985,6 +985,26 @@ impl Store {
         self.meta_set("attempt", "")
     }
 
+    /// How many times in a row the server has answered for `uid` without sending its content. Kept apart from the
+    /// crash counter, which is a single slot that any other message resets.
+    pub fn no_content_attempt(&self, uid: u32) -> anyhow::Result<u32> {
+        let tries = match self
+            .meta_get("no_content")
+            .as_deref()
+            .and_then(|v| v.split_once(':'))
+        {
+            Some((u, n)) if u.parse() == Ok(uid) => n.parse::<u32>().unwrap_or(0) + 1,
+            _ => 1,
+        };
+        self.meta_set("no_content", &format!("{uid}:{tries}"))?;
+        Ok(tries)
+    }
+
+    /// Forgets the no-content counter once a fetch came back whole.
+    pub fn clear_no_content(&self) -> anyhow::Result<()> {
+        self.meta_set("no_content", "")
+    }
+
     /// The message a previous run was in the middle of, if it never finished.
     pub fn in_flight(&self) -> Option<u32> {
         self.meta_get("attempt")?.split_once(':')?.0.parse().ok()

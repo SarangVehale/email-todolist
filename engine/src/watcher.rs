@@ -27,6 +27,22 @@ pub struct Account {
     pub password: String,
 }
 
+/// The server refused the user name or password. Retrying this every half minute would hammer the provider (and can
+/// get an account locked), and no amount of waiting fixes it: the user has to put a new password in.
+#[derive(Debug)]
+pub struct SignInRefused(pub String);
+impl std::fmt::Display for SignInRefused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "sign-in refused: {}", self.0)
+    }
+}
+impl std::error::Error for SignInRefused {}
+
+/// Did this error come from the server refusing the sign-in, rather than from the network or the mailbox?
+pub fn is_sign_in_problem(e: &anyhow::Error) -> bool {
+    e.downcast_ref::<SignInRefused>().is_some()
+}
+
 /// Opens a TLS connection with hard connect and read/write time limits, so a dead network can never hang a thread forever.
 pub fn connect(a: &Account) -> Result<Sess> {
     connect_with_socket(a).map(|(s, _)| s)
@@ -53,7 +69,7 @@ pub fn connect_with_socket(a: &Account) -> Result<(Sess, TcpStream)> {
     client.read_greeting()?;
     let session = client
         .login(&a.user, &a.password)
-        .map_err(|e| anyhow!("login failed: {}", e.0))?;
+        .map_err(|e| anyhow::Error::new(SignInRefused(e.0.to_string())))?;
     Ok((session, socket))
 }
 
@@ -70,7 +86,7 @@ pub fn connect_plain(
     client.read_greeting()?;
     client
         .login(user, password)
-        .map_err(|e| anyhow!("login failed: {}", e.0))
+        .map_err(|e| anyhow::Error::new(SignInRefused(e.0.to_string())))
 }
 
 /// Folder carrying an RFC 6154 special-use flag such as `\Sent`, `\All` or `\Archive`.
@@ -133,6 +149,29 @@ pub fn build_sent_index<T: Read + Write>(
         }
     }
     Ok(idx)
+}
+
+/// The Sent folder and what it says about which messages have been answered. A mailbox whose Sent folder cannot be
+/// found — a localized name such as "Gesendet" or "Éléments envoyés" on a server that sets no `\Sent` flag — is not a
+/// reason to stop: the mail still loads, and only reply detection and "someone you write to" are weaker. The user is
+/// told once per connection so the missing feature is not a mystery.
+pub fn sent_or_empty<T: Read + Write>(
+    s: &mut Session<T>,
+    store: &Store,
+) -> (Option<String>, SentIndex) {
+    let found = find_sent_folder(s).and_then(|f| {
+        let idx = build_sent_index(s, &f, 500)?;
+        Ok((f, idx))
+    });
+    match found {
+        Ok((f, idx)) => (Some(f), idx),
+        Err(e) => {
+            let _ = store.log(&format!(
+                "could not read your Sent folder ({e}); mail still loads, but replies you have already sent are not detected"
+            ));
+            (None, SentIndex::default())
+        }
+    }
 }
 
 /// Adds messages that arrived in Sent since the index was built. If the folder was renumbered, it is read again
@@ -297,6 +336,8 @@ pub fn process_new_until<T: Read + Write>(
         uids = uids.split_off(start);
     }
     let mut n = 0;
+    // the lowest UID this pass asked for but never received, so the cursor can stop short of it
+    let mut unfinished: Option<u32> = None;
     for chunk in uids.chunks(20) {
         if stopped() {
             return Ok(n);
@@ -319,8 +360,22 @@ pub fn process_new_until<T: Read + Write>(
             }
             continue;
         }
+        let mut received: Vec<u32> = vec![];
         for m in s.uid_fetch(uid_set(&wanted), "BODY.PEEK[]")?.iter() {
-            let (Some(uid), Some(body)) = (m.uid, m.body()) else {
+            let Some(uid) = m.uid else { continue };
+            received.push(uid);
+            let Some(body) = m.body() else {
+                // The server answered for this message but sent no content. Leaving the cursor past it would drop it
+                // from the list for good, so stop short of it and try again next time — a few times, then give up.
+                let tries = store.no_content_attempt(uid)?;
+                if tries > MAX_ATTEMPTS {
+                    store.log(&format!(
+                        "giving up on message {uid}: the server returned no content {} times",
+                        tries - 1
+                    ))?;
+                } else {
+                    unfinished = Some(unfinished.map_or(uid, |u: u32| u.min(uid)));
+                }
                 continue;
             };
             if stopped() {
@@ -375,8 +430,22 @@ pub fn process_new_until<T: Read + Write>(
             }
             store.end_attempt()?;
         }
+        // a message that was asked for and not mentioned at all also has to be waited for
+        for uid in wanted.iter().filter(|u| !received.contains(u)) {
+            unfinished = Some(unfinished.map_or(*uid, |u: u32| u.min(*uid)));
+        }
+        if unfinished.is_none() {
+            store.clear_no_content()?;
+        }
         if let Some(max) = chunk.last() {
-            store.set_last_uid(store.last_uid().max(*max))?;
+            let upto = match unfinished {
+                Some(u) => (*max).min(u.saturating_sub(1)),
+                None => *max,
+            };
+            store.set_last_uid(store.last_uid().max(upto))?;
+        }
+        if unfinished.is_some() {
+            break; // later chunks are past the gap; next sync picks them up
         }
     }
     Ok(n)
@@ -385,18 +454,25 @@ pub fn process_new_until<T: Read + Write>(
 /// How often an idle connection looks for replies sent and mail moved elsewhere.
 const RECONCILE_EVERY: Duration = Duration::from_secs(120);
 
+/// Wait before reconnecting after an ordinary failure, and after the server refused the sign-in.
+const RETRY: Duration = Duration::from_secs(30);
+const SIGN_IN_RETRY: Duration = Duration::from_secs(300);
+
 /// Brings the Sent index up to date and lets finished tasks close. A failure here is logged and ignored: it must
 /// never take down the connection that delivers new mail.
 fn maintain<T: Read + Write>(
     s: &mut Session<T>,
     store: &Store,
-    folder: &str,
+    folder: Option<&str>,
     sent: &mut SentIndex,
     stop: &AtomicBool,
 ) {
-    if let Err(e) = refresh_sent_index(s, folder, sent) {
-        let _ = store.log(&format!("could not read your Sent folder this time: {e}"));
-        return;
+    // with no Sent folder there is nothing to refresh, but mail that left the inbox is still worth noticing
+    if let Some(folder) = folder {
+        if let Err(e) = refresh_sent_index(s, folder, sent) {
+            let _ = store.log(&format!("could not read your Sent folder this time: {e}"));
+            return;
+        }
     }
     match reconcile_open(s, store, sent, stop) {
         Ok(r) if r.replied > 0 || r.gone > 0 => {
@@ -428,12 +504,15 @@ pub fn run(
         // a panic anywhere in a connection attempt becomes an ordinary error and goes through the retry path
         let attempt = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> Result<()> {
             let (mut s, socket) = connect_with_socket(a)?;
-            let folder = find_sent_folder(&mut s)?;
-            let mut sent = build_sent_index(&mut s, &folder, 500)?;
-            store.log(&format!("connected as {}; Sent folder “{folder}”", a.user))?;
+            let (folder, mut sent) = sent_or_empty(&mut s, store);
+            store.log(&format!(
+                "connected as {}; Sent folder “{}”",
+                a.user,
+                folder.as_deref().unwrap_or("not found")
+            ))?;
             status("syncing");
             process_new_until(&mut s, store, triager, &sent, first_run_limit, on_new, stop)?;
-            maintain(&mut s, store, &folder, &mut sent, stop);
+            maintain(&mut s, store, folder.as_deref(), &mut sent, stop);
             let mut last_check = std::time::Instant::now();
             status("idle");
             while !stop.load(Ordering::Relaxed) {
@@ -457,13 +536,13 @@ pub fn run(
                     )?;
                     // a busy mailbox changes all the time: do the extra checks at most every 20 seconds then
                     if last_check.elapsed() >= Duration::from_secs(20) {
-                        maintain(&mut s, store, &folder, &mut sent, stop);
+                        maintain(&mut s, store, folder.as_deref(), &mut sent, stop);
                         last_check = std::time::Instant::now();
                     }
                     status("idle");
                 } else if last_check.elapsed() >= RECONCILE_EVERY {
                     // nothing arrived, but you may have replied or archived elsewhere
-                    maintain(&mut s, store, &folder, &mut sent, stop);
+                    maintain(&mut s, store, folder.as_deref(), &mut sent, stop);
                     last_check = std::time::Instant::now();
                 }
             }
@@ -475,9 +554,20 @@ pub fn run(
             ))
         });
         if let Err(e) = result {
-            status(&format!("error: {e}"));
-            let _ = store.log(&format!("connection lost ({e}); retrying in 30s"));
-            for _ in 0..30 {
+            // A refused password is not going to fix itself, and retrying it every half minute can get the account
+            // locked by the provider, so it waits much longer and says what the user has to do.
+            let refused = is_sign_in_problem(&e);
+            let wait = if refused { SIGN_IN_RETRY } else { RETRY };
+            if refused {
+                status("error: your mail server refused the sign-in. Enter your password again in Settings");
+            } else {
+                status(&format!("error: {e}"));
+            }
+            let _ = store.log(&format!(
+                "connection lost ({e}); retrying in {}s",
+                wait.as_secs()
+            ));
+            for _ in 0..wait.as_secs() {
                 if stop.load(Ordering::Relaxed) {
                     return;
                 }

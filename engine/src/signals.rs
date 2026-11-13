@@ -8,8 +8,9 @@ use std::collections::HashSet;
 pub struct SentIndex {
     pub recipients: HashSet<String>,
     pub message_ids: HashSet<String>,
-    /// Message-IDs the user has answered: everything named in the In-Reply-To or References of a sent message.
-    /// Forwards are left out, since forwarding a message is not the same as dealing with it.
+    /// Message-IDs the user has answered: what the In-Reply-To of a sent message names. References is deliberately
+    /// not used, because replying to the newest message of a thread does not answer the older ones. Forwards are left
+    /// out too, since forwarding a message is not the same as dealing with it.
     pub replied_to: HashSet<String>,
     /// UIDVALIDITY of the Sent folder when the index was built, and the highest UID read so far, so the index can
     /// be topped up with only the new messages (0 = not yet known).

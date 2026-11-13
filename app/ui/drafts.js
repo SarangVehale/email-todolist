@@ -295,5 +295,7 @@ document.addEventListener("keydown", e => {
     return;
   }
   if (e.metaKey || e.ctrlKey || e.altKey || vl().classList.contains("show") || /INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) return;
-  if (e.key === "a") { e.preventDefault(); openAdd() } else if (e.key === "?") { e.preventDefault(); openHelp() }
+  // Caps Lock or Shift must not silently turn these off
+  const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  if (key === "a") { e.preventDefault(); openAdd() } else if (key === "?") { e.preventDefault(); openHelp() }
 });

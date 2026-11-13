@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Inbox Agent (demo)</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<!-- Development preview only. It loads the demo backend (mock.js), which answers with invented mail and accepts any
+     password. It is deliberately NOT served by the phone hub: see engine/src/hub.rs FILES. Open demo.html?demo=1 -->
+<div id="rail"></div>
+<div id="bar"></div>
+<main><div id="view"></div></main>
+<div id="foot"></div>
+<div class="veil" id="veil"></div>
+<div id="toasts" role="status" aria-live="polite"></div>
+<div class="undo" id="undo" role="status" aria-live="polite"><span id="undoMsg"></span><button id="undoBtn">Undo</button></div>
+<script src="mock.js"></script>
+<script src="main.js"></script>
+<script src="drafts.js"></script>
+<script src="setup.js"></script>
+<script src="boot.js"></script>
+</body>
+</html>

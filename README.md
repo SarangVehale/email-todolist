@@ -18,8 +18,9 @@ and alerts you only when something is important.
   correct it. Newsletters and mail that left your inbox fold away.
 - **Your own tasks and notes.** Add tasks that never came by email (`a`), and keep a note on any task. Attachments and a
   copy-only unsubscribe link show on each message; due dates are found even without AI.
-- **Keyboard first.** `j` `k` move, `x` done, `1`-`5` priority, `s` star, `r` reply draft, `h` snooze, `a` add task,
-  `/` search, `z` undo, `?` for the full list.
+- **Keyboard first.** `j` `k` or the arrow keys move, `Enter` opens a task, `x` (or `e`) done, `1`-`5` priority,
+  `s` star, `r` reply draft (mail only), `h` snooze, `a` add task, `/` search, `z` undo, `,` settings, `?` for the full
+  list. Capitals work too.
 
 ## Repository
 
@@ -53,7 +54,7 @@ IMAP_HOST=imap.example.com IMAP_USER=you@example.com IMAP_PASS=... cargo run --e
 
 ## Status
 
-Built and tested: engine (235 tests, including protocol tests against a scripted mock IMAP server and a dedicated edge-case suite), UI in a browser, phone hub, installer build.
+Built and tested: engine (241 tests, including protocol tests against a scripted mock IMAP server and a dedicated edge-case suite), UI in a browser, phone hub, installer build.
 The IMAP sync and write-back are tested against a scripted mock server, which proves what the client sends and how it parses
 standard responses, but a real Gmail or other server may differ. Not yet exercised against a live mailbox, and releases are unsigned.
 See [SECURITY.md](SECURITY.md) for the full list of limits.

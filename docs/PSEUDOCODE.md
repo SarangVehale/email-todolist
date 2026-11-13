@@ -11,7 +11,7 @@ start():
     settings = load settings.json            # corrupt or missing -> defaults
     open the database: integrity check; a damaged file is set aside as agent.db.corrupt-<time> and rebuilt;
                        data from a newer app version is refused and left alone
-    start scheduler thread                    # always (snooze wake-ups, daily digest)
+    start scheduler thread                    # always (snooze wake-ups, daily digest, the update check)
     if hub enabled:      start hub thread
     account = settings + password from OS keychain
     if no account or not onboarded: status = "setup" / "no password"; return
@@ -30,9 +30,11 @@ run():
         sent_folder = folder flagged \Sent  (else common names)
         sent_index  = recipients and Message-IDs of the last 500 sent messages     # read-only
         process_new()
+        maintain()                            # section 5b
         loop until stop:
             EXAMINE INBOX (read-only); IDLE for up to 60 s
-            if the mailbox changed: process_new()
+            if the mailbox changed: process_new(), then maintain() at most every 20 s
+            otherwise, every 120 s: maintain()
         on any error: status = "error"; wait 30 s; reconnect
 ```
 Edge cases: network drops, server hangs — timeouts; `a_failing_server…`, IMAP flow tests.
@@ -40,6 +42,8 @@ Edge cases: network drops, server hangs — timeouts; `a_failing_server…`, IMA
 ## 3. Fetching new mail (`watcher.rs: process_new`)
 
 ```
+prune old data (done tasks past 90 days, log past 30, corrections past 365)
+
 process_new():
     mailbox = EXAMINE INBOX
     if server's UIDVALIDITY differs from the stored one:        # UIDs now mean different mails
@@ -83,8 +87,9 @@ parse(raw):
         thread = first id of the raw References header, else In-Reply-To, else own Message-ID  ("" if none usable)
         attachments = names of parts marked attachment (or non-inline parts with a file name): count them all,
                       keep five names, path and control characters removed, <= 60 chars; inline images are skipped
-        unsubscribe = first https link in List-Unsubscribe, else the first mailto link; anything else
-                      (http, javascript, data, spaces, > 500 chars) -> ""
+        unsubscribe = first https link in List-Unsubscribe, else the first mailto link, and only with a real
+                      public host (or a plausible mailbox); anything else (http, javascript, data, spaces, an IP
+                      or a single-label host, > 2000 chars) -> ""
 ```
 Edge cases: HTML-only mail, other charsets, base64 and quoted-printable, encoded-word headers, missing From/Subject/
 Date, NUL bytes, attachment-only mail, 20 000-character subjects, forged Message-IDs —
@@ -118,7 +123,7 @@ Edge cases: spoofed sender, prompt injection, hostile category strings, malforme
 ## 5b. Closing tasks that are finished elsewhere (`watcher.rs: reconcile_open`, `refresh_sent_index`)
 
 ```
-after each sync, and every 2 minutes while idle:                    # failures are logged, never fatal
+after the first sync, after a mailbox change (at most every 20 s), and every 2 minutes while idle:                    # failures are logged, never fatal
     top up the Sent index with new Sent messages (read again if the Sent UIDVALIDITY changed)
         replied_to = every id named in In-Reply-To (not References) of a sent message, except forwards (Fwd, FW, WG, TR, RV, ENC...)
     for each open mail task (not user-added), newest 500:
@@ -204,7 +209,9 @@ Edge cases: stalled clients, floods, hostile headers, odd methods — `stalled_c
 every 20 s:
     for tasks whose snooze time has passed: clear the snooze, notify once ("Back from snooze")
     if digest time is set, now >= that time, and no digest has been sent today:
-        record today; if anything is open: notify "N open · H high · U urgent · D drafts ready"
+        record today; if anything is open: notify "N open · H high · D due [· U urgent] · R draft(s) ready"
+        N counts conversations, not messages; snoozed tasks and ones that left the inbox are left out; the urgent
+        figure shows only when it is above zero
 
 snooze presets (local time):  3h = now + 3 hours;  tomorrow = tomorrow 09:00;
                               next week = the next Monday after today, 09:00;  clear = bring back
@@ -233,16 +240,17 @@ Edge cases: corrupt or older settings files fall back safely — `corrupt_or_old
 
 ```
 every scheduler tick:
-    if UPDATE_REPO is empty, or the user turned the check off, or an attempt was already made today: do nothing
-    record today as the attempt date
+    if UPDATE_REPO is empty, the user turned the check off, the server already answered today, or a failed try
+       is still inside its hour: do nothing
     on another thread: GET https://api.github.com/repos/<repo>/releases/latest     # 5 s, no redirects, <= 256 KB
         tag = tag_name, only if it is a plain version (digits, dots, optional short alphanumeric suffix)
-        store the tag if it is newer than the running version, else clear it
+        the server answered: store the tag if it is newer than the running version, else clear it; record today
+        no answer at all (no network yet after a reboot): try again in an hour, not tomorrow
 state():  show the stored tag only while it is still newer than the running version; the page address is rebuilt
           from the repository and the tag; phones never get it
 
 diagnostics():                                                                      # desktop only
-    counts + option names + server host name
+    counts + option names + the server's host name, but only for well-known providers (else "custom server")
     activity lines: quoted text -> ellipsis, around "@" -> <address>, home paths -> <path>, error details removed
     crash lines: keep time, thread and file:line only
 ```

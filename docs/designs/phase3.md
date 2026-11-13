@@ -28,8 +28,9 @@ everyone. Nothing here may add a server of ours.
 ### 1. Update check (built; off until a repository is set)
 
 `UPDATE_REPO` in `engine/src/updates.rs` is empty today. While it is empty there is no network call and no setting shown. When
-it names a repository (`owner/name`), the scheduler makes one attempt a day (an attempt, not a success, recorded in the
-database, so a rate limit or a deleted repository is not retried all day and a settings save does not restart the clock):
+it names a repository (`owner/name`), the scheduler asks once a day. The day is recorded when the server answers at all,
+including a rate limit or a 404, so neither is retried all day and a settings save does not restart the clock; a try that
+got no answer at all (no network yet after a reboot) is repeated in an hour:
 `GET https://api.github.com/repos/<repo>/releases/latest` over HTTPS with no redirects, a 5-second timeout, a 256 KB cap
 and a User-Agent of `InboxAgent/<version>`. Only the response's `tag_name` is used, and only when it is a plain version
 (digits and dots, an optional short alphanumeric pre-release suffix; no slashes, spaces, `?`, `#` or `+`). The release
@@ -42,13 +43,14 @@ counted successes, not attempts.
 ### 2. Diagnostics (built)
 
 A desktop-only command and a "Copy diagnostics" button. The text has the version, system, status, counts, option names and
-the mail server's host name, plus the last 30 activity lines and the last 20 crash-log lines, both redacted. Redaction (a
+the mail server's host name if it is a well-known provider (anything else reads "custom server", because a private domain
+identifies the user), plus the last 30 activity lines and the last 20 crash-log lines, both redacted. Redaction (a
 review found the first version leaked): everything from the first opening quote to the **last** closing quote (curly, straight
 and backtick, because Rust panic messages quote strings in backticks) becomes an ellipsis; anything around an `@` becomes
 `<address>`; from the first path under a home folder to the end of the line becomes `<path>` (folder names can contain
 spaces); the text after an error colon, inside "connection lost (...)" and the login name in "connected as" are removed
-unless they are one of a few fixed phrases; the line is cut to 200 characters. Crash lines keep only the time, thread and
-file:line; the panic text is dropped.
+unless they start with one of a few fixed phrases; any piece that looks like a path or a mail folder becomes `<name>`;
+and the line is cut to 200 characters. Crash lines keep only the time, thread and file:line; the panic text is dropped.
 
 ### 3. Deferred: Google sign-in with your own client ID
 
@@ -78,6 +80,6 @@ telemetry of any kind.
 
 ## Test plan
 
-Each item has a failing test first. OAuth runs against a local mock token server and the mock IMAP server (extended with
-AUTHENTICATE). The update check runs against a local mock HTTP server with the base URL injectable. Diagnostics is a unit
-test over a populated store, checking that no address, subject or secret appears in the output.
+Each item has a failing test first. The update check runs against a local mock HTTP server with the base address
+injectable; diagnostics is checked over a populated store, confirming that no address, subject or secret reaches the
+output. The OAuth tests described in the deferred section above were never written, because none of that code exists.

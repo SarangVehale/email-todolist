@@ -104,7 +104,9 @@ fn prune_drops_old_done_tasks_but_keeps_open_and_recent_work() {
 }
 
 #[test]
-fn changed_uidvalidity_resets_the_cursor_so_new_mail_is_not_lost() {
+fn changed_uidvalidity_starts_the_mailbox_over_because_the_uids_now_mean_other_mail() {
+    // The old numbers point at different messages now, so the stored tasks are not about this mailbox any more and
+    // are deleted. Mail is not lost from the mailbox; the list is rebuilt from the server on the next sync.
     let st = Store::memory().unwrap();
     add(&st, 5, 1.0);
     st.set_last_uid(5).unwrap();

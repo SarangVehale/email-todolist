@@ -67,7 +67,7 @@ Do this on **clean machines** (a fresh Windows user or VM, a Mac, a Linux box), 
 ## Switching on the update notice
 
 The app can tell users when a newer version exists. It is off until you name the repository: set `UPDATE_REPO` in
-`engine/src/updates.rs` to `"owner/name"` (and the `repository` fields in the two `Cargo.toml` files and `package.json`),
+`engine/src/updates.rs` to `"owner/name"` (and the `repository` field in `app/src-tauri/Cargo.toml`; add one to `engine/Cargo.toml` and `app/package.json` if you want it there too),
 rebuild, and tag a release. From then on the app asks GitHub once a day and shows a notice with a link to the release page. It
 never downloads or installs anything, so it needs no signing keys. The test `the_check_is_off_until_a_repository_is_set`
 documents the switch; update it when you flip it. Release tags must look like `v1.2.3` (an optional short suffix such as

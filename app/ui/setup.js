@@ -50,7 +50,7 @@ function drawWizard() {
       <p>Install the free ntfy app on your phone and subscribe to the same topic. Treat the topic like a password.</p>`;
   }
   if (n === 4) {
-    h += `<h2>Almost done.</h2><label class="sw"><input type="checkbox" data-c="writeback" ${W.writeback ? "checked" : ""}><div><b>Let Inbox Agent file mail for me</b><span>Marking a task done archives the message. Stars and priorities become flags and labels. Leave off to keep your mailbox untouched.</span></div></label>
+    h += `<h2>Almost done.</h2><label class="sw"><input type="checkbox" data-c="writeback" ${W.writeback ? "checked" : ""}><div><b>Let Inbox Agent file mail for me</b><span>Marking a task done archives the message. Stars and priorities become flags, and labels on Gmail. Left off, your mailbox is untouched, but the changes you make are remembered and applied if you switch this on later.</span></div></label>
       <label class="sw"><input type="checkbox" data-c="hub" ${W.hub ? "checked" : ""}><div><b>Use on phone or tablet</b><span>Shows a QR code in Settings. Works on your home Wi-Fi (not encrypted) or over a private VPN such as Tailscale.</span></div></label>`;
     next = `<button class="btn pri" data-w="finish">Finish</button>`;
   }
@@ -109,7 +109,10 @@ async function drawSettings() {
   const s = S.settings, a = s.alerts || {}, ai = s.ai || {}, dr = s.drafts || { auto: false, tone: "friendly", signature: "", min_priority: 3, daily_cap: 25 };
   let hub = null; if (s.hub?.enabled) hub = await rpc("hub_info").catch(() => null);
   veil.innerHTML = panel(`<h2>Settings</h2>
-    <div class="sect">Mail</div><p>${esc(s.account?.user)} · ${esc(s.account?.host)}</p><div class="foot" style="margin-top:12px"><button class="btn sm" data-s="signout">Sign out and reset</button></div>
+    <div class="sect">Mail</div><p>${esc(s.account?.user)} · ${esc(s.account?.host)}</p>
+    <label class="f" for="s-pw">New app password</label><input id="s-pw" type="password" data-s="newpw" autocomplete="off" placeholder="paste a new app password">
+    <p>Providers cancel app passwords whenever you change your account password. Pasting a new one here keeps your list, notes and tasks.</p>
+    <div class="foot" style="margin-top:12px"><button class="btn sm" data-s="savepw">Save password</button><span id="pwres"></span><span class="sp"></span><button class="btn sm" data-s="signout">Sign out and reset</button></div>
     <div class="sect">Ranking</div>
     <select data-s="aimode"><option value="rules" ${ai.mode === "rules" ? "selected" : ""}>Rules only</option><option value="ollama" ${ai.mode === "ollama" ? "selected" : ""}>Local AI (Ollama)</option><option value="anthropic" ${ai.mode === "anthropic" ? "selected" : ""}>Claude (own API key)</option></select>
     ${ai.mode === "ollama" ? `<label class="f">Ollama model</label><input type="text" data-s="ollama_model" value="${esc(ai.ollama_model)}" placeholder="llama3.2">` : ""}
@@ -162,6 +165,17 @@ async function settingsClick(e) {
     let next = all.includes(c) ? all.filter(x => x !== c) : [...all, c];
     if (next.length === ALERT_CATS.length || !next.length) next = [];
     try { S.settings = await rpc("save_settings", { patch: { alerts: { categories: next } } }); drawSettings() } catch (err) { toast("Couldn't save: " + err) }
+  }
+  if (k === "savepw") {
+    const box = $("#s-pw"), pw = box?.value.trim(), out = $("#pwres");
+    if (!pw) { out.innerHTML = '<span class="bad">Paste the new password first</span>'; return }
+    out.textContent = "Checking…";
+    const acct = S.settings.account || {};
+    try {
+      await rpc("test_account", { host: acct.host, port: acct.port, user: acct.user, password: pw });
+      await rpc("save_account", { host: acct.host, port: acct.port, user: acct.user, password: pw });
+      box.value = ""; out.innerHTML = '<span class="ok">Saved. Your list is untouched.</span>';
+    } catch (err) { out.innerHTML = `<span class="bad">${esc(String(err).replace(/^Error: /, ""))}</span>` }
   }
   if (k === "diag") { try { await navigator.clipboard.writeText(await rpc("diagnostics")); toast("Diagnostics copied. Read it, then paste it into your bug report.") } catch (err) { toast("Couldn’t copy: " + err) } }
   if (k === "export") { try { await navigator.clipboard.writeText(await rpc("export_markdown")); toast("Copied as Markdown") } catch (err) { toast("Couldn’t copy: " + err) } }

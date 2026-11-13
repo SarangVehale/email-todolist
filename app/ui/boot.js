@@ -1,4 +1,5 @@
 "use strict";
 /* ───────── boot ───────── */
-render(); load(); setInterval(load, 3000);
+if (MODE === "locked") { lockedScreen(); }
+else { render(); load(); setInterval(load, 3000); }
 document.addEventListener("visibilitychange", () => !document.hidden && load());

@@ -6,7 +6,7 @@ use engine::store::Store;
 use engine::triage::RulesTriager;
 use engine::watcher::{
     build_sent_index, connect_plain, find_sent_folder, find_special, process_new, reconcile_open,
-    refresh_sent_index,
+    refresh_sent_index, sent_or_empty,
 };
 use engine::writeback::drain_session;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -39,6 +39,8 @@ struct State {
     refuse_store: bool,
     refuse_fetch: bool,
     omit_uid: bool,
+    refuse_login: bool,
+    no_body_for: Option<u32>,
 }
 
 struct Server {
@@ -169,7 +171,15 @@ fn serve(stream: TcpStream, st: Arc<Mutex<State>>) {
         let mut out = String::new();
         match cmd.as_str() {
             "CAPABILITY" => out += "* CAPABILITY IMAP4rev1 IDLE UIDPLUS MOVE X-GM-EXT-1\r\n",
-            "LOGIN" => {}
+            "LOGIN" => {
+                if s.refuse_login {
+                    let _ = w.write_all(
+                        format!("{tag} NO [AUTHENTICATIONFAILED] Invalid credentials\r\n")
+                            .as_bytes(),
+                    );
+                    continue;
+                }
+            }
             "LIST" => {
                 for f in &s.folders {
                     let attr = if f.attr.is_empty() {
@@ -249,6 +259,7 @@ fn serve(stream: TcpStream, st: Arc<Mutex<State>>) {
                             continue;
                         }
                         let omit_uid = s.omit_uid;
+                        let no_body_for = s.no_body_for;
                         let (set, items) = a2.split_once(' ').unwrap_or((a2, ""));
                         let f = s
                             .folders
@@ -275,6 +286,17 @@ fn serve(stream: TcpStream, st: Arc<Mutex<State>>) {
                             } else {
                                 format!("UID {uid} ")
                             };
+                            // a server that answers the fetch but sends no content for this message
+                            if part.is_empty() && no_body_for == Some(uid) {
+                                let _ = w.write_all(
+                                    format!(
+                                        "* {seq} FETCH ({uid_item}FLAGS ({}))\r\n",
+                                        m.flags.join(" ")
+                                    )
+                                    .as_bytes(),
+                                );
+                                continue;
+                            }
                             let _ = w.write_all(
                                 format!("* {seq} FETCH ({uid_item}FLAGS ({}) ", m.flags.join(" "))
                                     .as_bytes(),
@@ -1458,4 +1480,144 @@ fn a_renumbered_sent_folder_is_read_again_from_scratch() {
     let folder = find_sent_folder(&mut s).unwrap();
     refresh_sent_index(&mut s, &folder, &mut idx).unwrap();
     assert!(idx.replied_to.contains("<z@acme>"));
+}
+
+// ───────── findings from the review council ─────────
+
+/// Folders with no `\Sent` flag and no English name, as a localized server presents them.
+fn localized_folders(inbox: Vec<Msg>) -> Vec<Folder> {
+    vec![
+        folder("INBOX", "", inbox),
+        folder("Gesendet", "", vec![]),
+        folder("Entwürfe", "", vec![]),
+        folder("Papierkorb", "", vec![]),
+    ]
+}
+
+#[test]
+fn a_mailbox_whose_sent_folder_cannot_be_found_still_loads_all_the_mail() {
+    // a German, French or custom-named Sent folder with no \Sent flag must not stop the whole sync
+    let srv = Server::start(localized_folders(vec![
+        inbox_msg(1, "<a@acme>", "one"),
+        inbox_msg(2, "<b@acme>", "two"),
+    ]));
+    let store = Store::memory().unwrap();
+    let mut s = srv.session();
+    assert!(
+        find_sent_folder(&mut s).is_err(),
+        "the folder really is unfindable"
+    );
+
+    let (folder, idx) = sent_or_empty(&mut s, &store);
+    assert!(folder.is_none());
+    assert!(idx.replied_to.is_empty() && idx.recipients.is_empty());
+    let n = process_new(&mut s, &store, &RulesTriager, &idx, 50, &mut |_, _| {}).unwrap();
+    assert_eq!(n, 2, "the mail loads anyway");
+    let log: Vec<String> = store.recent_log(10).into_iter().map(|l| l.1).collect();
+    assert!(
+        log.iter().any(|l| l.contains("Sent folder")),
+        "and the user is told why replies are not detected: {log:?}"
+    );
+}
+
+#[test]
+fn a_wrong_password_is_told_apart_from_a_server_that_is_simply_down() {
+    let srv = Server::start(gmail_folders(vec![], vec![]));
+    srv.st.lock().unwrap().refuse_login = true;
+    let e = connect_plain(srv.addr, "me@example.com", "wrong").expect_err("login is refused");
+    assert!(
+        engine::watcher::is_sign_in_problem(&e),
+        "a refused password: {e}"
+    );
+
+    // nothing listening: an ordinary network problem, not a reason to stop trying
+    let dead = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = dead.local_addr().unwrap();
+    drop(dead);
+    let e = connect_plain(addr, "me@example.com", "pw").expect_err("nothing is listening");
+    assert!(!engine::watcher::is_sign_in_problem(&e), "a dead port: {e}");
+}
+
+#[test]
+fn a_message_the_server_returns_without_a_body_is_retried_then_given_up_on() {
+    let srv = Server::start(gmail_folders(
+        vec![
+            inbox_msg(1, "<a@acme>", "one"),
+            inbox_msg(2, "<b@acme>", "two"),
+            inbox_msg(3, "<c@acme>", "three"),
+        ],
+        vec![],
+    ));
+    srv.st.lock().unwrap().no_body_for = Some(2);
+    let store = Store::memory().unwrap();
+
+    // first pass: 1 and 3 are stored, and the cursor does not jump past the message that came back empty
+    let mut s = srv.session();
+    process_new(
+        &mut s,
+        &store,
+        &RulesTriager,
+        &SentIndex::default(),
+        50,
+        &mut |_, _| {},
+    )
+    .unwrap();
+    assert!(store.seen(1) && store.seen(3));
+    assert!(!store.seen(2));
+    assert!(
+        store.last_uid() < 2,
+        "the cursor waits for it, got {}",
+        store.last_uid()
+    );
+
+    // the server recovers: the message arrives on the next sync, nothing is lost
+    srv.st.lock().unwrap().no_body_for = None;
+    let mut s = srv.session();
+    process_new(
+        &mut s,
+        &store,
+        &RulesTriager,
+        &SentIndex::default(),
+        50,
+        &mut |_, _| {},
+    )
+    .unwrap();
+    assert!(
+        store.seen(2),
+        "the message appears once the server sends it"
+    );
+    assert_eq!(store.last_uid(), 3);
+}
+
+#[test]
+fn a_message_that_never_arrives_does_not_block_the_sync_for_ever() {
+    let srv = Server::start(gmail_folders(
+        vec![
+            inbox_msg(1, "<a@acme>", "one"),
+            inbox_msg(2, "<b@acme>", "two"),
+        ],
+        vec![],
+    ));
+    srv.st.lock().unwrap().no_body_for = Some(1);
+    let store = Store::memory().unwrap();
+    for _ in 0..4 {
+        let mut s = srv.session();
+        process_new(
+            &mut s,
+            &store,
+            &RulesTriager,
+            &SentIndex::default(),
+            50,
+            &mut |_, _| {},
+        )
+        .unwrap();
+    }
+    assert!(store.seen(2));
+    assert_eq!(store.last_uid(), 2, "after a few tries the cursor moves on");
+    let log: Vec<String> = store.recent_log(20).into_iter().map(|l| l.1).collect();
+    assert!(
+        log.iter()
+            .any(|l| l.contains("message 1") && l.contains("no content")),
+        "and it is logged, not silent: {log:?}"
+    );
 }

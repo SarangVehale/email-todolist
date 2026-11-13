@@ -50,7 +50,7 @@ highest priority and a count; it shows what is true of any message in the conver
 and is folded as automated or as left-the-inbox only when every message is. The priority dots show the newest message's own
 priority (clicking them changes that message), with an "Earlier P4" tag when an older one ranks higher. Done, star and snooze
 apply to the messages of that row from the same filtered list the user is looking at (search, category and the Starred tab
-are respected), no newer than the row; priority applies to the row's own message only. A new message wakes a snoozed conversation. Review
+are respected), no newer than the row; priority applies to the row's own message only. A new message wakes a snoozed conversation, unless that message failed its sender check. Review
 changes: separate stored root, message ids written without spaces are read, actions are limited to what was on screen, the
 cursor moves to the nearest row (or stays on the conversation) when its row disappears.
 
@@ -59,8 +59,9 @@ cursor moves to the nearest row (or stays on the conversation) when its row disa
 Corrections are stored with the sender's address (not the display name) and the task, one per task: its first priority and
 its latest. Nudging the same mail twice is still one correction, and walking it back to where it started (undo) removes it. Corrections of mail that failed its sender check
 are not recorded. For a sender, the last three corrections are read: with at least two, all in the same direction, later
-mail from that address moves by their rounded average (one or two steps, never outside 1 to 5). It applies only to the
-rules ranker, never to a sender with a saved preference, never to mail that failed its sender check, and never sets urgent.
+mail from that address moves by their rounded average (one or two steps, never outside 1 to 5). It applies to any message the rules ranked, including one where a
+model failed and the rules took over; never to a sender with a saved preference; never to mail that failed its sender
+check; and it never sets urgent.
 The task shows "Learned +1" and the why line says so; setting the sender to Normal forgets everything learned.
 
 ### 4. Priority 5 in rules mode
@@ -73,7 +74,9 @@ message now count for nothing.
 
 ### 5. Newsletters fold away (already in place)
 
-Bulk mail at priority 1 or 2 with no due date folds into one "Automated" row with "Done all"; it is not counted in the header.
+Bulk mail at priority 1 or 2 that the user has not touched (no star, no draft anywhere in the conversation, not
+urgent, no due date) collapses behind a "Show automated" button, with "Done all automated" beside it; it is not counted
+in the header.
 
 ### 6. Reading the mail
 
@@ -84,8 +87,9 @@ accounts a button copies a Gmail search link. Clicking text in an open row no lo
 
 First run says "Reading your latest mail" while the first sync runs, and the write-back queue is labelled "to file". Undo
 looks tasks up by id when it runs. Discarding an edited draft asks first. Due dates are editable on any task and titles on
-tasks the user added; "snooze until" takes a date; tasks due today or overdue sort as at least priority 4; the daily digest
-counts them. Dialogs get roles and labels, move focus in and back, keep Tab inside, and close on Escape (not the first-run
+tasks the user added; "snooze until" takes a date; a task due today or earlier sorts as at least priority 4, but only when someone is waiting on an
+answer (it needs a reply or comes from a sender you write to, and is not bulk), so a newsletter saying "offer ends
+today" cannot climb; the daily digest shows these as their own "due" figure. Dialogs get roles and labels, move focus in and back, keep Tab inside, and close on Escape (not the first-run
 wizard); toasts are announced; wizard choices are real buttons and labels are bound to fields; dimmed rows no longer fall
 below readable contrast; reduced motion is respected.
 
@@ -99,5 +103,5 @@ Multiple accounts, calendar invites, AI summaries, swipe gestures, any change to
 ## Test plan
 
 Each item has a failing test first. Auto-close and threads run against the scripted IMAP server in
-`engine/tests/imap_flows.rs`. Learning, urgency and thread keys are unit tests on the store and triage code.
+`engine/tests/imap_flows.rs`. Learning, urgency and thread keys are tested in `engine/tests/phase2.rs`.
 UI behaviour is checked in the browser demo and in the packaged app.

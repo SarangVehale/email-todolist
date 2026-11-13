@@ -26,7 +26,7 @@ automated checks, not a third-party penetration test.
 | 5 | Medium | **Spoofed sender** gained "known person" trust and a high-priority alert | A failed DKIM, SPF or DMARC result in `Authentication-Results` cancels sender and reply trust. Model prompts defang `<` and `>` in email text so it cannot close the untrusted wrapper | `failed_dkim_or_spf_cancels_known_sender_trust`, `email_text_cannot_close_the_untrusted_wrapper...` |
 | 6 | Medium | **Crash on hostile MIME**: deeply nested multipart overflowed the stack and aborted the whole process (reproduced) | Refuse messages with an absurd number of MIME containers, parse on a 64 MB-stack thread, cap text recursion, skip messages over 5 MB | `deeply_nested_multipart_does_not_crash_the_process` |
 | 7 | Low | **Access code handling**: code stayed in the address bar, no brute-force limit, no clickjacking or Referer protection, public state exposed account and alert topic, no rotation | Code stripped from the URL after first load; 10 failures per minute locks an address out; `X-Frame-Options`, `Referrer-Policy`, `nosniff`, CSP and `no-store` on every response; the hub sees only `onboarded` and `writeback`; code rotates on disable and sign-out, plus a "Rotate access code" button | `guessing_tokens_gets_an_address_locked_out`, `responses_carry_hardening_headers`, `rotating_the_token_kills_the_old_one`, `public_state_leaks_neither...` |
-| 8 | Low | **Data at rest**: no retention; a changed `UIDVALIDITY` could lose mail | Finished tasks pruned after 90 days, log after 30; cursor resets when the server's `UIDVALIDITY` changes | `prune_drops_old_done_tasks...`, `changed_uidvalidity_resets_the_cursor...` |
+| 8 | Low | **Data at rest**: no retention; a changed `UIDVALIDITY` could lose mail | Finished tasks pruned after 90 days, log after 30; when the server's `UIDVALIDITY` changes the mailbox starts over (the stored tasks, drafts and queued changes go, because the old numbers now point at different messages) | `prune_drops_old_done_tasks...`, `changed_uidvalidity_starts_the_mailbox_over...` |
 | 9 | Info | CSP allowed inline scripts; settings fields were not validated; model calls followed redirects | UI split into files, `script-src 'self'` in the app and the hub; settings validated before every save (host, ports, ntfy topic and server, model names, URLs); model and alert HTTP calls never follow redirects | `settings_reject_values_that_could_inject_into_urls_or_commands`, `defaults_are_valid` |
 | 10 | High | **Stored XSS via model output**: the model's `category` reached an HTML attribute (the filter chips) unescaped, so a crafted email could have tried to inject markup | The engine keeps only the eight known categories (anything else becomes `other`); the UI also escapes the attribute | `unknown_or_hostile_categories_become_other` |
 | 11 | Info | **Reply drafts** are new attacker-adjacent output: header injection when saving to the Drafts folder, prompt injection through the email being replied to, runaway AI cost | Draft messages are built by one function that rejects invalid addresses, strips control characters from every header, encodes non-ASCII subjects, base64-encodes the body, and keeps only clean Message-IDs in threading headers. Email text, sender and the user's own instruction are defanged in the prompt. Auto-drafting has a daily cap, a minimum priority, needs an AI model, and discards template fallbacks. **No code in the app can send mail**: a draft only ever reaches the Drafts folder, by an explicit click, and only when mailbox write-back is on | `draft_message_headers_cannot_be_injected`, `draft_message_round_trips_...`, `the_draft_prompt_defangs_...`, `task_commands_work_through_the_core` |
@@ -71,7 +71,7 @@ overlap for one 20-second tick.
 
 Exact-match routes only (no filesystem access, path traversal tested); bound SQL parameters
 everywhere; constant-time token comparison; 32-character access code from a CSPRNG; hub commands
-limited to four, and desktop-only commands blocked; secrets in the OS keychain only; the API key is
+limited to a short allow-list (eleven today, none of which can reach the account, settings, secrets or the AI); secrets in the OS keychain only; the API key is
 sent only to a fixed Anthropic HTTPS URL; TLS to the mail server with hostname verification;
 ntfy title restricted to ASCII; all UI sinks escape `& < > " '`.
 
@@ -206,6 +206,35 @@ Known and accepted: an account change or a server renumbering clears the stored 
 check can happen that day; a renamed repository stops notices silently (GitHub answers with a redirect, which the app
 does not follow); the check is on by default and the wizard does not ask about it (PRIVACY.md describes it, and it does
 nothing until the project has a repository).
+
+## Review 4 (two-model council plus a documentation drift pass, 2026-11-13)
+
+Two models were asked the same question independently — "should this be published as 0.1.0 to strangers?" — without
+being told each other's answers or mine. One said **do not ship**, the other **ship with caveats**. Both were right
+about different things, and every finding below was reproduced before it was changed.
+
+### Found by the seat that said "do not ship"
+
+| Finding | Fix |
+| --- | --- |
+| **The phone hub served a working fake sign-in form to everyone on the network.** Static files need no access code (the page has to load before it can authenticate), and the shipped bundle included the demo backend. A visitor with no code therefore got the setup wizard, an "App password" field, and the answer "Connected · Sent folder: [Gmail]/Sent Mail" to anything typed. The legitimate user whose phone lost its code saw the same thing: a real password typed into a form that discards it, followed by a fabricated inbox. Reproduced in a browser end to end | The demo backend is no longer part of the hub bundle, and a page with no access code is now a dead end that says to scan the code again. It contains no password field. Development uses `app/ui/demo.html`, which the hub refuses to serve |
+| **There was no way to re-enter a password.** `save_account` was reachable only from the first-run wizard; Settings offered only "Sign out and reset", which deletes the task list, notes, drafts and your own tasks. Providers cancel app passwords whenever the account password changes, so this is a first-week event | Settings has a "New app password" field that checks the password and saves it. The mailbox is unchanged, so nothing is deleted |
+| A test named `changed_uidvalidity_resets_the_cursor_so_new_mail_is_not_lost` asserted that every task was deleted | Renamed to `changed_uidvalidity_starts_the_mailbox_over_because_the_uids_now_mean_other_mail`, with a comment explaining that the mail is still on the server |
+
+### Found by the seat that said "ship with caveats"
+
+| Finding | Fix |
+| --- | --- |
+| **A mailbox whose Sent folder could not be found loaded no mail at all.** The lookup ran before the first sync and its failure restarted the whole connection every 30 seconds. Only five English and Gmail names are guessed, so a server that sets no `\Sent` flag and calls the folder "Gesendet" or "Éléments envoyés" left the user with an error and an empty list | The Sent folder is optional. Mail loads either way; only reply detection and "someone you write to" are weaker, and the user is told why |
+| **A refused password was retried every 30 seconds for ever.** Providers lock accounts for that | A refused sign-in is now its own kind of error: it waits five minutes and the status says to enter the password again |
+| **Mail could disappear from the list.** A message the server answered for but sent no content for was skipped, while the cursor still advanced past it, so it never appeared | The cursor stops short of such a message and tries again; after a few tries it gives up and says so in the log |
+
+### Accepted, not changed
+
+Unsigned builds, no automatic updates until the project has a repository, and the security contact in this file are all
+still open and are listed above. The deeper point both seats made stands: **nothing here has ever spoken to a real mail
+server.** The mock in `engine/tests/imap_flows.rs` proves the client does what its author expected, not what Gmail or
+Dovecot actually does. A live run remains the single most valuable thing left to do.
 
 Still open from this review: a signed update channel, code signing and notarization, a live-mailbox test, macOS and
 Linux builds run on real machines, a `Host` header check on the hub, two watchers briefly overlapping after a

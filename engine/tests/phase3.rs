@@ -755,3 +755,69 @@ fn folder_names_and_custom_server_names_are_not_in_the_report() {
     });
     assert!(known.contains("imap.gmail.com"));
 }
+
+// ── a new app password without losing the list ──
+#[test]
+fn a_new_password_can_be_saved_without_wiping_anything() {
+    // providers revoke app passwords whenever the account password changes; that must not cost the user their list
+    let (c, dir) = settings_core("newpw");
+    let mut s = c.settings();
+    s.account = engine::settings::AccountCfg {
+        host: "imap.example.com".into(),
+        port: 993,
+        user: "me@example.com".into(),
+    };
+    s.onboarded = true;
+    s.save(&c.dir).unwrap();
+    {
+        let st = c.store().unwrap();
+        let e = engine::mail::parse(
+            1,
+            b"From: Pat <pat@x.com>
+Subject: keep me
+Message-ID: <k@x>
+
+body
+",
+        )
+        .unwrap();
+        let sig = engine::signals::Signals::default();
+        use engine::triage::Triager;
+        st.add(
+            &e,
+            &engine::triage::RulesTriager.triage(&e, &sig).unwrap(),
+            &sig,
+        )
+        .unwrap();
+        st.set_note(1, "my note").unwrap();
+        st.add_local_task("my own task", 3, "").unwrap();
+    }
+
+    // the same mailbox, a new password
+    c.rpc(
+        "save_account",
+        &serde_json::json!({"host": "imap.example.com", "port": 993, "user": "me@example.com", "password": "new app password"}),
+    )
+    .unwrap();
+    let st = c.store().unwrap();
+    assert!(st.get(1).is_some(), "the mail task survives");
+    assert_eq!(st.get(1).unwrap().note, "my note");
+    assert_eq!(
+        st.all_tasks().unwrap().len(),
+        2,
+        "and so does the task you added"
+    );
+    assert!(c.settings().onboarded, "you are not thrown back into setup");
+
+    // a different mailbox is a different story: that data does not belong to the new account
+    c.rpc(
+        "save_account",
+        &serde_json::json!({"host": "imap.example.com", "port": 993, "user": "someone.else@example.com", "password": "pw"}),
+    )
+    .unwrap();
+    assert!(
+        c.store().unwrap().get(1).is_none(),
+        "another account starts clean"
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}

@@ -55,11 +55,6 @@ const FILES: &[(&str, &str, &[u8])] = &[
         include_bytes!("../../app/ui/setup.js"),
     ),
     (
-        "/mock.js",
-        "text/javascript; charset=utf-8",
-        include_bytes!("../../app/ui/mock.js"),
-    ),
-    (
         "/boot.js",
         "text/javascript; charset=utf-8",
         include_bytes!("../../app/ui/boot.js"),

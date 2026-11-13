@@ -223,7 +223,13 @@ fn every_ui_file_is_served_and_nothing_else() {
             let p = e.path();
             if p.is_dir() {
                 stack.push(p);
-            } else if p.extension().is_some_and(|x| x != "txt") {
+            } else if p.extension().is_some_and(|x| x != "txt")
+                // the demo backend and its preview page are for development only and are deliberately
+                // not shipped to the network
+                && p
+                    .file_name()
+                    .is_some_and(|f| f != "mock.js" && f != "demo.html")
+            {
                 let rel = p
                     .strip_prefix(&ui)
                     .unwrap()
@@ -253,4 +259,22 @@ fn every_ui_file_is_served_and_nothing_else() {
             "{bad} was served"
         );
     }
+}
+
+#[test]
+fn the_demo_backend_is_never_served_to_the_network() {
+    // A visitor with no access code must not be handed the demo backend: with it, the page shows the setup wizard,
+    // asks for an email address and an app password, and answers "Connected" to anything typed. That is a credential
+    // form served from the user's own machine to everyone on the network.
+    let h = hub("nomock");
+    for path in ["/mock.js", "/demo.html"] {
+        let r = raw(h.port, &format!("GET {path} HTTP/1.1\r\nHost: x\r\n\r\n"));
+        assert!(r.starts_with("HTTP/1.1 404"), "{path}: {}", head(&r));
+    }
+    // and the page it would have been loaded from must not reference it either
+    let page = raw(h.port, "GET /index.html HTTP/1.1\r\nHost: x\r\n\r\n");
+    assert!(
+        !page.contains("mock.js"),
+        "index.html still loads the demo backend"
+    );
 }

@@ -8,6 +8,8 @@ versions may change behaviour.
 First public build.
 
 ### Added
+- A new app password can be saved in Settings without losing the list, notes or your own tasks.
+
 - Update notice: once the project has a GitHub repository the app asks GitHub once a day whether a newer version exists and
   shows a link (it downloads nothing). Off until a repository is set; a Settings switch turns it off.
 - "Copy diagnostics" in Settings: a report with counts, option names and recent activity, with names, subjects and
@@ -16,7 +18,7 @@ First public build.
   marked and folded away instead of cluttering the list; nothing about this ever changes your mailbox.
 - Conversations are one row, with a count and the highest priority; done, star and snooze apply to the whole row.
 - The list learns from corrections of a sender (by address, with a way to start over), and rules mode now produces
-  priority 5 for an overdue question from someone you write to. Words like "urgent" in a message count for nothing.
+  priority 5 for a question from someone you write to whose date is today, tomorrow or past. Words like "urgent" in a message count for nothing.
 - Read the stored message text in the app, copy a Gmail link, edit due dates, rename your own tasks, snooze until a date.
 - Keyboard and screen-reader work: dialogs with roles and focus handling, Escape to close, announced toasts, readable
   contrast on every row, reduced-motion support.
@@ -29,7 +31,8 @@ First public build.
   per-sender "always important" / "mute", quiet hours and a daily digest.
 - Reply drafts stored inside each task: written by your chosen AI or a template, editable, copyable, and saveable to
   your mailbox's Drafts folder. The app contains no code that can send mail.
-- Optional mailbox changes (archive, star, priority and category labels), off until you switch them on.
+- Optional mailbox changes, off until you switch them on: archive and star everywhere, plus priority and category
+  labels on Gmail (other servers get the archive move and the flag only).
 - Phone and tablet access through a token-protected local hub with QR code setup.
 - Desktop notifications and optional ntfy push alerts.
 - Passwords and API keys in the operating system keychain.
@@ -39,10 +42,15 @@ First public build.
 - Choose which categories raise alerts (urgent mail always does), and a `?` card listing the keyboard shortcuts.
 
 ### Security
+- The phone hub no longer ships the demo backend, and a page opened without the access code is a dead end instead of a
+  sign-in form. Before this, anyone on the same network could be shown a convincing password form served by the user's
+  own machine.
+- A mailbox with no recognisable Sent folder still loads; a refused password waits five minutes instead of retrying
+  every thirty seconds; and a message the server returns empty is retried instead of being skipped for good.
 - Third review (Opus, 2026-11-13): one bad unsubscribe link could blank the list; a crashing message could crash the app on every start; hostile HTML could stall the watcher; sign-out left mail text in the database files; the hub answered public networks; mail data sat in Roaming AppData. All fixed with tests; see SECURITY.md.
 - A damaged database is set aside and rebuilt, newer data is refused, and a `crash.log` records internal errors (no telemetry).
 - Two independent security reviews; all confirmed findings fixed with regression tests. See SECURITY.md.
-- 235 automated tests, including protocol tests against a scripted mock IMAP server and a dedicated edge-case suite.
+- 241 automated tests, including protocol tests against a scripted mock IMAP server and a dedicated edge-case suite.
 
 ### Known limitations
 - Microsoft (Outlook, Microsoft 365) accounts are not supported: Microsoft turned off password sign-in for IMAP.
