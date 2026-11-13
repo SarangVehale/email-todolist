@@ -122,7 +122,7 @@ fn check_for_update(
 pub fn wake_notices(due: &[crate::store::Task]) -> Vec<String> {
     let mut seen = std::collections::HashSet::new();
     due.iter()
-        .filter(|t| seen.insert(t.thread.clone()))
+        .filter(|t| seen.insert((t.mailbox, t.thread.clone()))) // a conversation is one mailbox's
         .map(|t| {
             if t.action.is_empty() {
                 t.subject.clone()
@@ -187,7 +187,7 @@ fn tick(core: &Arc<Core>) {
             let today = now.format("%Y-%m-%d").to_string();
             let conversations = open
                 .iter()
-                .map(|t| t.thread.as_str())
+                .map(|t| (t.mailbox, t.thread.as_str()))
                 .collect::<std::collections::HashSet<_>>()
                 .len();
             let high = open.iter().filter(|t| t.priority >= 4).count();

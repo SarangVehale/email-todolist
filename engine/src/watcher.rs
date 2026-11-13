@@ -364,6 +364,13 @@ pub fn process_new_until<T: Read + Write>(
         for m in s.uid_fetch(uid_set(&wanted), "BODY.PEEK[]")?.iter() {
             let Some(uid) = m.uid else { continue };
             received.push(uid);
+            // the task id layout holds IMAP numbers below 400 million; a mailbox past that cannot be tracked
+            if uid >= crate::store::MAILBOX_SPAN {
+                store.log(&format!(
+                    "skipped message {uid}: its number is too large for this app to track"
+                ))?;
+                continue;
+            }
             let Some(body) = m.body() else {
                 // The server answered for this message but sent no content. Leaving the cursor past it would drop it
                 // from the list for good, so stop short of it and try again next time — a few times, then give up.
@@ -434,6 +441,11 @@ pub fn process_new_until<T: Read + Write>(
         for uid in wanted.iter().filter(|u| !received.contains(u)) {
             unfinished = Some(unfinished.map_or(*uid, |u: u32| u.min(*uid)));
         }
+        // A stop that came while the last message was being ranked left it unstored: the cursor must not claim it was
+        // read (it would never be read), and a removed mailbox must not get its cursor written back after the removal.
+        if stopped() {
+            return Ok(n);
+        }
         if unfinished.is_none() {
             store.clear_no_content()?;
         }
@@ -501,7 +513,7 @@ fn maintain<T: Read + Write>(
         let now = chrono::Utc::now().timestamp() as f64;
         match crate::followup::check(s, store, sent, own, days, now, stop) {
             Ok(r) => {
-                let _ = store.meta_set("followup_error", "");
+                let _ = store.meta_set(&store.mkey("followup_error"), "");
                 if r.created > 0 || r.closed > 0 {
                     let _ = store.log(&format!(
                         "checked for replies to what you sent: {} waiting, {} answered since",
@@ -512,9 +524,10 @@ fn maintain<T: Read + Write>(
             // "unknown" never creates a task. The same complaint is logged once, not every two minutes.
             Err(e) => {
                 let msg = format!("could not check for replies to what you sent: {e}");
-                if store.meta_get("followup_error").as_deref() != Some(msg.as_str()) {
+                let key = store.mkey("followup_error");
+                if store.meta_get(&key).as_deref() != Some(msg.as_str()) {
                     let _ = store.log(&msg);
-                    let _ = store.meta_set("followup_error", &msg);
+                    let _ = store.meta_set(&key, &msg);
                 }
             }
         }

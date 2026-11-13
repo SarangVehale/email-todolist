@@ -138,3 +138,21 @@ a case changes mail. Record the result and, for any failure, the **Activity log*
 | MT-96 | A recurring invitation | The card says only the first time is kept |
 | MT-97 | A due-date-only monthly task (rent): finish it a few days early | It moves to next month's date and stays in the list |
 | MT-98 | Change only the repeat of a reminder that already fired | The change is accepted and nothing fires again |
+
+## J. Several mailboxes
+
+| ID | Case | Expected |
+| --- | --- | --- |
+| MT-99 | Settings, "Add another mailbox", a second real mailbox with its app password, Test, Add | Its mail appears within a minute with a small tag with its name (hover shows the address); the first mailbox's tasks gain a tag too |
+| MT-100 | Add a second mailbox at a provider other than the first (for example Gmail and iCloud) | Each is read with its own login; only the Gmail one offers "Copy Gmail link" |
+| MT-101 | Add two Google accounts; on a task of the second, press "Copy Gmail link" and open it | It opens that message in the second account (the link names the address), not the browser's first Google account |
+| MT-102 | Filter chips: choose a mailbox, then All | Only that mailbox's tasks, then everything; your own tasks show under All only |
+| MT-103 | Turn on "Let Inbox Agent file mail", mark a task of the second mailbox done | It is archived in the second mailbox only; a task of the first mailbox is untouched |
+| MT-104 | Reply to a message in the second mailbox from the second mailbox | Its task closes ("you replied"); a task of the same subject in the first mailbox stays |
+| MT-105 | Give the second mailbox a wrong app password (or revoke it at the provider) | The first mailbox keeps working; Settings says what is wrong with the second; pasting a new password there resumes it without a restart |
+| MT-106 | Remove the second mailbox | Its tasks vanish from every tab; the mailbox itself is untouched; its keychain entry (`imap-password-1`, service InboxAgent) is gone; the first mailbox and your own tasks stay |
+| MT-107 | Add the same address and server twice, or a sixth mailbox | Each is refused with a plain message |
+| MT-108 | Remove the first mailbox while a second exists | The second keeps working; "Sign out and reset" afterwards removes every password |
+| MT-109 | Open the phone hub with two mailboxes | The same list, no tags, no mailbox names anywhere in the page or its data |
+| MT-110 | Upgrade from the earlier build with an existing list | Nothing moves, no task is lost, the old mailbox is mailbox 0 and shows no tag until a second is added |
+| MT-111 | A second mailbox with a large inbox, first connect | The first load takes only the newest messages (as for the first mailbox) and the app stays responsive while both read |

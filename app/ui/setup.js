@@ -72,6 +72,7 @@ veil.addEventListener("change", e => {
 veil.addEventListener("click", async e => {
   if (e.target.closest("[data-vc]") || e.target === veil && veil.dataset.kind === "settings") return closeVeil();
   if (veil.dataset.kind === "settings") return settingsClick(e);
+  if (veil.dataset.kind === "mailbox") return mailboxClick(e);
   const ai = e.target.closest("[data-ai]"); if (ai) { W.ai = ai.dataset.ai; W.aiTest = null; if (W.ai === "ollama") { W.ollamaModels = await rpc("detect_ollama").catch(() => []); W.model = W.ollamaModels[0] || "" } drawWizard(); return }
   const w = e.target.closest("[data-w]")?.dataset.w; if (!w) return;
   if (w === "back") { W.step--; drawWizard() }
@@ -158,14 +159,79 @@ async function ruleClick(b) {
   }
 }
 veil.addEventListener("input", e => { if (veil.dataset.kind === "settings" && e.target.dataset?.r === "text") ruleEdit(e.target) });
+/* ───────── several mailboxes ───────── */
+function mailStatus(st) {
+  st = String(st || "");
+  if (st === "idle") return '<span class="ok">Connected</span>';
+  if (st === "syncing" || st === "connecting") return "Reading mail…";
+  if (st === "no password") return '<span class="bad">Needs a new app password</span>';
+  if (st.startsWith("error")) return `<span class="bad">${esc(st.replace(/^error:\s*/, "").slice(0, 90))}</span>`;
+  return esc(st);
+}
+function mailboxesHTML(s) {
+  const mbs = (S.accounts && S.accounts.length) ? S.accounts : [{ id: 0, user: s.account?.user, host: s.account?.host, status: S.status }];
+  return mbs.map(m => `<div class="mbx" data-id="${m.id}"><p><b>${esc(m.user)}</b> · ${esc(m.host)} · ${mailStatus(m.status)}</p>
+    <label class="f" for="s-pw${m.id}">New app password</label><input id="s-pw${m.id}" type="password" data-s="newpw" data-id="${m.id}" autocomplete="off" placeholder="paste a new app password">
+    <div class="foot" style="margin-top:8px"><button class="btn sm" data-s="savepw" data-id="${m.id}">Save password</button><span data-pwres="${m.id}"></span><span class="sp"></span>${mbs.length > 1 ? `<button class="btn sm" data-s="rmacct" data-id="${m.id}">Remove</button>` : ""}</div></div>`).join("");
+}
+let MB = null;
+function openAddMailbox() {
+  MB = { provider: "gmail", host: PROVIDERS.gmail.host, port: 993, user: "", pw: "", tested: null, testing: false, busy: false };
+  veil.dataset.kind = "mailbox"; drawMailbox();
+  const p = veil.querySelector(".panel"); if (p) p.setAttribute("aria-label", "Add a mailbox");
+  setTimeout(() => veil.querySelector("#m-user")?.focus(), 30);
+}
+function mailboxBack() { MB = null; veil.dataset.kind = "settings"; drawSettings().then(() => veil.querySelector("[data-s=addacct]")?.focus()) }
+function drawMailbox() {
+  const p = PROVIDERS[MB.provider], n = (S.accounts || []).length, focused = veil.contains(document.activeElement) ? document.activeElement.id : "";
+  veil.innerHTML = panel(`<h2>Add a mailbox</h2><p>Its mail joins the same list. A small tag on each task says which mailbox it came to. ${n} of 5 in use.</p>
+    <label class="f" for="m-provider">Provider</label><select id="m-provider" data-f="provider">${Object.entries(PROVIDERS).map(([k, v]) => `<option value="${k}" ${MB.provider === k ? "selected" : ""}>${v.name}</option>`).join("")}</select>
+    <div class="help"><b>Getting an app password</b><ol>${p.help.map(x => `<li>${esc(x)}</li>`).join("")}</ol></div>
+    ${MB.provider === "other" ? `<div class="row2"><div><label class="f" for="m-host">IMAP server</label><input id="m-host" type="text" data-f="host" value="${esc(MB.host)}" placeholder="imap.example.com"></div><div><label class="f" for="m-port">Port</label><input id="m-port" type="number" data-f="port" value="${MB.port}"></div></div>` : ""}
+    <label class="f" for="m-user">Email address</label><input id="m-user" type="text" data-f="user" value="${esc(MB.user)}" autocomplete="off" placeholder="you@example.com">
+    <label class="f" for="m-pw">App password</label><input id="m-pw" type="password" data-f="pw" value="${esc(MB.pw)}" autocomplete="off">
+    <div class="foot"><button class="btn sm" id="m-test" data-m="test" ${MB.testing ? "disabled" : ""}>${MB.testing ? "Testing…" : "Test connection"}</button><span id="mtestres">${MB.tested ? (MB.tested.ok ? `<span class="ok">Connected · Sent folder: ${esc(MB.tested.sent)}</span>` : `<span class="bad">${esc(MB.tested.error)}</span>`) : ""}</span></div>
+    <div class="foot"><span class="sp"></span><button class="btn" data-m="cancel">Cancel</button><button class="btn pri" id="m-add" data-m="add" ${MB.tested?.ok && !MB.busy ? "" : "disabled"}>Add mailbox</button></div>`);
+  veil.querySelector(".panel")?.setAttribute("aria-label", "Add a mailbox");
+  if (focused) veil.querySelector("#" + focused)?.focus(); // a redraw must not drop the keyboard onto the page
+}
+async function mailboxClick(e) {
+  const m = e.target.closest("[data-m]")?.dataset.m, mb = MB; if (!m || !mb) return;
+  if (m === "cancel") return mailboxBack();
+  const here = () => MB === mb; // Cancel or Escape while a request is out leaves nothing to draw on when it comes back
+  if (m === "test") {
+    mb.testing = true; mb.tested = null; drawMailbox();
+    try { const r = await rpc("test_account", { host: mb.host, port: mb.port, user: mb.user, password: mb.pw }); mb.tested = { ok: true, sent: r.sent } }
+    catch (err) { mb.tested = { ok: false, error: String(err).replace(/^Error: /, "") } }
+    mb.testing = false; if (here()) drawMailbox();
+  }
+  if (m === "add") {
+    if (mb.busy) return; mb.busy = true; drawMailbox();
+    try { await rpc("add_account", { host: mb.host, port: mb.port, user: mb.user, password: mb.pw }) }
+    catch (err) { mb.busy = false; mb.tested = { ok: false, error: String(err).replace(/^Error: /, "") }; if (here()) drawMailbox(); return }
+    clearReadCaches(); // a mailbox number may be a removed mailbox's again
+    lastSnap = ""; await load(); toast("Mailbox added. Its mail is being read.");
+    if (here()) { MB = null; veil.dataset.kind = "settings"; drawSettings().then(() => veil.querySelector("[data-s=addacct]")?.focus()) }
+  }
+}
+/* task ids are reused when a mailbox number is: what was read or can be undone for a removed mailbox must not follow the number */
+function clearReadCaches() { for (const k of Object.keys(bodies)) delete bodies[k]; undoStack.length = 0; const u = $("#undo"); if (u) u.style.display = "none" }
+veil.addEventListener("input", e => {
+  const f = e.target.dataset?.f; if (!f || veil.dataset.kind !== "mailbox" || !MB) return;
+  MB[f] = e.target.type === "number" ? +e.target.value : e.target.value;
+  if (["user", "pw", "host", "port"].includes(f)) { MB.tested = null; const ad = veil.querySelector("[data-m=add]"); if (ad) ad.disabled = true; const r = $("#mtestres"); if (r) r.innerHTML = "" }
+});
+veil.addEventListener("change", e => {
+  if (veil.dataset.kind === "mailbox" && MB && e.target.dataset.f === "provider") { MB.provider = e.target.value; MB.host = PROVIDERS[e.target.value].host; MB.port = 993; MB.tested = null; drawMailbox() }
+});
 async function drawSettings() {
   const s = S.settings, a = s.alerts || {}, ai = s.ai || {}, dr = s.drafts || { auto: false, tone: "friendly", signature: "", min_priority: 3, daily_cap: 25 };
   let hub = null; if (s.hub?.enabled) hub = await rpc("hub_info").catch(() => null);
   veil.innerHTML = panel(`<h2>Settings</h2>
-    <div class="sect">Mail</div><p>${esc(s.account?.user)} · ${esc(s.account?.host)}</p>
-    <label class="f" for="s-pw">New app password</label><input id="s-pw" type="password" data-s="newpw" autocomplete="off" placeholder="paste a new app password">
+    <div class="sect">Mail</div>
+    ${mailboxesHTML(s)}
     <p>Providers cancel app passwords whenever you change your account password. Pasting a new one here keeps your list, notes and tasks.</p>
-    <div class="foot" style="margin-top:12px"><button class="btn sm" data-s="savepw">Save password</button><span id="pwres"></span><span class="sp"></span><button class="btn sm" data-s="signout">Sign out and reset</button></div>
+    <div class="foot" style="margin-top:12px"><button class="btn sm" data-s="addacct" ${(S.accounts || []).length >= 5 ? "disabled" : ""}>Add another mailbox</button><span class="sp"></span><button class="btn sm" data-s="signout">Sign out and reset</button></div>
     <div class="sect">Ranking</div>
     <select data-s="aimode"><option value="rules" ${ai.mode === "rules" ? "selected" : ""}>Rules only</option><option value="ollama" ${ai.mode === "ollama" ? "selected" : ""}>Local AI (Ollama)</option><option value="anthropic" ${ai.mode === "anthropic" ? "selected" : ""}>Claude (own API key)</option></select>
     ${ai.mode === "ollama" ? `<label class="f">Ollama model</label><input type="text" data-s="ollama_model" value="${esc(ai.ollama_model)}" placeholder="llama3.2">` : ""}
@@ -231,19 +297,26 @@ async function settingsClick(e) {
     try { S.settings = await rpc("save_settings", { patch: { alerts: { categories: next } } }); drawSettings() } catch (err) { toast("Couldn't save: " + err) }
   }
   if (k === "savepw") {
-    const box = $("#s-pw"), pw = box?.value.trim(), out = $("#pwres");
+    const id = +e.target.closest("[data-s]").dataset.id || 0;
+    const box = veil.querySelector(`input[data-s=newpw][data-id="${id}"]`), pw = box?.value.trim(), out = veil.querySelector(`[data-pwres="${id}"]`);
     if (!pw) { out.innerHTML = '<span class="bad">Paste the new password first</span>'; return }
     out.textContent = "Checking…";
-    const acct = S.settings.account || {};
+    const acct = (id === 0 ? S.settings.account : (S.settings.more_accounts || []).find(m => m.id === id)) || {};
     try {
       await rpc("test_account", { host: acct.host, port: acct.port, user: acct.user, password: pw });
-      await rpc("save_account", { host: acct.host, port: acct.port, user: acct.user, password: pw });
+      await rpc("save_account", { id, host: acct.host, port: acct.port, user: acct.user, password: pw });
       box.value = ""; out.innerHTML = '<span class="ok">Saved. Your list is untouched.</span>';
     } catch (err) { out.innerHTML = `<span class="bad">${esc(String(err).replace(/^Error: /, ""))}</span>` }
+  }
+  if (k === "addacct") { openAddMailbox(); return }
+  if (k === "rmacct") {
+    const btn = e.target.closest("[data-s]"), id = +btn.dataset.id;
+    if (!twice(btn, "Click again: removes this mailbox, its tasks and its saved password from the app")) return;
+    try { await rpc("remove_account", { id }); clearReadCaches(); lastSnap = ""; await load(); drawSettings() } catch (err) { toast("Couldn't remove: " + String(err).replace(/^Error: /, "")) }
   }
   if (k === "diag") { try { await navigator.clipboard.writeText(await rpc("diagnostics")); toast("Diagnostics copied. Read it, then paste it into your bug report.") } catch (err) { toast("Couldn’t copy: " + err) } }
   if (k === "export") { try { await navigator.clipboard.writeText(await rpc("export_markdown")); toast("Copied as Markdown") } catch (err) { toast("Couldn’t copy: " + err) } }
   if (k === "rotate") { await rpc("rotate_hub_token"); toast("New access code. Scan the code again on your phone."); drawSettings() }
-  if (k === "signout" && twice(e.target.closest("[data-s]"), "Click again: removes password and local list")) { await rpc("sign_out"); W = { ...W, step: 0, tested: null, pw: "" }; closeVeil() }
+  if (k === "signout" && twice(e.target.closest("[data-s]"), "Click again: removes every saved password and key, and the local list")) { await rpc("sign_out"); clearReadCaches(); W = { ...W, step: 0, tested: null, pw: "" }; closeVeil() }
 }
 

@@ -26,6 +26,9 @@ and alerts you only when something is important.
 - **Reminders, search inside messages, calendar invitations.** Give a task of your own a time to be reminded and let it
   repeat daily, weekly or monthly. Search finds words inside the stored message text, not only in the subject. An
   invitation shows its event, and "Save .ics" writes a calendar file you open yourself.
+- **Several mailboxes, one list.** Add up to five mailboxes (any IMAP provider with an app password) in Settings. Their mail
+  merges into one list with a small tag on each task and a filter chip per mailbox; each is read, filed and followed up in
+  its own account, and removing one deletes its tasks, drafts, follow-up records and saved password and leaves the mailbox itself untouched.
 - **Keyboard first.** `j` `k` or the arrow keys move, `Enter` opens a task, `x` (or `e`) done, `1`-`5` priority,
   `s` star, `r` reply draft (mail only), `h` snooze, `v` select several, `a` add task, `/` search, `z` undo, `,` settings, `?` for the full
   list. Capitals work too.
@@ -63,7 +66,7 @@ IMAP_HOST=imap.example.com IMAP_USER=you@example.com IMAP_PASS=... cargo run --e
 
 ## Status
 
-Built and tested: engine (366 tests, including protocol tests against a scripted mock IMAP server and a dedicated edge-case suite), UI in a browser, phone hub, installer build.
+Built and tested: engine (412 tests, including protocol tests against a scripted mock IMAP server and a dedicated edge-case suite), UI in a browser, phone hub, installer build.
 The IMAP sync and write-back are tested against a scripted mock server, which proves what the client sends and how it parses
 standard responses, but a real Gmail or other server may differ. Not yet exercised against a live mailbox, and releases are unsigned.
 See [SECURITY.md](SECURITY.md) for the full list of limits.

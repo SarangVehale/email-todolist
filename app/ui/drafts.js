@@ -11,6 +11,22 @@ const SOURCE_LABEL = { ai: "Written by AI", template: "Quick reply", user: "Edit
 const isoToday = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 const dueLabel = iso => { const [, m, d] = iso.split("-"); return `${+d} ${MONTHS[+m - 1]}`; };
 const isLocal = t => t.uid >= 2000000000;
+/* several mailboxes: the engine tells the desktop window which mailboxes there are and each task which one it belongs to
+   (none for a task you added). The phone is told neither, so it shows no tags and no mailbox filter. */
+const accts = () => S.accounts || [];
+const multi = () => accts().length > 1;
+const acctInfo = t => (t.mailbox == null ? null : accts().find(a => a.id === t.mailbox) || null);
+const acctLabel = a => {
+  const [l, dom = ""] = String(a.user || "").split("@");
+  const dup = accts().some(o => o.id !== a.id && String(o.user || "").split("@")[0].toLowerCase() === l.toLowerCase());
+  const s = dup && dom ? l + "@" + dom.split(".")[0] : l;
+  return s.length > 16 ? s.slice(0, 15) + "…" : s;
+};
+const gmailOf = t => (accts().length ? !!acctInfo(t)?.gmail : S.gmail);
+function statusTitle(st) {
+  if (!multi()) return st;
+  return accts().map(a => `${acctLabel(a)}: ${a.status || "?"}`).join(" · ");
+}
 const nowLocal = () => { const d = new Date(), p = n => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}` };
 /* a calendar event's day and a readable "when": UTC times are shown in this computer's time, others as written */
 const evDay = ev => {
@@ -48,6 +64,7 @@ function tagsHTML(t) {
   if (t.event) out.push(`<span class="tg ${t.event.cancelled ? "r" : ""}">${t.event.cancelled ? "Event cancelled" : "Event " + dueLabel(evDay(t.event))}</span>`);
   if (flt.q.trim() && bodyHit(t, flt.q.trim().toLowerCase()) && !textMatch(t, flt.q.trim().toLowerCase())) out.push('<span class="tg" title="The words are in the message text">In text</span>');
   if (isLocal(t) && t.kind !== "followup") out.push('<span class="tg">Mine</span>');
+  if (multi()) { const a = acctInfo(t); if (a) out.push(`<span class="tg" title="${esc(a.user)}">${esc(acctLabel(a))}</span>`) }
   if (t.pref === "important") out.push('<span class="tg">★ Sender</span>');
   if (t.pref === "mute") out.push('<span class="tg">Muted</span>');
   return out.join("");
@@ -74,7 +91,7 @@ function extraHTML(t) {
   const own = find(t.uid) || t; // a conversation row shows the earliest due date; the field edits this message's own
   const due = `<div class="drow"><label class="lbl" for="du${t.uid}">Due</label><input id="du${t.uid}" class="mini dateinp" type="date" data-due="${t.uid}" value="${esc(own.due || "")}" aria-label="Due date">${own.due ? '<button class="mini" data-act="due-clear">Clear</button>' : ""}</div>`;
   const title = isLocal(t) ? `<div class="drow"><label class="lbl" for="ti${t.uid}">Title</label><input id="ti${t.uid}" class="dtext titleinp" type="text" maxlength="200" data-title="${t.uid}" value="${esc(t.subject)}" aria-label="Task title"></div>` : "";
-  const gmail = S.gmail && t.message_id ? '<button class="mini" data-act="copy-gmail">Copy Gmail link</button>' : "";
+  const gmail = gmailOf(t) && t.message_id ? '<button class="mini" data-act="copy-gmail">Copy Gmail link</button>' : "";
   const read = !isLocal(t) && !isHub
     ? `<div class="drow"><button class="mini" data-act="read-body" aria-expanded="${bodies[t.uid] !== undefined}">${bodies[t.uid] !== undefined ? "Hide message" : "Read message"}</button>${gmail}</div>${bodies[t.uid] !== undefined ? `<pre class="bodytext" tabindex="0" aria-label="Message text">${esc(bodies[t.uid] || "No text.")}</pre>` : ""}`
     : "";
@@ -125,10 +142,11 @@ function replyBlock(t) {
 function filterHTML() {
   const base = baseList(), cats = {};
   base.forEach(t => cats[t.category] = (cats[t.category] || 0) + 1);
-  const filtered = flt.cat !== "all" || flt.only || flt.q.trim();
+  const filtered = flt.cat !== "all" || flt.only || flt.acct || flt.q.trim();
   const nReply = base.filter(t => t.needs_reply || t.draft).length, nDraft = base.filter(t => t.draft).length;
-  const chip = (key, label, n, on) => `<button class="chip ${on ? "on" : ""}" data-flt="${esc(key)}">${label}<i>${n}</i></button>`;
-  return `<div class="fbar"><div class="chips">${chip("all", "All", base.length, flt.cat === "all" && !flt.only)}${nReply ? chip("only:reply", "Reply", nReply, flt.only === "reply") : ""}${nDraft ? chip("only:drafts", "Drafts", nDraft, flt.only === "drafts") : ""}${Object.keys(cats).sort().map(c => chip("cat:" + c, esc(c), cats[c], flt.cat === c)).join("")}</div>
+  const chip = (key, label, n, on, tip) => `<button class="chip ${on ? "on" : ""}" data-flt="${esc(key)}"${tip ? ` title="${esc(tip)}"` : ""}>${label}<i>${n}</i></button>`;
+  const boxes = multi() ? accts().map(a => chip("acct:" + a.id, esc(acctLabel(a)), base.filter(t => t.mailbox === a.id).length, flt.acct === String(a.id), a.user)).join("") : "";
+  return `<div class="fbar"><div class="chips">${chip("all", "All", base.length, flt.cat === "all" && !flt.only && !flt.acct)}${nReply ? chip("only:reply", "Reply", nReply, flt.only === "reply") : ""}${nDraft ? chip("only:drafts", "Drafts", nDraft, flt.only === "drafts") : ""}${boxes}${Object.keys(cats).sort().map(c => chip("cat:" + c, esc(c), cats[c], flt.cat === c)).join("")}</div>
     <div class="fctl">${filtered && listFor().length > 1 ? `<button class="mini" data-bulk="1">Done all ${listFor().length}</button>` : ""}<input id="q" type="search" placeholder="Search   /" value="${esc(flt.q)}" aria-label="Search tasks" autocomplete="off"><select id="sort" aria-label="Sort by">${Object.entries(SORT_LABELS).map(([k, l]) => `<option value="${k}" ${flt.sort === k ? "selected" : ""}>${l}</option>`).join("")}</select></div></div>`;
 }
 
@@ -182,7 +200,7 @@ function handleExtra(e, t, act) {
     case "save-ics":
       (async () => { busy++; try { const p = await rpc("save_event", { uid: t.uid }); toast("Saved " + p) } catch (err) { toast(String(err).replace(/^Error: /, "")) } finally { busy-- } })();
       return true;
-    case "copy-gmail": copyText("https://mail.google.com/mail/u/0/#search/" + encodeURIComponent("rfc822msgid:" + String(t.message_id).replace(/^<|>$/g, ""))); return true;
+    case "copy-gmail": copyText("https://mail.google.com/mail/u/" + (multi() && acctInfo(t) ? encodeURIComponent(acctInfo(t).user) : "0") + "/#search/" + encodeURIComponent("rfc822msgid:" + String(t.message_id).replace(/^<|>$/g, ""))); return true;
     case "due-clear": setDue(t, ""); return true;
     case "read-body":
       if (bodies[t.uid] !== undefined) { delete bodies[t.uid]; render(); return true }
@@ -215,7 +233,8 @@ function handleExtra(e, t, act) {
 document.addEventListener("click", e => {
   const c = e.target.closest("[data-flt]"); if (!c) return;
   const [k, v] = c.dataset.flt.split(":");
-  if (k === "all") { flt.cat = "all"; flt.only = "" }
+  if (k === "all") { flt.cat = "all"; flt.only = ""; flt.acct = "" }
+  else if (k === "acct") { flt.acct = flt.acct === v ? "" : v }
   else if (k === "cat") { flt.cat = flt.cat === v ? "all" : v }
   else if (k === "only") { flt.only = flt.only === v ? "" : v }
   render();
@@ -334,7 +353,7 @@ async function submitAdd() {
   const title = $("#at-title").value.trim(); if (!title) { toast("Give the task a title"); return }
   try {
     const uid = await rpc("add_task", { title, priority: +$("#at-pri").value, due: $("#at-due").value || "" });
-    view = "todo"; flt.cat = "all"; flt.only = ""; flt.q = ""; cur = uid; closeVeil(); toast("Task added");
+    view = "todo"; flt.cat = "all"; flt.only = ""; flt.acct = ""; flt.q = ""; cur = uid; closeVeil(); toast("Task added");
   } catch (err) { toast(String(err).replace(/^Error: /, "")) }
 }
 const HELP = [["J K", "Move down / up"], ["Enter", "Open or close a task (while selecting, picks the row)"], ["X", "Mark done"], ["1–5", "Set priority"], ["S", "Star"], ["R", "Reply draft"], ["H", "Snooze until tomorrow"], ["V", "Select several, then X, 1–5, S or H"], ["A", "Add a task"], ["/", "Search"], ["Z", "Undo"], [",", "Settings"], ["?", "This card"]];
@@ -352,6 +371,7 @@ document.addEventListener("click", e => {
 document.addEventListener("keydown", e => {
   const k = vl().dataset.kind;
   if (vl().classList.contains("show") && e.key === "Escape" && k === "settings") { closeVeil(); return }
+  if (vl().classList.contains("show") && e.key === "Escape" && k === "mailbox") { mailboxBack(); return }
   if (vl().classList.contains("show") && (k === "add" || k === "help")) {
     if (e.key === "Escape") closeVeil();
     else if (k === "add" && e.key === "Enter" && e.target.id === "at-title") { e.preventDefault(); submitAdd() }

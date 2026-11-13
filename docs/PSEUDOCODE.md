@@ -11,15 +11,19 @@ start():
     settings = load settings.json            # corrupt or missing -> defaults
     open the database: integrity check; a damaged file is set aside as agent.db.corrupt-<time> and rebuilt;
                        data from a newer app version is refused and left alone
-    start scheduler thread                    # always (snooze wake-ups, daily digest, the update check)
     if hub enabled:      start hub thread
-    account = settings + password from OS keychain
-    if no account or not onboarded: status = "setup" / "no password"; return
-    start watcher thread                      # section 2
-    start write-back thread                   # section 6
+    start scheduler thread                    # always (snooze wake-ups, daily digest, the update check)
+    if setup is not finished: status = "setup"; return
+    if there is no mailbox:   status = "no password"; return
+    for each mailbox in settings (the first, then up to four more; section 5h):
+        password = its OS keychain entry                          # none -> its status = "no password" (or the keychain's own error); no threads
+        start watcher thread  (scoped store)                      # section 2
+        start write-back thread  (scoped store)                   # section 6
+    status shown = the worst of the mailboxes' statuses           # section 5h
 ```
 Edge cases: restarting after every settings save must not leave two hubs fighting for the port (hub retries its bind for
-6 s) — `hub_survives_repeated_settings_saves`.
+6 s) — `hub_survives_repeated_settings_saves`; one mailbox without a password must not stop the others from syncing —
+`phase6.rs` (add/remove/status tests).
 
 ## 2. Watching the mailbox (`watcher.rs: run`)
 
@@ -187,9 +191,10 @@ own = from_addrs + the login name when it is an address
 check(days, stop):                               # inside maintain(), after the Sent index is topped up
     if days == 0 or stop: return                 # no commands at all, not even for follow-ups already open
     for each open follow-up (not reopened by the user):
-        if a stored mail replies to it (thread or References has its id; not its own copy, not from `own`, not bulk):
+        if a stored mail replies to it (thread or References has its id; not its own copy, not from `own`, not bulk;
+                                        mail already read from ANY mailbox counts: a reply may reach another of your addresses):
             close it, closed_by = "replied", remember "answered"        # no search, no server round trip
-    room = 20 - open follow-ups
+    room = 20 - this mailbox's open follow-ups     # the cap, like the server search, is per mailbox
     candidates = started messages sent between 14 days and `days` days ago, not yet in the `followups` table,
                  with a recipient that is not in `own` (the first such one is the subject of the task)
     for each candidate, newest first, at most 10 per pass; stop if `stop` is set before each step and before each write:
@@ -201,7 +206,7 @@ check(days, stop):                               # inside maintain(), after the 
         answered:       remember "answered"            (never searched again)
         not answered:   if room > 0: remember "waiting"; make a task of your own "Follow up: <subject>", priority 3,
                         kind "followup" (the task and its record are written together); room -= 1
-prune follow-up records older than 60 days at start and once a day; sign-out and an account change delete them with their tasks
+prune follow-up records older than 60 days at start and once a day, except those whose task still exists (the record is what ties a task to its mailbox); sign-out and an account change delete them with their tasks
 ```
 Edge cases: server cannot search, replies archived to All Mail or Archive, a reply read and filed by the app, your own
 nudge, an out-of-office notice, a task you closed, a task you reopened, messages to yourself (also with a login that is not
@@ -284,6 +289,64 @@ save_event(uid)  (desktop only):  no event / cancelled: refuse
 Edge cases: Windows zone names, folded and escaped lines, alarms, a second event, a reply, hostile and oversized input,
 random garbage, injection through the summary or place, file names from hostile summaries, an existing file —
 `phase5.rs` (calendar tests).
+
+## 5h. Several mailboxes (`store.rs: scoped, global_uid, remove_mailbox`, `core.rs: add_account, remove_account`)
+
+```
+ids:    task id = mailbox * 400,000,000 + IMAP uid       (mailbox 0..4; mailbox 0 = the raw IMAP uid, as before)
+        your own tasks and follow-ups = 2,000,000,000 and up
+        an IMAP uid >= 400,000,000 -> the store refuses it; the sync logs "skipped message N" and moves its cursor past it
+
+store.scoped(n):                           # one mailbox's view: its two threads, and the reset when its login changes
+    sync speaks IMAP numbers in and out; the store keeps task ids
+    last_uid, uidvalidity, in-flight, no-content counters   <- meta keys "<name>@n" (mailbox 0: plain key)
+    open_mail_tasks / set_gone / auto_close / pending (outbox) / open_followups   see only this mailbox
+    unscoped store (window, commands, phone): writes as mailbox 0, reads everything
+
+UIDVALIDITY changed (the mailbox was renumbered):
+    delete its tasks, drafts, outbox items and per-mailbox meta keys (cursor, counters)
+    corrections made on its messages are kept (what was learned about senders holds) but unlinked: parked on the first
+    number of this mailbox's block, which no message has, so they go with this mailbox and with no other
+server or address changed, or the mailbox removed:
+    all of the above, plus its corrections, its follow-up tasks and its follow-up records (every record carries its mailbox;
+    a follow-up task with no record at all, left by the old clean-up, counts as the first mailbox's)
+keep, always: the other mailboxes, your own tasks, rules, sender choices, the log, the update-check date
+
+add_account(host, port, user, password):
+    refuse unless setup is done and a first mailbox exists; refuse an empty password
+    id = lowest unused number in 0..4 (0 = the first mailbox's place, empty after it was removed), else "at most five mailboxes"
+    candidate settings = settings + this mailbox;  validate (<= 4 extras, unique ids, no same server+address, valid host/port/user)
+    clear whatever an earlier mailbox of that number left behind (a sync still mid-message when it was removed)
+    store the password at keychain "imap-password-<id>";  save settings;  start();  return id
+
+remove_account(id):
+    refuse an unknown id;  raise the stop flag;  delete that mailbox's data (above);  delete its keychain entry
+    clear it from settings (id 0 -> an empty first account);  if no mailbox is left: onboarded = false
+    save settings;  start()
+
+save_account(id?, host, port, user, password):                 # a new password, or another server or address
+    candidate settings with this mailbox replaced; validate
+    if server or address changed: raise the stop flag first (a sync mid-batch must not write the old mail back), then
+                                  reset that mailbox         # only that one
+    store the password at its keychain entry;  save
+    if setup is done (and something was stopped or the save worked): start()    # so the syncs use the new password
+
+status shown = first of: any "error..."; "no password"; "connecting"; "syncing"; anything not "idle"; else "idle"
+               (no mailbox has reported yet: "starting"; setup not finished: "setup")
+a sync that was stopped (restart, sign-out, its mailbox removed) reports no more status and does not move its cursor:
+a batch whose last message was being ranked when the stop came is read again next time, not skipped
+
+the phone:   its state has no `accounts`, and the "connected as <login>" line of the sync log reaches it without the login
+the window:  a task carries `mailbox` (mail: its mailbox; follow-up: the mailbox that sent the message; yours: none)
+             tags and chips only when the desktop's `accounts` has more than one entry (the phone gets no list, so none)
+             a conversation is a mailbox + thread, so one message that reached two mailboxes stays two rows, and news in
+             one (which wakes a snooze) never wakes the other's
+```
+Edge cases: the same IMAP number in two mailboxes, a UID past the layout, a renumbered mailbox, a removed first mailbox
+with others left, the last mailbox removed, a sixth mailbox, the same address twice (any case), the password of a removed
+mailbox, a sync stopped while it ranks a message, data left behind in a number that is reused, a first place refilled after it was
+emptied, the phone's log, many threads opening a new database at once —
+`phase6.rs` and the `mailboxes` module of `imap_flows.rs`.
 
 ## 6. Changing the real mailbox (`writeback.rs`) — only when the user turned it on
 
@@ -399,7 +462,7 @@ state():  show the stored tag only while it is still newer than the running vers
           from the repository and the tag; phones never get it
 
 diagnostics():                                                                      # desktop only
-    counts + option names + the server's host name, but only for well-known providers (else "custom server")
+    counts + option names + the first mailbox's server host name, but only for well-known providers (else "custom server")
     activity lines: quoted text -> ellipsis, around "@" -> <address>, home paths -> <path>, error details removed
     crash lines: keep time, thread and file:line only
 ```

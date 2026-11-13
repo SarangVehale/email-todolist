@@ -16,6 +16,37 @@ pub const MAX_NOTE_CHARS: usize = 2000;
 pub const SCHEMA_VERSION: i32 = 2;
 /// Tasks you add yourself live above this number, so they never collide with a mail server's UIDs.
 pub const LOCAL_UID_BASE: u32 = 2_000_000_000;
+/// The most mailboxes the app reads at once.
+pub const MAX_MAILBOXES: u32 = 5;
+/// Each mailbox owns a block of this many task ids: mailbox `n` numbers its tasks `n * MAILBOX_SPAN + IMAP UID`. The first
+/// mailbox's ids are therefore its IMAP UIDs, exactly as before, and five blocks end where your own tasks begin. A mailbox
+/// whose UIDs pass this number (400 million messages) cannot be tracked and its messages are skipped with a log line.
+pub const MAILBOX_SPAN: u32 = 400_000_000;
+
+/// The task id of IMAP message `uid` in mailbox `mailbox`. `uid` must be below `MAILBOX_SPAN`.
+pub fn global_uid(mailbox: u32, uid: u32) -> u32 {
+    mailbox * MAILBOX_SPAN + uid
+}
+
+/// Which mailbox a mail task's id belongs to.
+pub fn mailbox_of(id: u32) -> u32 {
+    id / MAILBOX_SPAN
+}
+
+/// The IMAP UID inside the mailbox for a mail task's id.
+pub fn imap_uid(id: u32) -> u32 {
+    id % MAILBOX_SPAN
+}
+
+/// What a mailbox keeps in `meta`, under a name that carries the mailbox number (`last_uid@2`; the first mailbox keeps
+/// the plain name).
+const PER_MAILBOX_META: [&str; 5] = [
+    "last_uid",
+    "uid_validity",
+    "attempt",
+    "no_content",
+    "followup_error",
+];
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Draft {
@@ -80,6 +111,8 @@ pub struct Task {
     pub repeat: String,
     /// The calendar event the message invited you to, if it carried one.
     pub event: Option<crate::calendar::Event>,
+    /// The mailbox (0 to 4) a mail task, or a follow-up, belongs to; none for a task you added yourself.
+    pub mailbox: Option<u32>,
 }
 
 /// What `apply_rules` did, or with a dry run would do.
@@ -112,6 +145,10 @@ pub struct Override {
 
 pub struct Store {
     db: Connection,
+    /// The mailbox this store works for, or None for the whole app. A plain store (the window, the commands, the phone,
+    /// every test) is None: it sees every mailbox's tasks, and what it writes for "the mailbox" is the first one's, which
+    /// is how a single-mailbox app has always behaved. The sync and write-back of mailbox `n` use `scoped(n)`.
+    scope: Option<u32>,
 }
 
 const SCHEMA: &str = "
@@ -137,7 +174,8 @@ CREATE TABLE IF NOT EXISTS rules (
   priority INTEGER, category TEXT, file INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS followups (
-  message_id TEXT PRIMARY KEY, state TEXT NOT NULL, at REAL NOT NULL, task_uid INTEGER NOT NULL DEFAULT 0
+  message_id TEXT PRIMARY KEY, state TEXT NOT NULL, at REAL NOT NULL, task_uid INTEGER NOT NULL DEFAULT 0,
+  acct INTEGER NOT NULL DEFAULT 0
 );
 ";
 
@@ -214,12 +252,16 @@ const ADDED_COLUMNS: &[(&str, &str)] = &[
     ("event", "TEXT DEFAULT ''"),
 ];
 
+/// And the follow-up records, which learned which mailbox they belong to.
+const ADDED_FOLLOWUP_COLUMNS: &[(&str, &str)] = &[("acct", "INTEGER NOT NULL DEFAULT 0")];
+
 /// Same idea for the corrections table.
 const ADDED_OVERRIDE_COLUMNS: &[(&str, &str)] =
     &[("addr", "TEXT DEFAULT ''"), ("uid", "INTEGER DEFAULT 0")];
 
 const SELECT: &str = "SELECT t.uid,t.message_id,t.sender,t.addr,t.subject,t.received,t.priority,t.category,t.action,t.urgent,t.status,t.star,\
-t.excerpt,t.why,t.signals,t.needs_reply,t.due,t.snooze_until,t.reply_to,d.body,d.source,d.saved,d.updated,p.level,t.auth_fail,t.attachments,t.attachment_count,t.unsubscribe,t.note,t.thread,t.closed_by,t.gone,t.learned,t.kind,t.remind,t.repeat,t.event \
+t.excerpt,t.why,t.signals,t.needs_reply,t.due,t.snooze_until,t.reply_to,d.body,d.source,d.saved,d.updated,p.level,t.auth_fail,t.attachments,t.attachment_count,t.unsubscribe,t.note,t.thread,t.closed_by,t.gone,t.learned,t.kind,t.remind,t.repeat,t.event,\
+CASE WHEN t.kind='followup' THEN COALESCE((SELECT f.acct FROM followups f WHERE f.task_uid=t.uid), 0) END \
 FROM tasks t LEFT JOIN drafts d ON d.uid=t.uid LEFT JOIN sender_prefs p ON p.addr=t.addr";
 
 fn domain(a: &str) -> String {
@@ -282,6 +324,11 @@ fn row(r: &rusqlite::Row) -> rusqlite::Result<Task> {
         remind: r.get(34)?,
         repeat: r.get(35)?,
         event: serde_json::from_str(&r.get::<_, Option<String>>(36)?.unwrap_or_default()).ok(),
+        mailbox: if uid < LOCAL_UID_BASE {
+            Some(mailbox_of(uid))
+        } else {
+            r.get::<_, Option<u32>>(37)?
+        },
     })
 }
 
@@ -306,6 +353,16 @@ fn ensure_secure_delete(db: &Connection) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Adds a column unless it is there. Every mailbox's sync opens its own connection, so two of them can reach a database that
+/// needs the column at the same moment; the loser's `ALTER` then fails with "duplicate column name", which is the answer
+/// it was after.
+fn add_column(db: &Connection, table: &str, name: &str, def: &str) -> anyhow::Result<()> {
+    match db.execute(&format!("ALTER TABLE {table} ADD COLUMN {name} {def}"), []) {
+        Err(e) if e.to_string().contains("duplicate column name") => Ok(()),
+        r => r.map(|_| ()).map_err(Into::into),
+    }
+}
+
 fn has_index(db: &Connection) -> bool {
     db.query_row(
         "SELECT 1 FROM sqlite_master WHERE name='tasks_fts'",
@@ -323,7 +380,17 @@ fn migrate(db: &Connection) -> anyhow::Result<()> {
         .collect();
     for (name, def) in ADDED_COLUMNS {
         if !have.iter().any(|h| h == name) {
-            db.execute(&format!("ALTER TABLE tasks ADD COLUMN {name} {def}"), [])?;
+            add_column(db, "tasks", name, def)?;
+        }
+    }
+    let have: Vec<String> = db
+        .prepare("PRAGMA table_info(followups)")?
+        .query_map([], |r| r.get::<_, String>(1))?
+        .filter_map(Result::ok)
+        .collect();
+    for (name, def) in ADDED_FOLLOWUP_COLUMNS {
+        if !have.iter().any(|h| h == name) {
+            add_column(db, "followups", name, def)?;
         }
     }
     let have: Vec<String> = db
@@ -333,10 +400,7 @@ fn migrate(db: &Connection) -> anyhow::Result<()> {
         .collect();
     for (name, def) in ADDED_OVERRIDE_COLUMNS {
         if !have.iter().any(|h| h == name) {
-            db.execute(
-                &format!("ALTER TABLE overrides ADD COLUMN {name} {def}"),
-                [],
-            )?;
+            add_column(db, "overrides", name, def)?;
         }
     }
     Ok(())
@@ -395,6 +459,12 @@ pub fn remove_leftover_files(dir: &Path) {
 
 impl Store {
     pub fn open(path: &Path) -> anyhow::Result<Self> {
+        // Every mailbox's sync, its write-back, the scheduler and the window open their own connection, often at the same
+        // moment (at start-up, and after every settings save). Getting a database ready (switching it to WAL, creating
+        // tables, adding columns, building the index) is where connections trip over each other, so that part takes turns.
+        // Ordinary reads and writes afterwards do not.
+        static SETUP: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _turn = SETUP.lock().unwrap_or_else(|e| e.into_inner());
         let db = Connection::open(path)?;
         db.busy_timeout(std::time::Duration::from_secs(5))?;
         let _ = db.query_row("PRAGMA journal_mode=WAL", [], |_| Ok(()));
@@ -432,7 +502,7 @@ impl Store {
         if version != SCHEMA_VERSION {
             db.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }
-        Ok(Self { db })
+        Ok(Self { db, scope: None })
     }
 
     /// Opens the database; if the file is damaged, moves it (and its journal files) aside as
@@ -480,7 +550,7 @@ impl Store {
         migrate(&db)?;
         db.execute_batch(FTS_SCHEMA)?;
         ensure_secure_delete(&db)?;
-        Ok(Self { db })
+        Ok(Self { db, scope: None })
     }
 
     /// Ids of the tasks that match what the user typed, best match first, at most 500. See `fts_query`.
@@ -495,9 +565,44 @@ impl Store {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
+    /// The same database, working for mailbox `mailbox`: the numbers the sync passes in and gets back are IMAP UIDs of that
+    /// mailbox, its counters are its own, and what it resets or lists is that mailbox's alone.
+    pub fn scoped(mut self, mailbox: u32) -> Self {
+        self.scope = Some(mailbox);
+        self
+    }
+
+    fn mb(&self) -> u32 {
+        self.scope.unwrap_or(0)
+    }
+
+    /// The `meta` name for one of this mailbox's counters (`last_uid`, or `last_uid@2` for the third mailbox).
+    pub fn mkey(&self, base: &str) -> String {
+        match self.mb() {
+            0 => base.to_string(),
+            n => format!("{base}@{n}"),
+        }
+    }
+
+    /// The task id of IMAP message `uid` in this store's mailbox; an error when the number is too large for the layout.
+    fn gid(&self, uid: u32) -> anyhow::Result<u32> {
+        if uid >= MAILBOX_SPAN {
+            anyhow::bail!("message number {uid} is too large for this app to track");
+        }
+        Ok(global_uid(self.mb(), uid))
+    }
+
+    /// The block of task ids that belong to mailbox `n`.
+    fn block(n: u32) -> (u32, u32) {
+        (n * MAILBOX_SPAN, (n + 1) * MAILBOX_SPAN)
+    }
+
     pub fn seen(&self, uid: u32) -> bool {
+        let Ok(id) = self.gid(uid) else {
+            return false;
+        };
         self.db
-            .query_row("SELECT 1 FROM tasks WHERE uid=?1", [uid], |_| Ok(()))
+            .query_row("SELECT 1 FROM tasks WHERE uid=?1", [id], |_| Ok(()))
             .is_ok()
     }
 
@@ -526,6 +631,7 @@ impl Store {
     /// Stores a triaged message. The sender's saved preference (important / mute) overrides the
     /// model's priority. Returns the triage as stored, so alerts use the final priority.
     pub fn add(&self, e: &Email, t: &Triage, s: &Signals) -> anyhow::Result<Triage> {
+        let uid = self.gid(e.uid)?; // the task id: this mailbox's block plus the IMAP UID
         let mut t = t.clone();
         let pref = self.pref(&e.sender_addr);
         match pref.as_deref() {
@@ -620,7 +726,7 @@ impl Store {
             "INSERT OR REPLACE INTO tasks(uid,message_id,sender,addr,subject,received,priority,category,action,urgent,excerpt,why,signals,body,needs_reply,due,reply_to,refs,auth_fail,attachments,attachment_count,unsubscribe,thread,learned,event)
              VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25)",
             params![
-                e.uid, e.message_id, e.sender_name, e.sender_addr, e.subject, e.received, t.priority, t.category,
+                uid, e.message_id, e.sender_name, e.sender_addr, e.subject, e.received, t.priority, t.category,
                 t.action, t.urgent as i32, e.excerpt, t.why, serde_json::to_string(s)?, e.body,
                 t.needs_reply as i32, t.due, e.reply_to, e.references, e.auth_fail as i32,
                 serde_json::to_string(&e.attachments)?, e.attachment_count as i64, e.unsubscribe, e.thread,
@@ -629,9 +735,10 @@ impl Store {
         )?;
         // news in a snoozed conversation wakes it: the snooze was for the old state of the thread
         if !e.thread.is_empty() && !e.auth_fail {
+            let (lo, hi) = Self::block(mailbox_of(uid)); // a conversation belongs to one mailbox
             self.db.execute(
-                "UPDATE tasks SET snooze_until=0 WHERE thread=?1 AND status='open' AND snooze_until>0 AND uid<>?2",
-                params![e.thread, e.uid],
+                "UPDATE tasks SET snooze_until=0 WHERE thread=?1 AND status='open' AND snooze_until>0 AND uid<>?2 AND uid>=?3 AND uid<?4",
+                params![e.thread, uid, lo, hi],
             )?;
         }
         self.log(&format!(
@@ -643,7 +750,7 @@ impl Store {
             if t.needs_reply { ", needs reply" } else { "" }
         ))?;
         if file {
-            self.set_done(e.uid, true)?; // exactly what pressing X does, including the archive with write-back on
+            self.set_done(uid, true)?; // exactly what pressing X does, including the archive with write-back on
         }
         Ok(t)
     }
@@ -1045,17 +1152,18 @@ impl Store {
     }
 
     // ---- tasks that close themselves ----
-    /// Open mail tasks (not the ones you added) with their Message-ID, for the reply and left-the-inbox checks:
-    /// (uid, message_id, keep_open, gone). Newest first.
+    /// Open mail tasks of this store's mailbox (not the ones you added) with their Message-ID, for the reply and
+    /// left-the-inbox checks: (IMAP uid, message_id, keep_open, gone). Newest first.
     pub fn open_mail_tasks(&self, limit: i64) -> Vec<(u32, String, bool, bool)> {
+        let (lo, hi) = Self::block(self.mb());
         let Ok(mut q) = self.db.prepare(
-            "SELECT uid, message_id, keep_open, gone FROM tasks WHERE status='open' AND uid<?1 AND message_id<>'' ORDER BY received DESC LIMIT ?2",
+            "SELECT uid, message_id, keep_open, gone FROM tasks WHERE status='open' AND uid>=?1 AND uid<?2 AND message_id<>'' ORDER BY received DESC LIMIT ?3",
         ) else {
             return vec![];
         };
-        q.query_map(params![LOCAL_UID_BASE, limit], |r| {
+        q.query_map(params![lo, hi, limit], |r| {
             Ok((
-                r.get(0)?,
+                imap_uid(r.get(0)?),
                 r.get(1)?,
                 r.get::<_, i32>(2)? != 0,
                 r.get::<_, i32>(3)? != 0,
@@ -1068,6 +1176,7 @@ impl Store {
     /// Closes a task because the mailbox shows it is dealt with (`by` = "replied"). Never touches the mailbox, and
     /// leaves tasks the user reopened alone. Returns whether anything changed.
     pub fn auto_close(&self, uid: u32, by: &str) -> anyhow::Result<bool> {
+        let uid = self.gid(uid)?;
         let n = self.db.execute(
             "UPDATE tasks SET status='done', snooze_until=0, closed_by=?1, done_at=CAST(strftime('%s','now') AS INTEGER) WHERE uid=?2 AND status='open' AND keep_open=0 AND uid<?3",
             params![by, uid, LOCAL_UID_BASE],
@@ -1080,6 +1189,7 @@ impl Store {
 
     /// Marks a task whose message is no longer in the inbox (or clears the mark if it is back).
     pub fn set_gone(&self, uid: u32, gone: bool) -> anyhow::Result<()> {
+        let uid = self.gid(uid)?;
         self.db.execute(
             "UPDATE tasks SET gone=?1 WHERE uid=?2 AND gone<>?1",
             params![gone as i32, uid],
@@ -1089,7 +1199,7 @@ impl Store {
 
     /// The inbox UIDVALIDITY the stored tasks were numbered under, if known.
     pub fn stored_uid_validity(&self) -> Option<u32> {
-        self.meta_get("uid_validity")?.parse().ok()
+        self.meta_get(&self.mkey("uid_validity"))?.parse().ok()
     }
 
     // ---- editable fields ----
@@ -1353,8 +1463,8 @@ impl Store {
     /// Remembers the outcome for a sent message so it is never looked at again. `at` is when it was first seen.
     pub fn mark_followup(&self, message_id: &str, state: &str, at: f64) -> anyhow::Result<()> {
         self.db.execute(
-            "INSERT INTO followups(message_id,state,at) VALUES(?1,?2,?3) ON CONFLICT(message_id) DO UPDATE SET state=excluded.state",
-            params![message_id, state, at],
+            "INSERT INTO followups(message_id,state,at,acct) VALUES(?1,?2,?3,?4) ON CONFLICT(message_id) DO UPDATE SET state=excluded.state",
+            params![message_id, state, at, self.mb()],
         )?;
         Ok(())
     }
@@ -1383,8 +1493,8 @@ impl Store {
         )?;
         let uid = tx.last_insert_rowid() as u32;
         tx.execute(
-            "INSERT INTO followups(message_id,state,at,task_uid) VALUES(?1,'waiting',?2,?3)",
-            params![m.message_id, now, uid],
+            "INSERT INTO followups(message_id,state,at,task_uid,acct) VALUES(?1,'waiting',?2,?3,?4)",
+            params![m.message_id, now, uid, self.mb()],
         )?;
         tx.commit()?;
         self.log(&format!("waiting on a reply: “{subject}”"))?;
@@ -1424,11 +1534,11 @@ impl Store {
     pub fn open_followups(&self) -> Vec<(u32, String)> {
         let Ok(mut q) = self.db.prepare(
             "SELECT t.uid, f.message_id FROM tasks t JOIN followups f ON f.task_uid=t.uid \
-             WHERE t.kind='followup' AND t.status='open' AND t.keep_open=0 ORDER BY t.uid",
+             WHERE t.kind='followup' AND t.status='open' AND t.keep_open=0 AND (?1 IS NULL OR f.acct=?1) ORDER BY t.uid",
         ) else {
             return vec![];
         };
-        q.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+        q.query_map([self.scope], |r| Ok((r.get(0)?, r.get(1)?)))
             .map(|rows| rows.filter_map(Result::ok).collect())
             .unwrap_or_default()
     }
@@ -1451,10 +1561,12 @@ impl Store {
         Ok(n > 0)
     }
 
-    /// Forgets follow-up records older than 60 days. A sent message that old is outside the 14-day window anyway.
+    /// Forgets follow-up records older than 60 days. A sent message that old is outside the 14-day window anyway. A record
+    /// whose task still exists stays as long as the task does: it says which mailbox the task belongs to, and it is how the
+    /// task is found again when that mailbox is removed.
     pub fn prune_followups(&self, now: f64) -> anyhow::Result<usize> {
         Ok(self.db.execute(
-            "DELETE FROM followups WHERE at < ?1",
+            "DELETE FROM followups WHERE at < ?1 AND (task_uid = 0 OR task_uid NOT IN (SELECT uid FROM tasks))",
             [now - 60.0 * 86400.0],
         )?)
     }
@@ -1472,13 +1584,17 @@ impl Store {
     }
 
     pub fn pending(&self, limit: i64) -> Vec<OutboxItem> {
-        let Ok(mut st) = self
-            .db
-            .prepare("SELECT id,uid,op,arg,tries FROM outbox ORDER BY id LIMIT ?1")
-        else {
+        // a store for one mailbox sees only that mailbox's items; the plain store sees them all
+        let (lo, hi) = match self.scope {
+            Some(n) => Self::block(n),
+            None => (0, u32::MAX),
+        };
+        let Ok(mut st) = self.db.prepare(
+            "SELECT id,uid,op,arg,tries FROM outbox WHERE uid>=?2 AND uid<?3 ORDER BY id LIMIT ?1",
+        ) else {
             return vec![];
         };
-        st.query_map([limit], |r| {
+        st.query_map(params![limit, lo, hi], |r| {
             Ok(OutboxItem {
                 id: r.get(0)?,
                 uid: r.get(1)?,
@@ -1586,58 +1702,62 @@ impl Store {
     }
 
     pub fn last_uid(&self) -> u32 {
-        self.meta_get("last_uid")
+        self.meta_get(&self.mkey("last_uid"))
             .and_then(|v| v.parse().ok())
             .unwrap_or(0)
     }
 
     pub fn set_last_uid(&self, uid: u32) -> anyhow::Result<()> {
-        self.meta_set("last_uid", &uid.to_string())
+        self.meta_set(&self.mkey("last_uid"), &uid.to_string())
     }
 
     /// Marks a message as "being handled right now" and returns how many times in a row this same message has
     /// been started without finishing. A crash leaves the marker behind, so the next start sees a count above 1.
     pub fn begin_attempt(&self, uid: u32) -> anyhow::Result<u32> {
         let tries = match self
-            .meta_get("attempt")
+            .meta_get(&self.mkey("attempt"))
             .as_deref()
             .and_then(|v| v.split_once(':'))
         {
             Some((u, n)) if u.parse() == Ok(uid) => n.parse::<u32>().unwrap_or(0) + 1,
             _ => 1,
         };
-        self.meta_set("attempt", &format!("{uid}:{tries}"))?;
+        self.meta_set(&self.mkey("attempt"), &format!("{uid}:{tries}"))?;
         Ok(tries)
     }
 
     /// Clears the marker once a message has been handled (stored, rejected or skipped).
     pub fn end_attempt(&self) -> anyhow::Result<()> {
-        self.meta_set("attempt", "")
+        self.meta_set(&self.mkey("attempt"), "")
     }
 
     /// How many times in a row the server has answered for `uid` without sending its content. Kept apart from the
     /// crash counter, which is a single slot that any other message resets.
     pub fn no_content_attempt(&self, uid: u32) -> anyhow::Result<u32> {
         let tries = match self
-            .meta_get("no_content")
+            .meta_get(&self.mkey("no_content"))
             .as_deref()
             .and_then(|v| v.split_once(':'))
         {
             Some((u, n)) if u.parse() == Ok(uid) => n.parse::<u32>().unwrap_or(0) + 1,
             _ => 1,
         };
-        self.meta_set("no_content", &format!("{uid}:{tries}"))?;
+        self.meta_set(&self.mkey("no_content"), &format!("{uid}:{tries}"))?;
         Ok(tries)
     }
 
     /// Forgets the no-content counter once a fetch came back whole.
     pub fn clear_no_content(&self) -> anyhow::Result<()> {
-        self.meta_set("no_content", "")
+        self.meta_set(&self.mkey("no_content"), "")
     }
 
     /// The message a previous run was in the middle of, if it never finished.
     pub fn in_flight(&self) -> Option<u32> {
-        self.meta_get("attempt")?.split_once(':')?.0.parse().ok()
+        self.meta_get(&self.mkey("attempt"))?
+            .split_once(':')?
+            .0
+            .parse()
+            .ok()
     }
 
     /// Data minimisation: drop finished tasks (and their drafts) and log lines past their retention.
@@ -1669,13 +1789,20 @@ impl Store {
     /// IMAP UIDs are only meaningful within one UIDVALIDITY. If the server reports a new value the
     /// stored cursor and UIDs are stale, so start over. Returns true when a reset happened.
     pub fn reconcile_uid_validity(&self, v: u32) -> anyhow::Result<bool> {
-        let reset = matches!(self.meta_get("uid_validity"), Some(c) if c != v.to_string());
+        let key = self.mkey("uid_validity");
+        let reset = matches!(self.meta_get(&key), Some(c) if c != v.to_string());
         if reset {
             self.reset_mailbox_data()?;
-            // what was learned about senders still holds, but the links to the old UIDs mean nothing now
-            self.db.execute("UPDATE overrides SET uid=0", [])?;
+            // what was learned about senders still holds, but the links to the old UIDs mean nothing now. An unlinked
+            // correction is parked on the first number of this mailbox's block (no message has it: IMAP numbers start at 1),
+            // so it still belongs to this mailbox and goes with it, and with no other
+            let (lo, hi) = Self::block(self.mb());
+            self.db.execute(
+                "UPDATE overrides SET uid=?1 WHERE uid>=?1 AND uid<?2",
+                params![lo, hi],
+            )?;
         }
-        self.meta_set("uid_validity", &v.to_string())?;
+        self.meta_set(&key, &v.to_string())?;
         Ok(reset)
     }
 
@@ -1704,22 +1831,72 @@ impl Store {
         Ok(())
     }
 
-    /// Forget everything tied to a mailbox (used when the account changes). Sender preferences and your rules stay.
-    /// The account changed: everything tied to the old mailbox goes, including what was learned about its senders and
-    /// the follow-ups about mail sent from it.
+    /// The first mailbox's account changed (or any scoped store's): everything tied to that mailbox goes, including what was
+    /// learned from its messages and the follow-ups about mail sent from it. Sender preferences, your rules, your own tasks
+    /// and the other mailboxes stay.
     pub fn reset_for_new_account(&self) -> anyhow::Result<()> {
-        self.reset_mailbox_data()?;
-        self.db.execute("DELETE FROM overrides", [])?;
-        self.db
-            .execute("DELETE FROM tasks WHERE kind='followup'", [])?;
-        self.db.execute("DELETE FROM followups", [])?;
+        self.clear_mailbox(self.mb())
+    }
+
+    /// Removes a mailbox: its tasks, their drafts, its queued changes, the corrections made on its messages, its follow-ups,
+    /// its counters. Nothing in the mailbox itself is touched, and nothing of any other mailbox or of yours.
+    pub fn remove_mailbox(&self, n: u32) -> anyhow::Result<()> {
+        self.clear_mailbox(n)?;
+        self.log("a mailbox was removed from the app")?;
         Ok(())
     }
 
-    pub fn reset_mailbox_data(&self) -> anyhow::Result<()> {
-        self.db.execute_batch(
-            "DELETE FROM tasks WHERE uid < 2000000000; DELETE FROM drafts WHERE uid < 2000000000; DELETE FROM outbox; DELETE FROM meta;",
+    /// `remove_mailbox` without the log line: for clearing a number before a new mailbox takes it.
+    pub fn clear_mailbox(&self, n: u32) -> anyhow::Result<()> {
+        self.delete_mail_rows(n)?;
+        let (lo, hi) = Self::block(n);
+        let tx = self.db.unchecked_transaction()?;
+        tx.execute(
+            "DELETE FROM overrides WHERE uid>=?1 AND uid<?2",
+            params![lo, hi],
         )?;
+        tx.execute(
+            "DELETE FROM tasks WHERE kind='followup' AND uid IN (SELECT task_uid FROM followups WHERE acct=?1)",
+            [n],
+        )?;
+        if n == 0 {
+            // a follow-up whose record the previous version pruned (it deleted records at 60 days whatever their task was
+            // doing): only the first mailbox could make follow-ups then, so it is the first mailbox's
+            tx.execute(
+                "DELETE FROM tasks WHERE kind='followup' AND uid NOT IN (SELECT task_uid FROM followups)",
+                [],
+            )?;
+        }
+        tx.execute("DELETE FROM followups WHERE acct=?1", [n])?;
+        tx.commit()?;
         Ok(())
+    }
+
+    /// The mailbox's tasks, drafts, queued changes and counters; the rest of `meta` (the update check, the digest date, the
+    /// draft budget) is not the mailbox's and stays.
+    fn delete_mail_rows(&self, n: u32) -> anyhow::Result<()> {
+        let (lo, hi) = Self::block(n);
+        let tx = self.db.unchecked_transaction()?;
+        for table in ["tasks", "drafts", "outbox"] {
+            tx.execute(
+                &format!("DELETE FROM {table} WHERE uid>=?1 AND uid<?2"),
+                params![lo, hi],
+            )?;
+        }
+        for base in PER_MAILBOX_META {
+            let key = if n == 0 {
+                base.to_string()
+            } else {
+                format!("{base}@{n}")
+            };
+            tx.execute("DELETE FROM meta WHERE key=?1", [key])?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// The sync found its mailbox renumbered: only that mailbox's mail and counters are forgotten.
+    pub fn reset_mailbox_data(&self) -> anyhow::Result<()> {
+        self.delete_mail_rows(self.mb())
     }
 }

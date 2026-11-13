@@ -220,6 +220,7 @@ input::placeholder,textarea::placeholder{color:var(--mute)}
 
 /* rules editor */
 .rule{padding:12px 0;border-bottom:1px solid var(--line)}
+.mbx{padding:10px 0 14px;border-bottom:1px solid var(--line)}.mbx p{margin:0 0 6px;word-break:break-all}
 .rrow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:6px 0}
 .rrow select{width:auto;flex:1;min-width:120px}
 .rrow input[type=text]{flex:2;min-width:150px}

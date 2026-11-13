@@ -3,12 +3,13 @@
 use crate::ai::{self, make_triager};
 use crate::mail::Email;
 use crate::settings::{is_gmail, AccountCfg, Settings};
-use crate::store::Store;
+use crate::store::{global_uid, Store};
 use crate::triage::Triage;
 use crate::watcher::{self, Account};
 use crate::{commands, hub, jobs, secrets, writeback};
 use anyhow::{anyhow, Result};
 use serde_json::{json, Value};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -22,7 +23,8 @@ pub type Notify = Arc<dyn Fn(&str, &str) + Send + Sync>;
 pub struct Core {
     pub dir: PathBuf,
     notify: Notify,
-    status: Arc<Mutex<String>>,
+    /// One status per mailbox (by number); the one the app shows is the worst of them.
+    status: Arc<Mutex<BTreeMap<u32, String>>>,
     stop: Mutex<Arc<AtomicBool>>,
 }
 
@@ -48,7 +50,7 @@ impl Core {
         Arc::new(Self {
             dir,
             notify,
-            status: Arc::new(Mutex::new("starting".into())),
+            status: Arc::new(Mutex::new(BTreeMap::new())),
             stop: Mutex::new(Arc::new(AtomicBool::new(true))),
         })
     }
@@ -61,28 +63,51 @@ impl Core {
         Store::open(&self.dir.join("agent.db"))
     }
 
-    /// The sync status as shown in the app (for the support report).
+    /// The database as mailbox `mailbox`'s sync and write-back see it: their numbers are IMAP UIDs, and what they list or
+    /// reset is that mailbox's alone.
+    pub fn store_for(&self, mailbox: u32) -> Result<Store> {
+        Ok(self.store()?.scoped(mailbox))
+    }
+
+    /// The sync status as shown in the app (for the support report): the worst of the mailboxes.
     pub fn status_text(&self) -> String {
+        let all: Vec<String> = self
+            .status
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .values()
+            .cloned()
+            .collect();
+        if all.is_empty() {
+            "starting".into()
+        } else {
+            worst_status(&all)
+        }
+    }
+
+    fn set_status(&self, mailbox: u32, s: &str) {
         self.status
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .clone()
+            .insert(mailbox, s.to_string());
     }
 
-    fn set_status(&self, s: &str) {
-        *self.status.lock().unwrap_or_else(|e| e.into_inner()) = s.to_string();
+    fn status_of(&self, mailbox: u32) -> String {
+        self.status
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&mailbox)
+            .cloned()
+            .unwrap_or_else(|| "starting".into())
     }
 
-    /// `Ok(None)`: not set up, or no saved password. `Err(status)`: the system keychain could not be read.
-    fn account(&self, s: &Settings) -> std::result::Result<Option<Account>, String> {
-        if !s.onboarded || s.account.host.is_empty() {
-            return Ok(None);
-        }
-        match secrets::lookup("imap-password") {
+    /// `Ok(None)`: no saved password. `Err(status)`: the system keychain could not be read.
+    fn mailbox_account(&self, m: &AccountCfg) -> std::result::Result<Option<Account>, String> {
+        match secrets::lookup(&secrets::imap_key(m.id)) {
             Ok(Some(password)) => Ok(Some(Account {
-                host: s.account.host.clone(),
-                port: s.account.port,
-                user: s.account.user.clone(),
+                host: m.host.clone(),
+                port: m.port,
+                user: m.user.clone(),
                 password,
             })),
             Ok(None) => Ok(None),
@@ -101,6 +126,10 @@ impl Core {
         )
         .store(true, Ordering::Relaxed);
         let s = self.settings();
+        self.status
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
 
         // A damaged database is set aside and rebuilt; one from a newer app version is refused, untouched. The check
         // runs once per launch (start() also runs after every settings save). A busy database is retried by the
@@ -108,7 +137,7 @@ impl Core {
         if !HEALTH_CHECKED.swap(true, Ordering::Relaxed) {
             if let Err(e) = Store::open_recovering(&self.dir.join("agent.db")) {
                 HEALTH_CHECKED.store(false, Ordering::Relaxed); // not checked after all: try again on the next start
-                self.set_status(&format!("error: {e}"));
+                self.set_status(0, &format!("error: {e}"));
                 if e.downcast_ref::<crate::store::TooNew>().is_some() {
                     return;
                 }
@@ -123,23 +152,31 @@ impl Core {
             let (core, stop) = (self.clone(), new_stop.clone());
             std::thread::spawn(move || jobs::run(core, stop));
         }
-        let acct = match self.account(&s) {
-            Ok(Some(a)) => a,
-            Ok(None) => {
-                self.set_status(if s.onboarded { "no password" } else { "setup" });
-                return;
+        let boxes = s.mailboxes();
+        if !s.onboarded || boxes.is_empty() {
+            self.set_status(0, if s.onboarded { "no password" } else { "setup" });
+            return;
+        }
+        for m in boxes {
+            match self.mailbox_account(&m) {
+                Ok(Some(acct)) => self.spawn_mailbox(m.id, acct, new_stop.clone()),
+                Ok(None) => self.set_status(m.id, "no password"),
+                Err(message) => self.set_status(m.id, &message),
             }
-            Err(message) => {
-                self.set_status(&message);
-                return;
-            }
-        };
+        }
+    }
 
+    /// The sync and the write-back of one mailbox, each on its own thread with its own connection and a store scoped to
+    /// the mailbox.
+    fn spawn_mailbox(self: &Arc<Self>, id: u32, acct: Account, stop: Arc<AtomicBool>) {
+        let gmail = is_gmail(&acct.host);
         // watcher
         {
-            let (core, stop, acct) = (self.clone(), new_stop.clone(), acct.clone());
+            let (core, stop, acct) = (self.clone(), stop.clone(), acct.clone());
             std::thread::spawn(move || {
-                let Ok(store) = core.store() else { return };
+                let Ok(store) = core.store_for(id) else {
+                    return;
+                };
                 let _ = store.prune(90, 30);
                 let s = core.settings();
                 let triager = make_triager(
@@ -150,11 +187,15 @@ impl Core {
                 let initial = store.last_uid() == 0;
                 let live = Arc::new(AtomicBool::new(false));
                 let (live_w, st) = (live.clone(), core.clone());
+                let stopped = stop.clone();
                 let status = move |x: &str| {
                     if x == "idle" {
                         live_w.store(true, Ordering::Relaxed);
                     }
-                    st.set_status(x);
+                    // a sync that was stopped (restart, or its mailbox removed) must not report on a mailbox that may be gone
+                    if !stopped.load(Ordering::Relaxed) {
+                        st.set_status(id, x);
+                    }
                 };
                 let core2 = core.clone();
                 watcher::run(
@@ -168,17 +209,19 @@ impl Core {
                     &stop,
                     &status,
                     &mut |e: &Email, t: &Triage| {
-                        // never alert for the very first backfill, only for genuinely new mail
-                        core2.on_triaged(e, t, !initial || live.load(Ordering::Relaxed));
+                        // never alert for the very first backfill of a mailbox, only for genuinely new mail
+                        core2.on_triaged(id, gmail, e, t, !initial || live.load(Ordering::Relaxed));
                     },
                 );
             });
         }
         // write-back
         {
-            let (core, stop) = (self.clone(), new_stop);
+            let core = self.clone();
             std::thread::spawn(move || {
-                let Ok(store) = core.store() else { return };
+                let Ok(store) = core.store_for(id) else {
+                    return;
+                };
                 while !stop.load(Ordering::Relaxed) {
                     let mut wait = 2;
                     if core.settings().writeback && !store.pending(1).is_empty() {
@@ -257,13 +300,22 @@ impl Core {
     }
 
     /// Everything that follows a newly triaged message: alert, category label, automatic reply draft.
-    fn on_triaged(self: &Arc<Self>, e: &Email, t: &Triage, alert: bool) {
+    #[doc(hidden)]
+    pub fn on_triaged(
+        self: &Arc<Self>,
+        mailbox: u32,
+        gmail: bool,
+        e: &Email,
+        t: &Triage,
+        alert: bool,
+    ) {
         if alert {
             self.alert(e, t);
         }
         let s = self.settings();
         let Ok(store) = self.store() else { return };
-        if s.writeback && is_gmail(&s.account.host) {
+        let uid = global_uid(mailbox, e.uid); // the task's id: the message's number in its own mailbox
+        if s.writeback && gmail {
             let mut label: String = t
                 .category
                 .chars()
@@ -274,10 +326,10 @@ impl Core {
                 first.make_ascii_uppercase();
             }
             if !label.is_empty() {
-                let _ = store.queue(e.uid, "category", &format!("AI/{label}"));
+                let _ = store.queue(uid, "category", &format!("AI/{label}"));
             }
         }
-        if let Some(task) = store.get(e.uid) {
+        if let Some(task) = store.get(uid) {
             commands::auto_draft(self, task);
         }
     }
@@ -294,11 +346,11 @@ impl Core {
         let mut state = json!({
             "settings": settings,
             "tasks": store.all_tasks()?,
-            "log": store.recent_log(100).into_iter().map(|(at, msg)| json!({"at": at, "msg": msg})).collect::<Vec<_>>(),
-            "status": self.status.lock().unwrap_or_else(|e| e.into_inner()).clone(),
+            "log": store.recent_log(100).into_iter().map(|(at, msg)| json!({"at": at, "msg": if public { for_the_phone(&msg) } else { msg }})).collect::<Vec<_>>(),
+            "status": self.status_text(),
             "pending": store.pending(1000).len(),
             "has_anthropic_key": !public && secrets::get("anthropic-key").is_some(),
-            "gmail": is_gmail(&s.account.host),
+            "gmail": s.mailboxes().iter().any(|m| is_gmail(&m.host)),
             "update_feature": !crate::updates::UPDATE_REPO.is_empty(),
             "update": if public || !s.updates.check || crate::updates::UPDATE_REPO.is_empty() {
                 None
@@ -314,6 +366,15 @@ impl Core {
         // what the user told the app to look for is private to this computer: the phone never sees it
         if !public {
             state["rules"] = serde_json::to_value(store.rules())?;
+            // the mailboxes (names, addresses, how each is doing) are for the desktop window only
+            state["accounts"] = json!(s
+                .mailboxes()
+                .iter()
+                .map(|m| json!({
+                    "id": m.id, "user": m.user, "host": m.host, "gmail": is_gmail(&m.host),
+                    "status": self.status_of(m.id),
+                }))
+                .collect::<Vec<_>>());
         }
         Ok(state)
     }
@@ -346,23 +407,124 @@ impl Core {
                 Ok(json!({"ok": true, "sent": sent, "gmail": is_gmail(&acct.host)}))
             }
             "save_account" => {
-                let mut s = self.settings();
+                // the first mailbox, or the one named by `id`: a new password, or a new server or address
+                let s = self.settings();
+                let id = match a.get("id") {
+                    None | Some(Value::Null) => 0,
+                    Some(v) => u32::try_from(v.as_u64().unwrap_or(u64::MAX)).unwrap_or(u32::MAX),
+                };
                 let new = AccountCfg {
+                    id,
                     host: s_arg(a, "host"),
                     port: a["port"].as_u64().unwrap_or(993) as u16,
                     user: s_arg(a, "user"),
                 };
+                let old = s.mailboxes().into_iter().find(|m| m.id == id);
                 let mut candidate = s.clone();
-                candidate.account = new.clone();
-                candidate.validate()?;
-                if (new.host.as_str(), new.user.as_str())
-                    != (s.account.host.as_str(), s.account.user.as_str())
-                {
-                    self.store()?.reset_for_new_account()?;
+                if id == 0 {
+                    candidate.account = new.clone();
+                } else {
+                    let Some(slot) = candidate.more_accounts.iter_mut().find(|m| m.id == id) else {
+                        return Err(anyhow!("There is no such mailbox"));
+                    };
+                    *slot = new.clone();
                 }
-                secrets::set("imap-password", &s_arg(a, "password").replace(' ', ""))?;
-                s.account = new;
+                candidate.validate()?;
+                // another server or address is another mailbox: this one's data is not the new one's. Only this mailbox's
+                // data; every other mailbox is not part of this change.
+                let changed = old.is_some_and(|o| {
+                    (o.host.as_str(), o.user.as_str()) != (new.host.as_str(), new.user.as_str())
+                });
+                if changed {
+                    // stop the syncs first: one that is mid-batch would write the old mailbox's mail back after the reset
+                    self.stop
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .store(true, Ordering::Relaxed);
+                }
+                let saved = (|| -> Result<()> {
+                    if changed {
+                        self.store_for(id)?.reset_for_new_account()?;
+                    }
+                    secrets::set(
+                        &secrets::imap_key(id),
+                        &s_arg(a, "password").replace(' ', ""),
+                    )?;
+                    candidate.save(&self.dir)
+                })();
+                // the syncs hold the old password (or were stopped above): start them again, whatever happened
+                if s.onboarded && (changed || saved.is_ok()) {
+                    self.start();
+                }
+                saved?;
+                Ok(json!(true))
+            }
+            "add_account" => {
+                let mut s = self.settings();
+                if !s.onboarded || s.mailboxes().is_empty() {
+                    return Err(anyhow!("Set up your first mailbox before adding another"));
+                }
+                let password = s_arg(a, "password").replace(' ', "");
+                if password.is_empty() {
+                    return Err(anyhow!("Enter the app password for this mailbox"));
+                }
+                let used: std::collections::HashSet<u32> =
+                    s.mailboxes().iter().map(|m| m.id).collect();
+                // the lowest free number; 0 is the first mailbox's place, free again after it was removed
+                let Some(id) = (0..crate::store::MAX_MAILBOXES).find(|n| !used.contains(n)) else {
+                    return Err(anyhow!("You can read at most five mailboxes at once"));
+                };
+                let new = AccountCfg {
+                    id,
+                    host: s_arg(a, "host"),
+                    port: a["port"].as_u64().unwrap_or(993) as u16,
+                    user: s_arg(a, "user"),
+                };
+                if new.host.trim().is_empty() || new.user.trim().is_empty() {
+                    return Err(anyhow!(
+                        "Enter the mail server and the email address of this mailbox"
+                    ));
+                }
+                if id == 0 {
+                    s.account = new;
+                } else {
+                    s.more_accounts.push(new);
+                }
+                s.validate()?;
+                // a new mailbox starts from nothing: a sync of an earlier mailbox with this number may have been
+                // mid-message when that mailbox was removed, and can have left a cursor or a task behind
+                self.store()?.clear_mailbox(id)?;
+                secrets::set(&secrets::imap_key(id), &password)?;
                 s.save(&self.dir)?;
+                self.start();
+                Ok(json!(id))
+            }
+            "remove_account" => {
+                let mut s = self.settings();
+                let id = u32::try_from(a["id"].as_u64().unwrap_or(u64::MAX)).unwrap_or(u32::MAX);
+                if !s.mailboxes().iter().any(|m| m.id == id) {
+                    return Err(anyhow!("There is no such mailbox"));
+                }
+                // stop the sync first, so nothing writes this mailbox's mail back in while it is removed
+                self.stop
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .store(true, Ordering::Relaxed);
+                let removed = (|| -> Result<()> {
+                    self.store()?.remove_mailbox(id)?;
+                    secrets::delete(&secrets::imap_key(id));
+                    if id == 0 {
+                        s.account = AccountCfg::default();
+                    } else {
+                        s.more_accounts.retain(|m| m.id != id);
+                    }
+                    if s.mailboxes().is_empty() {
+                        s.onboarded = false; // nothing left to read: setup is asked for again
+                    }
+                    s.save(&self.dir)
+                })();
+                self.start(); // the syncs were stopped above: start them again even if the removal failed halfway
+                removed?;
                 Ok(json!(true))
             }
             "save_settings" => {
@@ -377,6 +539,8 @@ impl Core {
                 let now = self.settings();
                 let mut s = now.patched(patch)?;
                 if serde_json::to_value(&s.account)? != serde_json::to_value(&now.account)?
+                    || serde_json::to_value(&s.more_accounts)?
+                        != serde_json::to_value(&now.more_accounts)?
                     || s.onboarded != now.onboarded
                 {
                     return Err(anyhow!(
@@ -445,16 +609,20 @@ impl Core {
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
                     .store(true, Ordering::Relaxed);
-                self.store()?.wipe_all()?;
-                crate::store::remove_leftover_files(&self.dir);
-                secrets::delete_all();
-                let mut s = self.settings();
-                s.account = AccountCfg::default();
-                s.onboarded = false;
-                s.hub.enabled = false;
-                s.hub.token.clear();
-                s.save(&self.dir)?;
-                self.start();
+                let signed_out = (|| -> Result<()> {
+                    self.store()?.wipe_all()?;
+                    crate::store::remove_leftover_files(&self.dir);
+                    secrets::delete_all();
+                    let mut s = self.settings();
+                    s.account = AccountCfg::default();
+                    s.more_accounts.clear();
+                    s.onboarded = false;
+                    s.hub.enabled = false;
+                    s.hub.token.clear();
+                    s.save(&self.dir)
+                })();
+                self.start(); // the threads were stopped above: start them again even if this failed halfway
+                signed_out?;
                 Ok(json!(true))
             }
             "hub_info" => {
@@ -473,6 +641,30 @@ impl Core {
             _ => Err(anyhow!("unknown command: {cmd}")),
         }
     }
+}
+
+/// A log line as the phone may see it: the login a mailbox connected as is the mailbox's address, which stays on the computer.
+fn for_the_phone(msg: &str) -> String {
+    match msg.strip_prefix("connected as ") {
+        Some(rest) => format!(
+            "connected;{}",
+            rest.split_once(';').map_or("", |(_, after)| after)
+        ),
+        None => msg.to_string(),
+    }
+}
+
+/// The status to show for several mailboxes: an error of any of them first, then "connecting" or "syncing" if any is,
+/// then whatever else is not "idle" (a missing password), else "idle". No mailbox at all is "setup".
+pub fn worst_status(all: &[String]) -> String {
+    let find = |f: &dyn Fn(&str) -> bool| all.iter().find(|s| f(s)).cloned();
+    find(&|s| s.starts_with("error"))
+        .or_else(|| find(&|s| s == "no password"))
+        .or_else(|| find(&|s| s == "connecting"))
+        .or_else(|| find(&|s| s == "syncing"))
+        .or_else(|| find(&|s| s != "idle"))
+        .or_else(|| all.first().cloned())
+        .unwrap_or_else(|| "setup".to_string())
 }
 
 pub fn new_token() -> String {

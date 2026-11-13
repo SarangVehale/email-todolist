@@ -8,6 +8,11 @@ versions may change behaviour.
 First public build.
 
 ### Added
+- Several mailboxes: add up to five (Settings, "Add another mailbox") and read them as one list. Each task is tagged with its
+  mailbox and there is a filter chip per mailbox; every mailbox has its own connection, password in the keychain, sent-mail
+  learning, follow-ups and write-back (a change goes only to the mailbox the message is in). "Remove" on a mailbox deletes its
+  tasks, drafts, waiting changes, follow-up records, the corrections made on its mail and its password, and leaves everything else. A new app password is saved per mailbox, and saving one
+  now reconnects every mailbox at once. The phone sees one list and no mailbox names. Existing lists need no migration.
 - Reminders for tasks you add yourself: a date and time, announced once by a desktop notification (and ntfy if you use it),
   and an optional repeat (daily, weekly, monthly). Finishing a repeating task moves it to its next time instead of closing it
   (also when it is done ahead of time); there is no undo for that, and a batch's undo does not include repeating tasks.
@@ -70,7 +75,7 @@ First public build.
 - Third review (Opus, 2026-11-13): one bad unsubscribe link could blank the list; a crashing message could crash the app on every start; hostile HTML could stall the watcher; sign-out left mail text in the database files; the hub answered public networks; mail data sat in Roaming AppData. All fixed with tests; see SECURITY.md.
 - A damaged database is set aside and rebuilt, newer data is refused, and a `crash.log` records internal errors (no telemetry).
 - Two independent security reviews; all confirmed findings fixed with regression tests. See SECURITY.md.
-- 366 automated tests, including protocol tests against a scripted mock IMAP server and a dedicated edge-case suite.
+- 412 automated tests, including protocol tests against a scripted mock IMAP server and a dedicated edge-case suite.
 
 ### Known limitations
 - Microsoft (Outlook, Microsoft 365) accounts are not supported: Microsoft turned off password sign-in for IMAP.

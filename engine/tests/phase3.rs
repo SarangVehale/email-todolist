@@ -626,6 +626,7 @@ fn a_settings_patch_in_any_shape_cannot_change_the_account_or_onboarding() {
     // seed an account the way save_account would
     let mut s = c.settings();
     s.account = engine::settings::AccountCfg {
+        id: 0,
         host: "imap.example.com".into(),
         port: 993,
         user: "me@example.com".into(),
@@ -763,6 +764,7 @@ fn a_new_password_can_be_saved_without_wiping_anything() {
     let (c, dir) = settings_core("newpw");
     let mut s = c.settings();
     s.account = engine::settings::AccountCfg {
+        id: 0,
         host: "imap.example.com".into(),
         port: 993,
         user: "me@example.com".into(),

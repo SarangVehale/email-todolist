@@ -291,7 +291,13 @@ pub fn run(core: &Arc<Core>, cmd: &str, a: &Value) -> Option<Result<Value>> {
                 if !s.writeback {
                     return Err(anyhow!("Turn on “Let Inbox Agent file mail” in Settings to save drafts to your mailbox"));
                 }
-                if !valid_address(&s.account.user) {
+                // the draft is saved to the mailbox the message came from, as that mailbox's user
+                let owner = s
+                    .mailboxes()
+                    .into_iter()
+                    .find(|m| m.id == crate::store::mailbox_of(uid))
+                    .ok_or_else(|| anyhow!("that message's mailbox is not set up any more"))?;
+                if !valid_address(&owner.user) {
                     return Err(anyhow!("Your login name isn't an email address, so drafts can't be saved to your mailbox"));
                 }
                 let t = store.get(uid).ok_or_else(|| anyhow!("no such task"))?;
@@ -353,7 +359,7 @@ pub fn run(core: &Arc<Core>, cmd: &str, a: &Value) -> Option<Result<Value>> {
                     hub: s.hub.enabled,
                     quiet_hours: !s.alerts.quiet_start.is_empty(),
                     google: false,
-                    host: &s.account.host,
+                    host: s.mailboxes().first().map_or("", |m| m.host.as_str()),
                     log: &log,
                     crash: &crash,
                 })))

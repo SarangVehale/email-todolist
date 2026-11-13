@@ -2281,3 +2281,302 @@ mod followups {
         assert_eq!(r.closed, 2);
     }
 }
+
+// ───────────────────────── several mailboxes (Phase 6) ─────────────────────────
+mod mailboxes {
+    use super::*;
+    use engine::store::{global_uid, MAILBOX_SPAN};
+
+    fn fresh_db(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("ia-p6-flow-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.join("agent.db")
+    }
+
+    fn inbox(n: u32) -> Vec<Msg> {
+        (1..=n)
+            .map(|u| inbox_msg(u, &format!("<m{u}@acme>"), &format!("Mail {u}")))
+            .collect()
+    }
+
+    #[test]
+    fn a_sync_for_one_mailbox_numbers_its_tasks_inside_that_mailboxs_block() {
+        let srv = Server::start(gmail_folders(inbox(3), vec![]));
+        let store = Store::memory().unwrap().scoped(1);
+        let mut s = srv.session();
+        let n = process_new(
+            &mut s,
+            &store,
+            &RulesTriager,
+            &SentIndex::default(),
+            50,
+            &mut |_, _| {},
+        )
+        .unwrap();
+        assert_eq!(n, 3);
+        for uid in 1..=3 {
+            assert!(
+                store.get(global_uid(1, uid)).is_some(),
+                "message {uid} is task {}",
+                global_uid(1, uid)
+            );
+            assert!(store.get(uid).is_none(), "and not task {uid}");
+        }
+        assert_eq!(store.last_uid(), 3, "the cursor is this mailbox's own");
+        assert_eq!(
+            process_new(
+                &mut s,
+                &store,
+                &RulesTriager,
+                &SentIndex::default(),
+                50,
+                &mut |_, _| {}
+            )
+            .unwrap(),
+            0,
+            "nothing is read twice"
+        );
+    }
+
+    #[test]
+    fn two_servers_with_the_same_message_numbers_feed_one_list() {
+        let path = fresh_db("two-servers");
+        let (a, b) = (
+            Server::start(gmail_folders(inbox(2), vec![])),
+            Server::start(gmail_folders(inbox(3), vec![])),
+        );
+        let (s0, s1) = (
+            Store::open(&path).unwrap().scoped(0),
+            Store::open(&path).unwrap().scoped(1),
+        );
+        let (mut c0, mut c1) = (a.session(), b.session());
+        let idx = SentIndex::default();
+        assert_eq!(
+            process_new(&mut c0, &s0, &RulesTriager, &idx, 50, &mut |_, _| {}).unwrap(),
+            2
+        );
+        assert_eq!(
+            process_new(&mut c1, &s1, &RulesTriager, &idx, 50, &mut |_, _| {}).unwrap(),
+            3
+        );
+        let all = Store::open(&path).unwrap().all_tasks().unwrap();
+        let mut ids: Vec<u32> = all.iter().map(|t| t.uid).collect();
+        ids.sort_unstable();
+        assert_eq!(
+            ids,
+            [1, 2, global_uid(1, 1), global_uid(1, 2), global_uid(1, 3)],
+            "five different tasks, two of them with the same IMAP number as two others"
+        );
+        assert_eq!((s0.last_uid(), s1.last_uid()), (2, 3));
+        // new mail in one mailbox is read by that mailbox's sync only
+        b.st.lock().unwrap().folders[0]
+            .msgs
+            .push(inbox_msg(4, "<m4@acme>", "Mail 4"));
+        assert_eq!(
+            process_new(&mut c0, &s0, &RulesTriager, &idx, 50, &mut |_, _| {}).unwrap(),
+            0
+        );
+        assert_eq!(
+            process_new(&mut c1, &s1, &RulesTriager, &idx, 50, &mut |_, _| {}).unwrap(),
+            1
+        );
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn a_message_number_past_the_id_layout_is_skipped_with_a_log_line_and_the_rest_load() {
+        let mut msgs = inbox(2);
+        msgs.push(inbox_msg(
+            MAILBOX_SPAN + 1,
+            "<huge@acme>",
+            "numbered too high",
+        ));
+        let srv = Server::start(gmail_folders(msgs, vec![]));
+        let store = Store::memory().unwrap().scoped(2);
+        let mut s = srv.session();
+        let n = process_new(
+            &mut s,
+            &store,
+            &RulesTriager,
+            &SentIndex::default(),
+            50,
+            &mut |_, _| {},
+        )
+        .unwrap();
+        assert_eq!(n, 2, "the two that fit");
+        let log: Vec<String> = store.recent_log(20).into_iter().map(|l| l.1).collect();
+        assert!(
+            log.iter()
+                .any(|l| l.contains("too large to track") || l.contains("too large for this app")),
+            "{log:?}"
+        );
+        assert!(
+            store.last_uid() > MAILBOX_SPAN,
+            "the cursor moves on, so it is not asked for again"
+        );
+        assert_eq!(store.all_tasks().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn write_back_of_one_mailbox_reaches_only_its_own_server_and_leaves_the_others_queue() {
+        let path = fresh_db("writeback");
+        let (s0, s1) = (
+            Store::open(&path).unwrap().scoped(0),
+            Store::open(&path).unwrap().scoped(1),
+        );
+        task(&s0, 7, "<a@x>", "priya@acme.com");
+        task(&s1, 7, "<b@x>", "priya@acme.com");
+        let all = Store::open(&path).unwrap();
+        all.set_done(7, true).unwrap();
+        all.set_done(global_uid(1, 7), true).unwrap();
+        assert_eq!(all.pending(10).len(), 2);
+        // the second mailbox's server holds only its own message
+        let srv = Server::start(gmail_folders(
+            vec![],
+            vec![inbox_msg(2, "<b@x>", "mailbox two")],
+        ));
+        let mut s = srv.session();
+        let n = drain_session(&mut s, "imap.gmail.com", "me@example.com", &s1).unwrap();
+        assert_eq!(n, 1, "only its own item");
+        let log = srv.log().join("\n");
+        assert!(log.contains("<b@x>"), "{log}");
+        assert!(
+            !log.contains("<a@x>"),
+            "the other mailbox's message is never asked about: {log}"
+        );
+        let left = all.pending(10);
+        assert_eq!(left.len(), 1);
+        assert_eq!(
+            left[0].uid, 7,
+            "the first mailbox's change is still waiting for its own server"
+        );
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn replies_and_departures_are_judged_inside_the_mailbox_they_belong_to() {
+        let path = fresh_db("reconcile");
+        let (s0, s1) = (
+            Store::open(&path).unwrap().scoped(0),
+            Store::open(&path).unwrap().scoped(1),
+        );
+        task(&s0, 7, "<same@x>", "priya@acme.com");
+        task(&s1, 7, "<same@x>", "priya@acme.com");
+        // mailbox 1's server still has message 7 in its inbox; mailbox 0's server has nothing
+        let srv = Server::start(gmail_folders(
+            vec![inbox_msg(7, "<same@x>", "kept")],
+            vec![],
+        ));
+        let mut s = srv.session();
+        let idx = SentIndex::default();
+        engine::watcher::reconcile_open(
+            &mut s,
+            &s1,
+            &idx,
+            &std::sync::atomic::AtomicBool::new(false),
+        )
+        .unwrap();
+        let all = Store::open(&path).unwrap();
+        assert!(
+            !all.get(global_uid(1, 7)).unwrap().gone,
+            "present in its own mailbox"
+        );
+        assert!(
+            !all.get(7).unwrap().gone,
+            "the first mailbox's task was not looked at"
+        );
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn a_reply_you_sent_from_one_mailbox_closes_that_mailboxs_task_and_not_the_other() {
+        let path = fresh_db("replied");
+        let (s0, s1) = (
+            Store::open(&path).unwrap().scoped(0),
+            Store::open(&path).unwrap().scoped(1),
+        );
+        task(&s0, 7, "<same@x>", "priya@acme.com");
+        task(&s1, 7, "<same@x>", "priya@acme.com");
+        // the second mailbox's Sent folder shows an answer to <same@x>; the first mailbox's does not
+        let mut sent = SentIndex::default();
+        sent.replied_to.insert("<same@x>".to_string());
+        let srv = Server::start(gmail_folders(
+            vec![inbox_msg(7, "<same@x>", "kept")],
+            vec![],
+        ));
+        let mut sess = srv.session();
+        let out = engine::watcher::reconcile_open(
+            &mut sess,
+            &s1,
+            &sent,
+            &std::sync::atomic::AtomicBool::new(false),
+        )
+        .unwrap();
+        assert_eq!(out.replied, 1);
+        let all = Store::open(&path).unwrap();
+        let (mine, other) = (all.get(global_uid(1, 7)).unwrap(), all.get(7).unwrap());
+        assert_eq!(
+            (mine.status.as_str(), mine.closed_by.as_str()),
+            ("done", "replied")
+        );
+        assert_eq!(
+            other.status, "open",
+            "the first mailbox's task was not answered from its own mailbox"
+        );
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    /// Ranks like the rules do, but raises the stop flag first: the app is restarted, or the mailbox removed, while the
+    /// message is being ranked.
+    struct StopWhileRanking(Arc<std::sync::atomic::AtomicBool>);
+    impl engine::triage::Triager for StopWhileRanking {
+        fn triage(
+            &self,
+            e: &mail::Email,
+            s: &engine::signals::Signals,
+        ) -> anyhow::Result<engine::triage::Triage> {
+            self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+            engine::triage::Triager::triage(&RulesTriager, e, s)
+        }
+    }
+
+    #[test]
+    fn a_stop_while_the_last_message_of_a_batch_is_ranked_does_not_move_the_cursor_past_it() {
+        let srv = Server::start(gmail_folders(inbox(1), vec![]));
+        let store = Store::memory().unwrap().scoped(1);
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let mut s = srv.session();
+        let n = engine::watcher::process_new_until(
+            &mut s,
+            &store,
+            &StopWhileRanking(stop.clone()),
+            &SentIndex::default(),
+            50,
+            &mut |_, _| {},
+            &stop,
+        )
+        .unwrap();
+        assert_eq!(n, 0, "nothing was stored once the stop came");
+        assert_eq!(
+            store.last_uid(),
+            0,
+            "the message was not stored, so the cursor must not say it was read: it would never be read"
+        );
+        // the next start reads it
+        let again = std::sync::atomic::AtomicBool::new(false);
+        let mut s = srv.session();
+        let n = engine::watcher::process_new_until(
+            &mut s,
+            &store,
+            &RulesTriager,
+            &SentIndex::default(),
+            50,
+            &mut |_, _| {},
+            &again,
+        )
+        .unwrap();
+        assert_eq!(n, 1);
+        assert!(store.get(global_uid(1, 1)).is_some());
+    }
+}

@@ -126,7 +126,7 @@ in the same thread is not an answer), and out-of-office notices carry `Auto-Subm
 * The check stops at once when the app is signing out, and writes nothing after that.
 * The feature never alerts and never writes to the mailbox. With the feature off, no command is sent at all, and open
   follow-ups stay open until you close them.
-* Follow-up records older than 60 days are removed by the routine clean-up (at start and once a day).
+* Follow-up records older than 60 days are removed by the routine clean-up (at start and once a day), unless their task still exists: since several mailboxes the record also says which mailbox the task belongs to.
 
 **Known limits.** A reply that a mail rule moved to some other folder before the app read it is not found, so that
 conversation shows as waiting; one click closes it, and it is not made again. An autoresponder that does not mark itself with

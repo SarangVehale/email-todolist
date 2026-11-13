@@ -34,7 +34,7 @@ async function rpc(cmd, args = {}) {
 /* ───────── state ───────── */
 let S = { settings: { onboarded: true, ai: {}, alerts: {}, hub: {}, account: {} }, tasks: [], log: [], status: "starting", pending: 0 };
 let view = "todo", cur = null, openUid = null, undoStack = [], lastSnap = "", busy = 0, pendingRender = false;
-let flt = { cat: "all", only: "", q: "", sort: "priority", hits: new Set(), hitsFor: "" }; // category / reply / draft filters, search text, sort order
+let flt = { cat: "all", only: "", acct: "", q: "", sort: "priority", hits: new Set(), hitsFor: "" }; // category / reply / draft filters, search text, sort order
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 /* Nothing-style dot-matrix numerals: 5x7 glyphs drawn as dots (lit = on, unlit = faint) */
@@ -75,7 +75,7 @@ const foldable = t => !!(t.signals && t.signals.bulk) && maxp(t) <= 2 && !t.star
 let autoOpen = false, goneOpen = false, curIdx = 0, updateDismissed = "";
 /* select mode: act on many rows at once. `sel` holds row ids (the newest message of each conversation) */
 let selMode = false, sel = new Set(), selAnchor = null;
-const folding = () => view === "todo" && flt.cat === "all" && !flt.only && !flt.q.trim();
+const folding = () => view === "todo" && flt.cat === "all" && !flt.only && !flt.acct && !flt.q.trim();
 /* the tasks that belong to the current tab, before filters */
 function baseList() {
   if (view === "done") return S.tasks.filter(t => t.status === "done");
@@ -94,7 +94,8 @@ const members = t => (groupOf[t.uid] || [find(t.uid)].filter(Boolean)).filter(x 
    star, urgent, needs a reply, earliest due date; it is "gone" or "automated" only when every message is. */
 function groupThreads(l, record) {
   const by = new Map();
-  for (const t of l) { if (!by.has(t.thread)) by.set(t.thread, []); by.get(t.thread).push(t) }
+  // one conversation per mailbox: the same message that reached two of your mailboxes stays two tasks
+  for (const t of l) { const k = t.mailbox + "|" + t.thread; if (!by.has(k)) by.set(k, []); by.get(k).push(t) }
   return [...by.values()].map(ms => {
     if (ms.length === 1) return ms[0];
     ms.sort((a, b) => b.received - a.received || b.uid - a.uid);
@@ -114,6 +115,7 @@ function filtered() {
     if (flt.cat !== "all") l = l.filter(t => t.category === flt.cat);
     if (flt.only === "reply") l = l.filter(t => t.needs_reply || t.draft);
     if (flt.only === "drafts") l = l.filter(t => t.draft);
+    if (flt.acct) l = l.filter(t => String(t.mailbox) === flt.acct);
     const q = flt.q.trim().toLowerCase();
     if (q) l = l.filter(t => textMatch(t, q) || bodyHit(t, q));
   }
@@ -145,7 +147,7 @@ function render() {
   const ok = st === "idle" || st === "syncing", err = st.startsWith("error") || st === "no password";
   const rows = list => groupThreads(list).length;
   const tabs = [["todo", "To-do", rows(open)], ["star", "Starred", rows(open.filter(t => t.star))], ["snoozed", "Snoozed", rows(snoozed)], ["done", "Done", S.tasks.filter(t => t.status === "done").length], ["log", "Log", ""]];
-  $("#bar").innerHTML = `<div class="brand"><span class="mark">要</span><span class="dot ${ok ? "" : err ? "err" : "off"}" title="${esc(st)}"></span></div>
+  $("#bar").innerHTML = `<div class="brand"><span class="mark">要</span><span class="dot ${ok ? "" : err ? "err" : "off"}" title="${esc(statusTitle(st))}"></span></div>
     <nav>${tabs.map(([k, n, c]) => `<button class="${view === k ? "on" : ""}" data-view="${k}">${n}${c !== "" && c !== 0 ? `<i>${c}</i>` : ""}</button>`).join("")}</nav><span class="sp"></span>${view === "log" ? "" : `<button class="gear ${selMode ? "on" : ""}" data-act="selectmode" aria-pressed="${selMode}">Select</button>`}<button class="gear" data-act="addtask">Add task</button>${isHub ? "" : '<button class="gear" data-act="settings">Settings</button>'}`;
   const names = { todo: "To<em>-do</em>", star: "Starred", snoozed: "Snoozed", done: "Done", log: "Log" };
   const d = new Date(), kick = `${{ todo: "Inbox", star: "Marked", snoozed: "Resting", done: "Filed", log: "Record" }[view]} · ${d.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" })}`;
@@ -159,7 +161,7 @@ function render() {
     const P = parts(), l = listFor();
     if (!l.some(t => t.uid === cur)) {
       // keep the cursor where it was: on the same conversation if its newest message changed, else the nearest row
-      const th = find(cur)?.thread, same = th && l.find(t => t.thread === th);
+      const was = find(cur), th = was?.thread, same = th && l.find(t => t.thread === th && t.mailbox === was.mailbox);
       cur = same ? same.uid : (l[Math.min(curIdx, l.length - 1)]?.uid ?? null);
     }
     curIdx = Math.max(0, l.findIndex(t => t.uid === cur));
@@ -183,7 +185,7 @@ function render() {
       if (goneOpen) for (const t of P.gone) h += rowHTML(t);
     }
     const reading = st === "syncing" || st === "connecting";
-    if (!l.length && !nAuto && !nGone) h += `<div class="empty">${view === "done" ? "Nothing done yet" : view === "snoozed" ? "Nothing resting" : flt.q || flt.cat !== "all" || flt.only ? "No matches" : reading ? "Reading your latest mail…" : ok ? "All clear" : "Waiting for mail"}<small>${reading && view === "todo" ? "The first sync can take a minute." : view === "todo" && ok ? "The agent is still watching your inbox." : ""}</small></div>`;
+    if (!l.length && !nAuto && !nGone) h += `<div class="empty">${view === "done" ? "Nothing done yet" : view === "snoozed" ? "Nothing resting" : flt.q || flt.cat !== "all" || flt.only || flt.acct ? "No matches" : reading ? "Reading your latest mail…" : ok ? "All clear" : "Waiting for mail"}<small>${reading && view === "todo" ? "The first sync can take a minute." : view === "todo" && ok ? "The agent is still watching your inbox." : ""}</small></div>`;
   }
   const wasSearching = document.activeElement?.id === "q", caret = wasSearching ? document.activeElement.selectionStart : 0;
   $("#view").innerHTML = h;
@@ -284,8 +286,9 @@ $("#undoBtn").onclick = () => { undoStack.pop()?.(); $("#undo").style.display = 
 async function load() {
   if (busy) return;
   try {
-    const d = await rpc("state"), snap = JSON.stringify([d.tasks, d.log, d.status, d.pending, d.settings, d.update]);
+    const d = await rpc("state"), snap = JSON.stringify([d.tasks, d.log, d.status, d.pending, d.settings, d.update, d.accounts]);
     if (snap === lastSnap) return; lastSnap = snap; S = d;
+    if (flt.acct && !(d.accounts || []).some(a => String(a.id) === flt.acct)) flt.acct = ""; // that mailbox is gone
     const v = $("#veil");
     if (!d.settings.onboarded && !isHub) { if (!v.classList.contains("show")) openWizard() }
     if (!v.classList.contains("show")) { if (editing()) pendingRender = true; else render() }

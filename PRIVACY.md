@@ -2,7 +2,7 @@
 
 Inbox Agent runs on your computer. There is no Inbox Agent server and no account with us.
 
-**What it reads.** Your mailbox over IMAP (read-only unless you switch on "Let Inbox Agent file mail"),
+**What it reads.** Your mailbox over IMAP (read-only unless you switch on "Let Inbox Agent file mail"), or up to five mailboxes, each read on its own connection and merged into one list,
 and the recipients, Message-IDs, subjects and dates of your Sent folder to learn who you write to and, if you turn on
 follow-up reminders, which conversations you started.
 
@@ -12,15 +12,15 @@ follow-up reminders, which conversations you started.
 - Your corrections (which sender, which subject, and the priority before and after), kept for 365 days and used to rank later mail from that sender; your "always important" and "mute" choices, kept until you change them; and any mailbox changes waiting to be applied.
 - A full-text index of the stored message text (subject, sender, address, the first 3,000 characters of the text, and your note), in the same database, so search can find words inside messages. It follows the task list: when a task is pruned, replaced or removed, or you sign out, its words are overwritten in the index rather than just hidden.
 - The first calendar event of an invitation (title, time, place, whether it is cancelled), reminder times you set, and your repeats.
-- Your rules: the text you typed, the field it looks at and what it does. They stay when you switch to another mailbox and are removed by "Sign out and reset".
-- If you turn on follow-up reminders: a record of each sent message that was checked (its Message-ID and a date), removed by the app's daily clean-up after 60 days, and a task naming the recipient and the subject, which follows the usual 90 days once finished.
+- Your rules: the text you typed, the field it looks at and what it does. They apply to every mailbox, stay when you switch to another one or remove one, and are removed by "Sign out and reset".
+- If you turn on follow-up reminders: a record of each sent message that was checked (its Message-ID and a date), removed by the app's daily clean-up after 60 days (a record whose task is still in your list stays as long as the task does), and a task naming the recipient and the subject, which follows the usual 90 days once finished.
 - Reply drafts you or the AI wrote. They are never sent; saving one to your mailbox's Drafts folder is a separate click and needs "Let Inbox Agent file mail" switched on.
-- Your settings (server name, address, alert options, phone-hub access code).
-- Your mail password and any API key, in the operating system keychain, never in a file.
+- Your settings (the server name and address of each mailbox, alert options, phone-hub access code).
+- One mail password per mailbox, and any API key, in the operating system keychain, never in a file.
 - A small `crash.log` (the text of an internal error and the code location, never sent anywhere, capped at 100 KB). There is no telemetry.
 
 **What leaves your computer.**
-- Mail traffic to your own mail provider.
+- Mail traffic to your own mail provider (to each provider, when you read several mailboxes; each mailbox is read only with its own password).
 - If you choose **Claude with your own API key**: the sender, subject and a short excerpt of each new
   message go to Anthropic to be ranked, and up to 3,000 characters of a message go when a reply draft is written for it.
   Each ranking request also carries your ten most recent corrections, which include the sender name and subject of those
@@ -40,6 +40,8 @@ follow-up reminders, which conversations you started.
 - **Copy diagnostics** only puts text on your clipboard. Nothing is sent unless you paste it somewhere. It holds counts, option
   names and recent activity with names, subjects and addresses removed; read it first.
 
+**Several mailboxes.** Every task remembers which mailbox it came from, and the window shows a small tag with its name (the part of the address before the @; hover over it for the full address). The phone hub shows the same list without tags: it is never told mailbox names or addresses. Removing a mailbox in Settings deletes its tasks, drafts, notes on them, waiting changes, follow-up records, the corrections made on its mail and its password from the keychain; nothing in the mailbox itself is touched. The activity log is not edited: its short lines (they can name a message's subject) stay until its 30 days are up. Your rules, sender choices, own tasks and the other mailboxes stay.
+
 **What the app writes outside its own folder.** Only one thing, and only when you click **Save .ics** on an invitation:
 a new `.ics` file in your Downloads folder (your user folder if there is none), never replacing a file that exists, never opened by the app. It holds the event's
 title, time and place, built by the app, not copied from the message.
@@ -49,7 +51,7 @@ make (done, star, priority) are remembered, and so are the changes your rules ma
 rule that sets a priority queues its label). Rules also run on the mail read when you connect a mailbox. Switching it on applies the ones that are still waiting. Sign out first if you
 do not want that.
 
-**Deleting everything.** Settings, "Sign out and reset" removes the saved password, the task list, your drafts, the
+**Deleting everything.** Settings, "Sign out and reset" removes every saved mailbox password and your Claude API key (if you saved one), the task list, your drafts, the
 activity log, your corrections, sender choices and rules, follow-up records, the database backup and the crash log. Your ntfy topic and AI choice
 stay in settings.json.
 Calendar files you saved stay in Downloads: they are yours. "Sign out and reset" also turns the phone hub off, forgets its access code, and clears the server and address.

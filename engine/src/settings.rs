@@ -5,6 +5,9 @@ use std::path::Path;
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct AccountCfg {
+    /// The mailbox's number: 0 for the first (`Settings::account`), 1 to 4 for `more_accounts`. It is part of every task
+    /// id the mailbox makes, so it never changes while the mailbox exists.
+    pub id: u32,
     pub host: String,
     pub port: u16,
     pub user: String,
@@ -12,6 +15,7 @@ pub struct AccountCfg {
 impl Default for AccountCfg {
     fn default() -> Self {
         Self {
+            id: 0,
             host: String::new(),
             port: 993,
             user: String::new(),
@@ -133,7 +137,10 @@ pub struct FollowCfg {
 #[serde(default)]
 pub struct Settings {
     pub onboarded: bool,
+    /// The first mailbox (number 0).
     pub account: AccountCfg,
+    /// Up to four more, numbered 1 to 4. Their passwords are in the keychain, never here.
+    pub more_accounts: Vec<AccountCfg>,
     pub ai: AiCfg,
     pub alerts: AlertCfg,
     pub hub: HubCfg,
@@ -149,6 +156,7 @@ impl Default for Settings {
         Self {
             onboarded: false,
             account: AccountCfg::default(),
+            more_accounts: vec![],
             ai: AiCfg::default(),
             alerts: AlertCfg::default(),
             hub: HubCfg::default(),
@@ -162,6 +170,19 @@ impl Default for Settings {
 }
 
 impl Settings {
+    /// Every mailbox that is set up, the first one (when it has a server) and then the others, each with its number.
+    pub fn mailboxes(&self) -> Vec<AccountCfg> {
+        let mut all = vec![];
+        if !self.account.host.is_empty() {
+            all.push(AccountCfg {
+                id: 0,
+                ..self.account.clone()
+            });
+        }
+        all.extend(self.more_accounts.iter().cloned());
+        all
+    }
+
     pub fn load(dir: &Path) -> Self {
         std::fs::read_to_string(dir.join("settings.json"))
             .ok()
@@ -240,6 +261,47 @@ fn valid_model(m: &str) -> bool {
 }
 
 impl Settings {
+    /// The extra mailboxes: at most four, numbers 1 to 4 each used once, a real server and user each, and no mailbox (server
+    /// and user, ignoring case) twice, the first one included.
+    fn validate_mailboxes(&self) -> anyhow::Result<()> {
+        use anyhow::bail;
+        if self.more_accounts.len() > (crate::store::MAX_MAILBOXES - 1) as usize {
+            bail!("At most five mailboxes can be read at once");
+        }
+        // the same server written another way (letter case, a trailing dot, Google's other name) is the same mailbox
+        let key = |a: &AccountCfg| {
+            let host = a.host.trim().trim_end_matches('.').to_lowercase();
+            let host = match host.strip_suffix("googlemail.com") {
+                Some(front) => format!("{front}gmail.com"),
+                None => host,
+            };
+            (host, a.user.trim().to_lowercase())
+        };
+        let mut seen_pairs = std::collections::HashSet::new();
+        if !self.account.host.is_empty() {
+            seen_pairs.insert(key(&self.account));
+        }
+        let mut seen_ids = std::collections::HashSet::new();
+        for a in &self.more_accounts {
+            if !(1..crate::store::MAX_MAILBOXES).contains(&a.id) || !seen_ids.insert(a.id) {
+                bail!("Every extra mailbox needs its own number from 1 to 4");
+            }
+            if a.host.is_empty() || !valid_host(&a.host) {
+                bail!("That mail server name isn't valid");
+            }
+            if a.port == 0 {
+                bail!("That mail server port isn't valid");
+            }
+            if a.user.trim().is_empty() || !is_printable(&a.user, 320) {
+                bail!("That email address isn't valid");
+            }
+            if !seen_pairs.insert(key(a)) {
+                bail!("That mailbox is already in the app");
+            }
+        }
+        Ok(())
+    }
+
     /// Rejects values that could inject into URLs, headers or IMAP commands. Called before every save.
     pub fn validate(&self) -> anyhow::Result<()> {
         use anyhow::bail;
@@ -265,6 +327,7 @@ impl Settings {
         if !valid_model(&self.ai.ollama_model) || !valid_model(&self.ai.anthropic_model) {
             bail!("Model name isn't valid");
         }
+        self.validate_mailboxes()?;
         let al = &self.alerts;
         if ![&al.quiet_start, &al.quiet_end, &al.digest_time]
             .iter()

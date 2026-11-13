@@ -5,7 +5,7 @@ const M = (() => {
   const mk = (uid, sender, addr, subject, hrs, p, category, action, urgent, star, excerpt, why, sig) => ({ uid, message_id: "<" + uid + ">", sender, addr, subject, received: now() - hrs * H, priority: p, category, action, urgent, status: "open", star, excerpt, why, signals: sig, needs_reply: false, due: "", snooze_until: 0, reply_to: addr, reply_warn: false, draft: null, pref: "", attachments: [], attachment_count: 0, unsubscribe: "", note: "", thread: "uid:" + uid, closed_by: "", gone: false, learned: 0, kind: "", remind: "", repeat: "", event: null });
   return {
     mk, // used below to add the conversation demo data
-    settings: { onboarded: new URLSearchParams(location.search).get("demo") !== null, account: { host: "imap.gmail.com", user: "you@example.com", port: 993 }, ai: { mode: "rules", ollama_model: "" }, alerts: { desktop: true, ntfy_topic: "" }, hub: { enabled: false, port: 8787, token: "" }, writeback: false },
+    settings: { onboarded: new URLSearchParams(location.search).get("demo") !== null, account: { id: 0, host: "imap.gmail.com", user: "you@example.com", port: 993 }, more_accounts: [{ id: 1, host: "imap.work.example", user: "sam@work.example", port: 993 }], ai: { mode: "rules", ollama_model: "" }, alerts: { desktop: true, ntfy_topic: "" }, hub: { enabled: false, port: 8787, token: "" }, writeback: false },
     tasks: [
       mk(3, "Priya Nair", "priya@acme.example", "Re: Q4 contract — need your sign-off today", 2, 5, "work", "Review and sign the Q4 contract", true, true, "Legal cleared the last changes. Can you sign by 5pm so we can countersign before the deadline?", "Reply to your own mail from a known colleague; deadline today.", { known: true, reply: true, bulk: false }),
       mk(7, "Riverside Clinic", "appointments@clinic.example", "Appointment confirmation request", 5, 4, "personal", "Confirm Thursday 10:30 appointment", false, false, "Please confirm your slot on Thursday at 10:30 or we will release it.", "Known sender; the slot is released if unanswered.", { known: true, reply: false, bulk: false }),
@@ -41,6 +41,10 @@ M.tasks.push(Object.assign(M.mk(2000000100, "You", "", "Follow up: Quote for the
 M.tasks.push(Object.assign(M.mk(2000000200, "You", "", "Put the bins out", 30, 3, "personal", "Put the bins out", false, false, "", "Added by you", {}), { message_id: "", reply_to: "", thread: "uid:2000000200", remind: "2026-11-17 07:00", repeat: "weekly", due: "2026-11-17" }));
 Object.assign(M.tasks.find(t => t.uid === 7), { event: { summary: "Appointment at Riverside Clinic", start: "20991120T103000Z", end: "20991120T110000Z", tzid: "", location: "Riverside Clinic, 2nd floor", all_day: false, cancelled: false } });
 const BODIES = { 12: "Sending three options. The boiler flight is the cheapest one, tell me which works.", 15: "Statement attached. Your direct debit for the boiler service plan is due." };
+for (const x of M.tasks) x.mailbox = x.uid >= 2000000000 ? (x.kind === "followup" ? 0 : null) : 0;
+for (const u of [15, 18]) { const x = M.tasks.find(y => y.uid === u); x.uid += 400000000; x.mailbox = 1; if (BODIES[u]) { BODIES[u + 400000000] = BODIES[u]; delete BODIES[u] } }
+const syncAccounts = () => { M.accounts = [M.settings.account, ...M.settings.more_accounts].filter(m => m.host).map(m => ({ id: m.id, user: m.user, host: m.host, gmail: /(^|\.)gmail\.com$/.test(m.host), status: "idle" })) };
+syncAccounts();
 M.settings.drafts = { auto: false, tone: "friendly", signature: "Best,\nSam", min_priority: 3, daily_cap: 25 };
 Object.assign(M.settings.alerts, { quiet_start: "", quiet_end: "", digest_time: "", categories: [] });
 const TEMPLATES = { thanks: "Thanks for your message. I've received it and will get back to you shortly.", confirm: "Thanks, that works for me. Consider it confirmed.", decline: "Thank you for thinking of me. Unfortunately I can't make this work, so I'll have to decline.", later: "Thanks for reaching out. I need a little more time and will reply properly by [date]." };
@@ -77,7 +81,27 @@ function mock(cmd, a) {
     case "set_star": t().star = a.star; return Promise.resolve(true);
     case "set_priority": log(`P${t().priority}→P${a.priority} saved as a correction`); t().priority = a.priority; return Promise.resolve(true);
     case "test_account": return new Promise((res, rej) => setTimeout(() => /@/.test(a.user) && a.password ? res({ ok: true, sent: "[Gmail]/Sent Mail" }) : rej("login failed: enter an address and app password"), 900));
-    case "save_account": M.settings.account = { host: a.host, port: a.port, user: a.user }; return Promise.resolve(true);
+    case "save_account": {
+      const id = a.id || 0;
+      if (id === 0) M.settings.account = { id: 0, host: a.host, port: a.port, user: a.user };
+      else { const m = M.settings.more_accounts.find(x => x.id === id); if (!m) return Promise.reject("There is no mailbox with that number"); Object.assign(m, { host: a.host, port: a.port, user: a.user }) }
+      syncAccounts(); return Promise.resolve(true);
+    }
+    case "add_account": {
+      if (!M.settings.onboarded || !M.accounts.length) return Promise.reject("Set up your first mailbox before adding another");
+      if (!String(a.password || "").replace(/ /g, "")) return Promise.reject("Enter the app password for this mailbox");
+      if (M.accounts.length >= 5) return Promise.reject("You can read at most five mailboxes at once");
+      if (!/@/.test(a.user || "") || !a.host) return Promise.reject("Enter a server and an email address");
+      if (M.accounts.some(m => m.host.toLowerCase() === String(a.host).toLowerCase() && m.user.toLowerCase() === String(a.user).toLowerCase())) return Promise.reject("That mailbox is already added");
+      const used = new Set(M.accounts.map(m => m.id)); let id = 0; while (used.has(id)) id++;
+      if (id === 0) M.settings.account = { id, host: a.host, port: a.port || 993, user: a.user }; else M.settings.more_accounts.push({ id, host: a.host, port: a.port || 993, user: a.user }); syncAccounts(); return Promise.resolve(id);
+    }
+    case "remove_account": {
+      const id = a.id, had = M.accounts.some(m => m.id === id); if (!had) return Promise.reject("There is no mailbox with that number");
+      M.tasks = M.tasks.filter(x => x.mailbox !== id);
+      if (id === 0) M.settings.account = { id: 0, host: "", user: "", port: 993 }; else M.settings.more_accounts = M.settings.more_accounts.filter(m => m.id !== id);
+      syncAccounts(); if (!M.accounts.length) M.settings.onboarded = false; return Promise.resolve(true);
+    }
     case "save_settings": { const mg = (x, y) => { for (const k in y) { if (y[k] && typeof y[k] === "object") mg(x[k] ??= {}, y[k]); else x[k] = y[k] } }; mg(M.settings, a.patch); if (M.settings.hub.enabled && !M.settings.hub.token) M.settings.hub.token = "demo"; return Promise.resolve(M.settings) }
     case "set_reminder": {
       const x = t(); if (!x || x.uid < 2000000000) return Promise.reject(x ? "Reminders are for tasks you added yourself. To see a message later, snooze it" : "no such task");
@@ -115,7 +139,7 @@ function mock(cmd, a) {
     case "test_ai": return new Promise(r => setTimeout(() => r({ priority: 5, category: "work", action: "Sign the contract", why: "deadline today" }), 700));
     case "rotate_hub_token": return Promise.resolve(true);
     case "finish_setup": M.settings.onboarded = true; return Promise.resolve(true);
-    case "sign_out": M.settings.onboarded = false; return Promise.resolve(true);
+    case "sign_out": M.settings.onboarded = false; M.settings.account = { id: 0, host: "", user: "", port: 993 }; M.settings.more_accounts = []; syncAccounts(); return Promise.resolve(true);
     case "hub_info": { let c = ""; for (let y = 0; y < 21; y++) for (let x = 0; x < 21; x++) if ((x * 7 + y * 13 + x * y) % 3 === 0) c += `<rect x="${x}" y="${y}" width="1" height="1"/>`; return Promise.resolve({ url: "http://192.168.1.20:8787/?token=demo", enabled: true, svg: `<svg viewBox="0 0 21 21" shape-rendering="crispEdges"><rect width="21" height="21" fill="#fff"/>${c}</svg>` }) }
   }
   return Promise.reject("unknown command");

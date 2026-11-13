@@ -286,6 +286,27 @@ tree in two rounds and approved it. Full ledger: `docs/2026-11-13_PHASE5_REVIEW.
 Accepted, in `docs/designs/phase5.md`: a repeating invitation is saved as its first occurrence only, and a zoned event is
 written without a `VTIMEZONE` block (Google and Apple accept that, some other calendars may not).
 
+## Review 7 (Phase 6: several mailboxes; council, drift passes and an Opus review loop, 2026-11-13)
+
+An Opus seat and a Sonnet seat reviewed blind and both said **ship with caveats**. A Sonnet pass compared the design and pseudocode
+with the code (12 disagreements, three of them code bugs) and a Haiku pass compared the promises (5, one a code bug). An Opus
+reviewer then went through the fixed tree in three rounds (six findings, then one, then none) and approved it. Full ledger:
+`docs/2026-11-13_PHASE6_REVIEW.md`.
+
+| Finding | Fix |
+| --- | --- |
+| **The phone received every mailbox's login.** The sync logs "connected as <login>" and the phone's state carried the log unfiltered, so the phone hub, which must never see addresses, saw one per mailbox (one before this change) | The log the phone gets has the login removed from those lines |
+| **A stop while the last message of a batch was being ranked moved the cursor past it**, so the message was skipped for good after any restart (this predates the change) and a removed mailbox's cursor could be written back, so a new mailbox with the same number skipped its whole inbox | A stopped sync no longer touches the cursor or reports a status; a new mailbox starts from a clean number |
+| **The engine's tests used the real OS keychain when cargo was started from the top folder**, so a test run could overwrite or delete the passwords of the person running it (it happened once during this work: two dummy entries, removed by hand) | The engine recognises its own cargo test runs and uses an in-memory keychain wherever they are started; a test pins it |
+| **Data crossed mailboxes**: a follow-up record of an answered message went to mailbox 0; a correction unlinked by a renumbering sat in mailbox 0's id range and was deleted with it; a snooze was woken by the same message arriving in another mailbox; the digest and wake notices merged conversations across mailboxes; a follow-up open for 60 days lost its mailbox and survived the mailbox's removal (also for databases from the previous release) | Each now belongs to its own mailbox and goes only with it |
+| **`save_account` reset a mailbox before stopping the syncs; `remove_account` and `sign_out` left every thread stopped if they failed halfway** | The syncs are stopped first and started again whatever happens (by construction; a race cannot be forced reliably in a test) |
+| The duplicate-mailbox check missed `imap.gmail.com.` and `googlemail.com`; after the first mailbox was removed only four could be added; the first place needed no address | The server is compared in a normal form; the first place is taken again by the next mailbox; every mailbox needs a server and an address |
+| UI: read message text and undo closures could follow a reused mailbox number; Cancel during Test or Add threw; focus was dropped | Caches are cleared when mailboxes change; the dialog ignores late answers and keeps focus |
+
+Accepted, documented: removing a mailbox leaves the short activity-log lines that name subjects until the log's 30 days are up; the
+phone is told a task's id, which encodes a mailbox number but no name or address; Gmail's per-address link form
+(`/mail/u/<address>/`) is untested against a live account; nothing was run against a live mailbox, macOS or Linux.
+
 ## Reporting a vulnerability
 
 Please report privately to the maintainer rather than opening a public issue. Add a contact address
