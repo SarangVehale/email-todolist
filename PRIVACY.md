@@ -6,11 +6,12 @@ Inbox Agent runs on your computer. There is no Inbox Agent server and no account
 and the recipients and Message-IDs of your Sent folder to learn who you write to.
 
 **What it stores, on your computer only.**
-- A task list: sender, subject, a 400-character excerpt, up to 3,000 characters of the message text (used only to write replies), the ranking, a due date if the message states one, and a short reason.
+- A task list: sender, subject, a 400-character excerpt, up to 3,000 characters of the message text (used only to write replies), the ranking, a due date if the message states one, up to five attachment names (never the files), the message's unsubscribe link, your own notes, tasks you add yourself, and a short reason.
   Finished tasks (and their drafts) are deleted after 90 days and the activity log after 30.
 - Reply drafts you or the AI wrote. They are never sent; saving one to your mailbox's Drafts folder is a separate click and needs "Let Inbox Agent file mail" switched on.
 - Your settings (server name, address, alert options, phone-hub access code).
 - Your mail password and any API key, in the operating system keychain, never in a file.
+- A small `crash.log` (the text of an internal error and the code location, never sent anywhere, capped at 100 KB). There is no telemetry.
 
 **What leaves your computer.**
 - Mail traffic to your own mail provider.
@@ -22,4 +23,5 @@ and the recipients and Message-IDs of your Sent folder to learn who you write to
 
 **Deleting everything.** Settings, "Sign out and reset" removes the saved password and the task list.
 Uninstalling removes the program; the data folder is `app.inboxagent.desktop` under your user
-profile's application-data location.
+profile's local application-data location (on Windows, `%LOCALAPPDATA%`). Use "Sign out and reset" before uninstalling so
+the saved password is removed from the keychain too.

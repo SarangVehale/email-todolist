@@ -14,6 +14,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+/// Whether the database integrity check has already passed in this launch.
+static HEALTH_CHECKED: AtomicBool = AtomicBool::new(false);
+
 pub type Notify = Arc<dyn Fn(&str, &str) + Send + Sync>;
 
 pub struct Core {
@@ -62,17 +65,23 @@ impl Core {
         *self.status.lock().unwrap_or_else(|e| e.into_inner()) = s.to_string();
     }
 
-    fn account(&self, s: &Settings) -> Option<Account> {
+    /// `Ok(None)`: not set up, or no saved password. `Err(status)`: the system keychain could not be read.
+    fn account(&self, s: &Settings) -> std::result::Result<Option<Account>, String> {
         if !s.onboarded || s.account.host.is_empty() {
-            return None;
+            return Ok(None);
         }
-        let password = secrets::get("imap-password")?;
-        Some(Account {
-            host: s.account.host.clone(),
-            port: s.account.port,
-            user: s.account.user.clone(),
-            password,
-        })
+        match secrets::lookup("imap-password") {
+            Ok(Some(password)) => Ok(Some(Account {
+                host: s.account.host.clone(),
+                port: s.account.port,
+                user: s.account.user.clone(),
+                password,
+            })),
+            Ok(None) => Ok(None),
+            Err(e) => Err(format!(
+                "error: your system keychain is not available ({e}). Unlock it and restart the app"
+            )),
+        }
     }
 
     /// (Re)starts the background threads from the current settings.
@@ -85,6 +94,19 @@ impl Core {
         .store(true, Ordering::Relaxed);
         let s = self.settings();
 
+        // A damaged database is set aside and rebuilt; one from a newer app version is refused, untouched. The check
+        // runs once per launch (start() also runs after every settings save). A busy database is retried by the
+        // sync itself, so only the "newer version" case stops the app here.
+        if !HEALTH_CHECKED.swap(true, Ordering::Relaxed) {
+            if let Err(e) = Store::open_recovering(&self.dir.join("agent.db")) {
+                HEALTH_CHECKED.store(false, Ordering::Relaxed); // not checked after all: try again on the next start
+                self.set_status(&format!("error: {e}"));
+                if e.downcast_ref::<crate::store::TooNew>().is_some() {
+                    return;
+                }
+            }
+        }
+
         if s.hub.enabled {
             let (core, stop) = (self.clone(), new_stop.clone());
             std::thread::spawn(move || hub::serve(core, stop));
@@ -93,9 +115,16 @@ impl Core {
             let (core, stop) = (self.clone(), new_stop.clone());
             std::thread::spawn(move || jobs::run(core, stop));
         }
-        let Some(acct) = self.account(&s) else {
-            self.set_status(if s.onboarded { "no password" } else { "setup" });
-            return;
+        let acct = match self.account(&s) {
+            Ok(Some(a)) => a,
+            Ok(None) => {
+                self.set_status(if s.onboarded { "no password" } else { "setup" });
+                return;
+            }
+            Err(message) => {
+                self.set_status(&message);
+                return;
+            }
         };
 
         // watcher
@@ -188,6 +217,12 @@ impl Core {
             return;
         }
         let s = self.settings();
+        if !t.urgent
+            && !s.alerts.categories.is_empty()
+            && !s.alerts.categories.contains(&t.category)
+        {
+            return;
+        }
         if !t.urgent
             && jobs::in_quiet_window(
                 &s.alerts.quiet_start,
@@ -362,8 +397,14 @@ impl Core {
                 Ok(json!(true))
             }
             "sign_out" => {
-                secrets::delete("imap-password");
+                // stop the background threads first so nothing writes mail back in while the data is wiped
+                self.stop
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .store(true, Ordering::Relaxed);
                 self.store()?.wipe_all()?;
+                crate::store::remove_leftover_files(&self.dir);
+                secrets::delete_all();
                 let mut s = self.settings();
                 s.account = AccountCfg::default();
                 s.onboarded = false;

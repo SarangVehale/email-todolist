@@ -1,6 +1,7 @@
 //! Optional AI: sorts mail (priority, category, due date, whether a reply is needed) and drafts replies.
 //! Email text is untrusted: the model only classifies it or replies to it, and its output is validated.
 //! Any failure returns an error; callers fall back to the rules and to reply templates.
+use crate::dates::valid_iso as valid_iso_date;
 use crate::mail::Email;
 use crate::settings::AiCfg;
 use crate::signals::{base_score, Signals};
@@ -85,15 +86,6 @@ pub fn build_draft_prompt(e: &Email, ctx: &DraftCtx) -> String {
         defang(&e.subject),
         defang(&e.body)
     )
-}
-
-fn valid_iso_date(s: &str) -> bool {
-    let b = s.as_bytes();
-    if b.len() != 10 || b[4] != b'-' || b[7] != b'-' {
-        return false;
-    }
-    let num = |r: std::ops::Range<usize>| s[r].parse::<u32>().ok();
-    matches!((num(0..4), num(5..7), num(8..10)), (Some(y), Some(m), Some(d)) if (2000..=2100).contains(&y) && (1..=12).contains(&m) && (1..=31).contains(&d))
 }
 
 pub const CATEGORIES: &[&str] = &[

@@ -78,7 +78,7 @@ function rowHTML(t) {
     <div class="mid" data-act="open"><div class="t">${esc(label(t))}</div><div class="s">${t.urgent ? "<b>Urgent</b> · " : ""}${tagsHTML(t)}${esc(t.sender)} · ${esc(t.subject)} · ${ago(t.received)}</div></div>
     <button class="star ${t.star ? "on" : ""}" data-act="star" aria-label="Star">${t.star ? "★" : "☆"}</button>
     <div class="pri ${t.priority >= 4 ? "hi" : ""}" role="group" aria-label="Priority">${[1, 2, 3, 4, 5].map(n => `<button data-p="${n}" class="${t.priority >= n ? "lit" : ""}" aria-label="Priority ${n}"></button>`).join("")}</div>
-    <div class="more"><p>${esc(t.excerpt) || "No text."}</p><div class="spec"><div><span>From</span><b>${esc(t.sender)} · ${esc(t.addr)}</b></div><div><span>Signals</span><b>${esc(why)}</b></div><div><span>Why</span><b>${esc(t.why)}</b></div><div><span>Mailbox</span><b>${S.settings.writeback ? "Done files it away" : "Write-back off · changes stay here"}</b></div></div>${replyHTML(t)}</div>
+    <div class="more"><p>${esc(t.excerpt) || "No text."}</p><div class="spec">${isLocal(t) ? "" : `<div><span>From</span><b>${esc(t.sender)} · ${esc(t.addr)}</b></div><div><span>Signals</span><b>${esc(why)}</b></div><div><span>Why</span><b>${esc(t.why)}</b></div><div><span>Mailbox</span><b>${S.settings.writeback ? "Done files it away" : "Write-back off · changes stay here"}</b></div>`}</div>${replyHTML(t)}</div>
   </div>`;
 }
 function render() {
@@ -86,7 +86,7 @@ function render() {
   const ok = st === "idle" || st === "syncing", err = st.startsWith("error") || st === "no password";
   const tabs = [["todo", "To-do", open.length], ["star", "Starred", open.filter(t => t.star).length], ["snoozed", "Snoozed", snoozed.length], ["done", "Done", S.tasks.filter(t => t.status === "done").length], ["log", "Log", ""]];
   $("#bar").innerHTML = `<div class="brand"><span class="mark">要</span><span class="dot ${ok ? "" : err ? "err" : "off"}" title="${esc(st)}"></span></div>
-    <nav>${tabs.map(([k, n, c]) => `<button class="${view === k ? "on" : ""}" data-view="${k}">${n}${c !== "" && c !== 0 ? `<i>${c}</i>` : ""}</button>`).join("")}</nav><span class="sp"></span>${isHub ? "" : '<button class="gear" data-act="settings">Settings</button>'}`;
+    <nav>${tabs.map(([k, n, c]) => `<button class="${view === k ? "on" : ""}" data-view="${k}">${n}${c !== "" && c !== 0 ? `<i>${c}</i>` : ""}</button>`).join("")}</nav><span class="sp"></span><button class="gear" data-act="addtask">Add task</button>${isHub ? "" : '<button class="gear" data-act="settings">Settings</button>'}`;
   const names = { todo: "To<em>-do</em>", star: "Starred", snoozed: "Snoozed", done: "Done", log: "Log" };
   const d = new Date(), kick = `${{ todo: "Inbox", star: "Marked", snoozed: "Resting", done: "Filed", log: "Record" }[view]} · ${d.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" })}`;
   let h = `<div class="kick">${kick}</div><h1>${names[view]}</h1>`;
@@ -113,7 +113,7 @@ function render() {
   const rl = view === "log" ? [] : listFor().slice(0, 80), ch = Math.max(5, Math.min(18, Math.floor((innerHeight - 40) / Math.max(rl.length, 1))));
   $("#rail").style.setProperty("--ch", ch + "px");
   $("#rail").innerHTML = rl.map(t => `<div class="rc ${t.uid === cur ? "cur" : ""}" data-rail="${t.uid}" title="${esc(label(t))}">${ch >= 10 ? [5, 4, 3, 2, 1].map(n => `<i class="${t.priority >= n ? "h" : ""}"></i>`).join("") : `<i class="${t.priority >= 4 ? "h" : ""}"></i>`}</div>`).join("");
-  $("#foot").innerHTML = `<span>${msg}</span><span class="sp"></span><span class="keys"><span class="cap">J</span><span class="cap">K</span>Move<span class="cap">X</span>Done<span class="cap">1–5</span>Priority<span class="cap">S</span>Star<span class="cap">R</span>Reply<span class="cap">H</span>Snooze<span class="cap">/</span>Search<span class="cap">Z</span>Undo</span>`;
+  $("#foot").innerHTML = `<span>${msg}</span><span class="sp"></span><span class="keys"><span class="cap">J</span><span class="cap">K</span>Move<span class="cap">X</span>Done<span class="cap">1–5</span>Priority<span class="cap">S</span>Star<span class="cap">R</span>Reply<span class="cap">H</span>Snooze<span class="cap">/</span>Search<span class="cap">A</span>Add<span class="cap">Z</span>Undo<span class="cap">?</span>Keys</span>`;
 }
 
 /* ───────── actions (optimistic; the engine confirms on the next poll) ───────── */
@@ -143,6 +143,7 @@ document.addEventListener("click", e => {
   const v = e.target.closest("[data-view]"); if (v) { view = v.dataset.view; render(); return }
   const a = e.target.closest("[data-act]")?.dataset.act;
   if (a === "settings") return openSettings();
+  if (a === "addtask") return openAdd();
   const row = e.target.closest(".row"); if (!row) return;
   const t = find(+row.dataset.uid); if (!t) return; cur = t.uid;
   const pb = e.target.closest("[data-p]");
@@ -161,7 +162,7 @@ document.addEventListener("keydown", e => {
   else if (t && /^[1-5]$/.test(k)) setPri(t, +k);
   else if (t && k === "s") toggleStar(t);
   else if (t && (k === "Enter" || k === " ")) { e.preventDefault(); openUid = openUid === t.uid ? null : t.uid; render() }
-  else if (t && k === "r") { e.preventDefault(); openUid = t.uid; render(); if (!t.draft && !isHub) genDraft(t, ""); else document.querySelector(".row.open textarea")?.focus() }
+  else if (t && k === "r" && !isLocal(t)) { e.preventDefault(); openUid = t.uid; render(); if (!t.draft && !isHub) genDraft(t, ""); else document.querySelector(".row.open textarea")?.focus() }
   else if (t && k === "h") { handleExtra({ target: { closest: () => ({ dataset: { preset: "tomorrow" } }) } }, t, "snooze") }
   else if (k === "/") { e.preventDefault(); const q = $("#q"); if (q) q.focus() }
   else if (k === "z") { undoStack.pop()?.(); render() }

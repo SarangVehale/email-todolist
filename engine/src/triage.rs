@@ -127,15 +127,29 @@ impl Triager for RulesTriager {
             urgent: false,
             why: format!("Rule-based: {why}."),
             needs_reply: !s.bulk && (s.reply || s.known) && e.body.contains('?'),
-            due: String::new(),
+            due: due_in(e),
         })
     }
 }
 
+/// A cued due date in the subject or the start of the body, resolved against the day the message arrived.
+fn due_in(e: &Email) -> String {
+    let text = format!(
+        "{} {}",
+        e.subject,
+        e.body.chars().take(1500).collect::<String>()
+    );
+    crate::dates::extract_due(&text, crate::dates::received_date(e.received)).unwrap_or_default()
+}
+
 /// Run `primary`; on any error use the rules, so a failing AI never loses mail.
 pub fn triage_with_fallback(primary: &dyn Triager, e: &Email, s: &Signals) -> Triage {
-    primary
+    let mut t = primary
         .triage(e, s)
         .or_else(|_| RulesTriager.triage(e, s))
-        .expect("rules triage is infallible")
+        .expect("rules triage is infallible");
+    if t.due.is_empty() {
+        t.due = due_in(e); // a model that found no date may still have missed an obvious one
+    }
+    t
 }

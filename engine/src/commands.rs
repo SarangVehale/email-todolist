@@ -22,6 +22,8 @@ pub const PUBLIC: &[&str] = &[
     "set_pref",
     "draft_update",
     "draft_discard",
+    "set_note",
+    "add_task",
 ];
 
 /// Task commands that only the desktop window may use.
@@ -53,6 +55,11 @@ fn draft_ctx(core: &Core, instruction: &str) -> DraftCtx {
 pub fn generate_draft(core: &Core, uid: u32, instruction: &str) -> Result<(String, &'static str)> {
     let store = core.store()?;
     let t = store.get(uid).ok_or_else(|| anyhow!("no such task"))?;
+    if uid >= crate::store::LOCAL_UID_BASE {
+        return Err(anyhow!(
+            "This task did not come from an email, so there is nothing to reply to"
+        ));
+    }
     let email = Email {
         uid,
         message_id: t.message_id.clone(),
@@ -67,6 +74,9 @@ pub fn generate_draft(core: &Core, uid: u32, instruction: &str) -> Result<(Strin
         references: store.references(uid),
         bulk_headers: false,
         auth_fail: false,
+        attachment_count: 0,
+        attachments: vec![],
+        unsubscribe: String::new(),
     };
     let s = core.settings();
     let triager = make_triager(&s.ai, secrets::get("anthropic-key"), vec![]);
@@ -206,6 +216,17 @@ pub fn run(core: &Arc<Core>, cmd: &str, a: &Value) -> Option<Result<Value>> {
                 Ok(json!(true))
             }
             "draft_discard" => Ok(json!(store.delete_draft(uid)?)),
+            "set_note" => Ok(json!(store.set_note(uid, a["note"].as_str().unwrap_or(""))?)),
+            "add_task" => {
+                let uid = store
+                    .add_local_task(
+                        a["title"].as_str().unwrap_or(""),
+                        a["priority"].as_u64().unwrap_or(3).min(255) as u8,
+                        a["due"].as_str().unwrap_or(""),
+                    )?
+                    .ok_or_else(|| anyhow!("Give the task a title (up to 200 characters), a priority from 1 to 5, and a date like 2026-11-20 if you set one"))?;
+                Ok(json!(uid))
+            }
             "draft_to_mailbox" => {
                 let s = core.settings();
                 if !s.writeback {

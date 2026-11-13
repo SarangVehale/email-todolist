@@ -570,6 +570,207 @@ fn oversized_and_hostile_messages_are_skipped_without_stopping_the_sync() {
     assert!(log.iter().any(|l| l.contains("could not parse")), "{log:?}");
 }
 
+/// A triager that panics on one subject, standing in for any bug a hostile message could trigger.
+struct Boom;
+impl engine::triage::Triager for Boom {
+    fn triage(
+        &self,
+        e: &engine::mail::Email,
+        s: &engine::signals::Signals,
+    ) -> anyhow::Result<engine::triage::Triage> {
+        if e.subject.contains("BOOM") {
+            panic!("simulated bug on {}", e.subject);
+        }
+        RulesTriager.triage(e, s)
+    }
+}
+
+#[test]
+fn a_message_that_panics_is_skipped_and_the_rest_of_the_sync_continues() {
+    let srv = Server::start(gmail_folders(
+        vec![
+            inbox_msg(1, "<a@acme>", "first"),
+            inbox_msg(2, "<b@acme>", "BOOM"),
+            inbox_msg(3, "<c@acme>", "third"),
+        ],
+        vec![],
+    ));
+    let store = Store::memory().unwrap();
+    let mut s = srv.session();
+    let n = process_new(
+        &mut s,
+        &store,
+        &Boom,
+        &SentIndex::default(),
+        50,
+        &mut |_, _| {},
+    )
+    .expect("a panic inside one message must not abort the sync");
+    assert_eq!(n, 2);
+    assert!(store.seen(1) && !store.seen(2) && store.seen(3));
+    assert_eq!(store.last_uid(), 3, "the cursor moves past the bad message");
+    let log: Vec<String> = store.recent_log(20).into_iter().map(|l| l.1).collect();
+    assert!(
+        log.iter()
+            .any(|l| l.contains("message 2") && l.contains("skipped")),
+        "{log:?}"
+    );
+    assert!(store.in_flight().is_none(), "no marker is left behind");
+}
+
+#[test]
+fn a_message_that_was_in_flight_during_a_crash_is_tried_once_more_then_skipped() {
+    let store = Store::memory().unwrap();
+    // first attempt starts, then the process dies: the marker stays
+    assert_eq!(store.begin_attempt(7).unwrap(), 1);
+    // after the restart the same message begins again: second attempt
+    assert_eq!(store.begin_attempt(7).unwrap(), 2);
+    // a different message resets the count
+    assert_eq!(store.begin_attempt(8).unwrap(), 1);
+    store.end_attempt().unwrap();
+    assert!(store.in_flight().is_none());
+    assert_eq!(store.begin_attempt(8).unwrap(), 1);
+}
+
+#[test]
+fn a_poison_message_that_keeps_killing_the_process_is_dropped_after_two_tries() {
+    let srv = Server::start(gmail_folders(
+        vec![
+            inbox_msg(1, "<a@acme>", "first"),
+            inbox_msg(2, "<b@acme>", "killer"),
+            inbox_msg(3, "<c@acme>", "third"),
+        ],
+        vec![],
+    ));
+    let store = Store::memory().unwrap();
+    task(&store, 1, "<a@acme>", "priya@acme.com"); // already handled before the crashes
+                                                   // two earlier runs died while handling message 2
+    store.begin_attempt(2).unwrap();
+    store.begin_attempt(2).unwrap();
+    let mut s = srv.session();
+    let n = process_new(
+        &mut s,
+        &store,
+        &RulesTriager,
+        &SentIndex::default(),
+        50,
+        &mut |_, _| {},
+    )
+    .unwrap();
+    assert_eq!(
+        n, 1,
+        "message 3 is stored, message 2 is not retried a third time"
+    );
+    assert!(store.seen(3) && !store.seen(2));
+    let log: Vec<String> = store.recent_log(20).into_iter().map(|l| l.1).collect();
+    assert!(
+        log.iter()
+            .any(|l| l.contains("message 2") && l.contains("crashed")),
+        "{log:?}"
+    );
+}
+
+#[test]
+fn a_database_error_is_not_counted_as_a_crash_so_the_message_is_not_lost() {
+    // regression: an ordinary store error left the in-flight marker, and the third retry skipped the message for good
+    let dir = std::env::temp_dir().join(format!("inbox-dberr-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("agent.db");
+    let store = Store::open(&path).unwrap();
+    let side = rusqlite::Connection::open(&path).unwrap();
+    side.execute_batch("CREATE TRIGGER nope BEFORE INSERT ON tasks WHEN NEW.uid=2 BEGIN SELECT RAISE(ABORT,'disk full'); END;").unwrap();
+    let srv = Server::start(gmail_folders(
+        vec![
+            inbox_msg(1, "<a@acme>", "first"),
+            inbox_msg(2, "<b@acme>", "second"),
+        ],
+        vec![],
+    ));
+    for round in 1..=4 {
+        let mut s = srv.session();
+        let r = process_new(
+            &mut s,
+            &store,
+            &RulesTriager,
+            &SentIndex::default(),
+            50,
+            &mut |_, _| {},
+        );
+        assert!(r.is_err(), "round {round}: the store error is reported");
+        assert!(
+            store.in_flight().is_none(),
+            "round {round}: it does not leave a crash marker"
+        );
+    }
+    side.execute_batch("DROP TRIGGER nope").unwrap();
+    let mut s = srv.session();
+    process_new(
+        &mut s,
+        &store,
+        &RulesTriager,
+        &SentIndex::default(),
+        50,
+        &mut |_, _| {},
+    )
+    .unwrap();
+    assert!(store.seen(2), "message 2 is stored once the fault clears");
+    drop(side);
+    drop(store);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_message_with_an_absurd_date_is_still_stored() {
+    let weird = msg(
+        1,
+        raw_mail(
+            "From: Priya <priya@acme.com>\nSubject: dated oddly\nMessage-ID: <d@acme>\nDate: Mon, 1 Jan 262143 12:00:00 +1400",
+            "please reply by tomorrow",
+        ),
+    );
+    let srv = Server::start(gmail_folders(vec![weird], vec![]));
+    let store = Store::memory().unwrap();
+    let mut s = srv.session();
+    let n = process_new(
+        &mut s,
+        &store,
+        &RulesTriager,
+        &SentIndex::default(),
+        50,
+        &mut |_, _| {},
+    )
+    .unwrap();
+    assert_eq!(n, 1);
+    assert!(store.seen(1));
+}
+
+#[test]
+fn a_stopped_sync_stores_nothing_new() {
+    let srv = Server::start(gmail_folders(
+        vec![inbox_msg(1, "<a@acme>", "first")],
+        vec![],
+    ));
+    let store = Store::memory().unwrap();
+    let mut s = srv.session();
+    let stop = std::sync::atomic::AtomicBool::new(true);
+    let n = engine::watcher::process_new_until(
+        &mut s,
+        &store,
+        &RulesTriager,
+        &SentIndex::default(),
+        50,
+        &mut |_, _| {},
+        &stop,
+    )
+    .unwrap();
+    assert_eq!(n, 0);
+    assert!(
+        !store.seen(1),
+        "signing out must not be followed by a late write"
+    );
+}
+
 #[test]
 fn a_renumbered_mailbox_restarts_the_sync_instead_of_losing_mail() {
     let srv = Server::start(gmail_folders(

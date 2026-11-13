@@ -71,9 +71,11 @@ jobs:
         run: |
           cargo install cargo-audit --locked
           cargo audit
+      - name: Dependency vulnerability scan (the app shell: Tauri, webview, plugins)
+        run: cargo audit -f app/src-tauri/Cargo.lock
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
       - name: Dependency vulnerability scan (npm)
         working-directory: app
-        run: npm audit --omit=dev
+        run: npm audit

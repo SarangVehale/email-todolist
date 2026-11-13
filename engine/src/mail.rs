@@ -1,6 +1,6 @@
 //! Parsed view of one RECEIVED message. Every field here is attacker-controlled, so parsing
 //! drops anything that could be abused downstream (IMAP commands, deep MIME, forged headers).
-use mailparse::{addrparse, MailAddr, MailHeaderMap, ParsedMail};
+use mailparse::{addrparse, DispositionType, MailAddr, MailHeaderMap, ParsedMail};
 
 /// More multipart containers than any real message has; beyond this we refuse to parse (stack-depth DoS).
 const MAX_MULTIPART_MARKERS: usize = 200;
@@ -8,6 +8,8 @@ const PARSE_STACK_BYTES: usize = 64 << 20;
 const MAX_TEXT_DEPTH: usize = 24;
 /// Characters of message text kept for drafting replies.
 const MAX_BODY_CHARS: usize = 3000;
+/// HTML beyond this many bytes is ignored when rendering to text.
+const MAX_HTML_BYTES: usize = 256 * 1024;
 const MAX_REFERENCES: usize = 10;
 
 #[derive(Debug, Clone)]
@@ -30,6 +32,12 @@ pub struct Email {
     pub bulk_headers: bool,
     /// The receiving server reported a failed DKIM/SPF/DMARC check, so the From address is not trustworthy.
     pub auth_fail: bool,
+    /// Total number of attached files (inline images such as logos are not counted).
+    pub attachment_count: usize,
+    /// Up to five attachment file names, cleaned for display.
+    pub attachments: Vec<String>,
+    /// A safe `https:` or `mailto:` link from the List-Unsubscribe header, or empty.
+    pub unsubscribe: String,
 }
 
 /// A Message-ID is used in IMAP SEARCH commands, so only a strict `<token>` of visible ASCII is kept.
@@ -131,34 +139,64 @@ fn entity(name: &str) -> Option<char> {
 
 /// Removes `<tag ...> ... </tag>` blocks (script, style, title) and comments. Works on ASCII-lowercased
 /// copies so byte offsets stay identical; unmatched openers are left alone, so it cannot loop or panic.
-fn drop_blocks(html: &str) -> String {
-    let mut s = html.to_string();
-    for (open, close) in [
+fn drop_blocks(html: &str, truncated: bool) -> String {
+    const KINDS: [(&str, &str); 4] = [
         ("<script", "</script>"),
         ("<style", "</style>"),
         ("<title", "</title>"),
         ("<!--", "-->"),
-    ] {
-        let mut from = 0;
-        loop {
-            let lower = s.to_ascii_lowercase();
-            let Some(a) = lower[from..].find(open).map(|i| i + from) else {
+    ];
+    // One lowercase copy and one left-to-right pass: time is linear in the input however many blocks it has.
+    let lower = html.to_ascii_lowercase();
+    let mut out = String::with_capacity(html.len());
+    let mut pos = 0;
+    // next[k] = where kind k opens at or after `pos`; None once it has no more openers or no closer is left
+    let mut next: [Option<usize>; 4] = [None; 4];
+    let mut stale = [true; 4];
+    loop {
+        for (k, (open, _)) in KINDS.iter().enumerate() {
+            if stale[k] || next[k].is_some_and(|n| n < pos) {
+                next[k] = lower[pos..].find(open).map(|i| i + pos);
+                stale[k] = false;
+            }
+        }
+        let Some((k, a)) = next
+            .iter()
+            .enumerate()
+            .filter_map(|(k, n)| n.map(|n| (k, n)))
+            .min_by_key(|&(_, n)| n)
+        else {
+            break;
+        };
+        match lower[a..].find(KINDS[k].1) {
+            Some(i) => {
+                out.push_str(&html[pos..a]);
+                out.push(' ');
+                pos = a + i + KINDS[k].1.len();
+            }
+            // The text was cut inside this block, so the rest of it is block content (CSS, script), not mail text.
+            None if truncated => {
+                out.push_str(&html[pos..a]);
+                pos = html.len();
                 break;
-            };
-            let Some(b) = lower[a..].find(close).map(|i| i + a + close.len()) else {
-                break;
-            };
-            s.replace_range(a..b, " ");
-            from = a;
+            }
+            // an opener with no closer: leave it as text, and no later opener of this kind can close either
+            None => next[k] = None,
         }
     }
-    s
+    out.push_str(&html[pos..]);
+    out
 }
 
 /// A readable plain-text rendering of an HTML body: block tags become line breaks, other tags vanish,
 /// entities are decoded. Malformed markup degrades to text, never to an error.
 pub fn html_to_text(html: &str) -> String {
-    let s = drop_blocks(html);
+    // Only the start of a message is ever shown or stored, so a huge body is cut before any work is done.
+    let mut cut = html.len().min(MAX_HTML_BYTES);
+    while !html.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    let s = drop_blocks(&html[..cut], cut < html.len());
     let chars: Vec<char> = s.chars().collect();
     let mut out = String::with_capacity(s.len() / 2);
     let mut i = 0;
@@ -265,6 +303,127 @@ fn tidy_body(text: &str) -> String {
     out.trim().chars().take(MAX_BODY_CHARS).collect()
 }
 
+/// A file name that is safe to show: no path, no control characters, at most 60 characters.
+fn clean_file_name(s: &str) -> String {
+    let base = s.rsplit(['/', '\\']).next().unwrap_or("");
+    base.chars()
+        .filter(|c| !c.is_control())
+        .take(60)
+        .collect::<String>()
+        .trim()
+        .to_string()
+}
+
+fn collect_attachments(m: &ParsedMail, depth: usize, names: &mut Vec<String>, count: &mut usize) {
+    if depth > MAX_TEXT_DEPTH {
+        return;
+    }
+    if m.subparts.is_empty() {
+        let d = m.get_content_disposition();
+        let file = d
+            .params
+            .get("filename")
+            .or_else(|| m.ctype.params.get("name"));
+        let is_attachment = d.disposition == DispositionType::Attachment
+            || (d.disposition != DispositionType::Inline && file.is_some());
+        if is_attachment {
+            *count += 1;
+            if names.len() < 5 {
+                let n = clean_file_name(file.map(String::as_str).unwrap_or(""));
+                names.push(if n.is_empty() {
+                    m.ctype.mimetype.clone()
+                } else {
+                    n
+                });
+            }
+        }
+        return;
+    }
+    for p in &m.subparts {
+        collect_attachments(p, depth + 1, names, count);
+    }
+}
+
+/// The first https link, else the first mailto link, in a List-Unsubscribe header. Anything else (http, javascript,
+/// data, links with spaces or control characters, very long links) is ignored.
+pub fn unsubscribe_link(header: &str) -> String {
+    let links: Vec<&str> = header
+        .split('<')
+        .skip(1)
+        .filter_map(|p| p.split_once('>').map(|(link, _)| link)) // only a complete <...> counts
+        .map(str::trim)
+        .collect();
+    let plain = |l: &str| {
+        l.len() <= 2000
+            && l.is_ascii()
+            && !l
+                .chars()
+                .any(|c| c.is_control() || c.is_whitespace() || matches!(c, '<' | '>' | '\\' | '"'))
+    };
+    links
+        .iter()
+        .find(|l| plain(l) && https_ok(l))
+        .or_else(|| links.iter().find(|l| plain(l) && mailto_ok(l)))
+        .map(|l| l.to_string())
+        .unwrap_or_default()
+}
+
+/// `https://host[:port][/...]` that a browser's URL parser will accept: a real DNS-style host, no user info,
+/// no IPv6 brackets, a numeric port in range. Anything odd is rejected rather than repaired.
+fn https_ok(l: &str) -> bool {
+    let Some(rest) = l
+        .get(..8)
+        .filter(|p| p.eq_ignore_ascii_case("https://"))
+        .map(|_| &l[8..])
+    else {
+        return false;
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let (host, port) = match authority.rsplit_once(':') {
+        Some((h, p)) => (h, Some(p)),
+        None => (authority, None),
+    };
+    let port_ok = port.is_none_or(|p| {
+        !p.is_empty()
+            && p.len() <= 5
+            && p.bytes().all(|b| b.is_ascii_digit())
+            && p.parse::<u32>().is_ok_and(|n| (1..=65535).contains(&n))
+    });
+    let host = host.strip_suffix('.').unwrap_or(host); // "example.com." is the same host
+    let labels: Vec<&str> = host.split('.').collect();
+    port_ok
+        && !host.is_empty()
+        && host.len() <= 253
+        // a public name has at least two labels and a non-numeric ending: this refuses "localhost", "10.0.0.1",
+        // "169.254.169.254" and the decimal form "2130706433"
+        && labels.len() >= 2
+        && !labels
+            .last()
+            .is_some_and(|l| l.bytes().all(|b| b.is_ascii_digit()))
+        && labels.iter().all(|label| {
+            !label.is_empty()
+                && label.len() <= 63
+                && !label.starts_with(['-', '_'])
+                && !label.ends_with(['-', '_'])
+                && label
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        })
+}
+
+/// `mailto:address[?query]` where the address is a plausible single mailbox.
+fn mailto_ok(l: &str) -> bool {
+    let Some(rest) = l
+        .get(..7)
+        .filter(|p| p.eq_ignore_ascii_case("mailto:"))
+        .map(|_| &l[7..])
+    else {
+        return false;
+    };
+    let addr = rest.split('?').next().unwrap_or("");
+    valid_address(addr)
+}
+
 fn parse_inner(uid: u32, raw: &[u8]) -> anyhow::Result<Email> {
     let m = mailparse::parse_mail(raw)?;
     let h = m.headers.as_slice();
@@ -298,6 +457,9 @@ fn parse_inner(uid: u32, raw: &[u8]) -> anyhow::Result<Email> {
             .iter()
             .any(|f| v.contains(f))
     });
+    let (mut attachments, mut attachment_count) = (vec![], 0);
+    collect_attachments(&m, 0, &mut attachments, &mut attachment_count);
+    let unsubscribe = unsubscribe_link(&get("List-Unsubscribe"));
     let plain = plain_text(&m, 0);
     // HTML-only mail is the norm today: fall back to a text rendering of the HTML part
     let text = if plain.trim().is_empty() {
@@ -313,8 +475,11 @@ fn parse_inner(uid: u32, raw: &[u8]) -> anyhow::Result<Email> {
         .chars()
         .take(400)
         .collect();
+    // a Date outside 2000..2100 is a forgery or a typo; treat it as unknown rather than trusting it
     let received = mailparse::dateparse(&get("Date"))
         .map(|t| t as f64)
+        .ok()
+        .filter(|t| (946_684_800.0..4_102_444_800.0).contains(t))
         .unwrap_or(0.0);
     let subject = get("Subject");
     let reply_to = addresses(&get("Reply-To"))
@@ -346,6 +511,9 @@ fn parse_inner(uid: u32, raw: &[u8]) -> anyhow::Result<Email> {
         references: thread.join(" "),
         bulk_headers,
         auth_fail,
+        attachment_count,
+        attachments,
+        unsubscribe,
     })
 }
 

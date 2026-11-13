@@ -8,6 +8,11 @@ use serde::Serialize;
 use std::path::Path;
 
 pub const MAX_DRAFT_CHARS: usize = 8000;
+pub const MAX_NOTE_CHARS: usize = 2000;
+/// Bumped whenever the database layout changes in a way an older app cannot read.
+pub const SCHEMA_VERSION: i32 = 1;
+/// Tasks you add yourself live above this number, so they never collide with a mail server's UIDs.
+pub const LOCAL_UID_BASE: u32 = 2_000_000_000;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Draft {
@@ -45,6 +50,13 @@ pub struct Task {
     /// Replies would go somewhere the sender did not expect: the Reply-To domain differs from the
     /// sender's, or the message failed DKIM/SPF/DMARC. The UI asks for a second click before saving a draft.
     pub reply_warn: bool,
+    /// Up to five attachment names, and how many files the message carries in total.
+    pub attachments: Vec<String>,
+    pub attachment_count: u32,
+    /// A safe https/mailto unsubscribe link from the message, or empty.
+    pub unsubscribe: String,
+    /// Free text the user wrote on the task.
+    pub note: String,
     pub draft: Option<Draft>,
     /// "important", "mute" or empty (normal) for this sender.
     pub pref: String,
@@ -101,10 +113,14 @@ const ADDED_COLUMNS: &[(&str, &str)] = &[
     ("refs", "TEXT DEFAULT ''"),
     ("auth_fail", "INTEGER DEFAULT 0"),
     ("done_at", "REAL DEFAULT 0"),
+    ("attachments", "TEXT DEFAULT '[]'"),
+    ("attachment_count", "INTEGER DEFAULT 0"),
+    ("unsubscribe", "TEXT DEFAULT ''"),
+    ("note", "TEXT DEFAULT ''"),
 ];
 
 const SELECT: &str = "SELECT t.uid,t.message_id,t.sender,t.addr,t.subject,t.received,t.priority,t.category,t.action,t.urgent,t.status,t.star,\
-t.excerpt,t.why,t.signals,t.needs_reply,t.due,t.snooze_until,t.reply_to,d.body,d.source,d.saved,d.updated,p.level,t.auth_fail \
+t.excerpt,t.why,t.signals,t.needs_reply,t.due,t.snooze_until,t.reply_to,d.body,d.source,d.saved,d.updated,p.level,t.auth_fail,t.attachments,t.attachment_count,t.unsubscribe,t.note \
 FROM tasks t LEFT JOIN drafts d ON d.uid=t.uid LEFT JOIN sender_prefs p ON p.addr=t.addr";
 
 fn domain(a: &str) -> String {
@@ -115,6 +131,8 @@ fn row(r: &rusqlite::Row) -> rusqlite::Result<Task> {
     let addr: String = r.get(3)?;
     let reply_to: String = r.get(18)?;
     let auth_fail = r.get::<_, i32>(24)? != 0;
+    let attachments: Vec<String> =
+        serde_json::from_str(&r.get::<_, String>(25)?).unwrap_or_default();
     let reply_warn = auth_fail || (!reply_to.is_empty() && domain(&reply_to) != domain(&addr));
     let draft = match r.get::<_, Option<String>>(19)? {
         Some(body) => Some(Draft {
@@ -146,6 +164,10 @@ fn row(r: &rusqlite::Row) -> rusqlite::Result<Task> {
         snooze_until: r.get(17)?,
         reply_to,
         reply_warn,
+        attachments,
+        attachment_count: r.get(26)?,
+        unsubscribe: r.get(27)?,
+        note: r.get(28)?,
         draft,
         pref: r.get::<_, Option<String>>(23)?.unwrap_or_default(),
     })
@@ -165,14 +187,126 @@ fn migrate(db: &Connection) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The database was written by a newer version of the app. It is refused, never "repaired".
+#[derive(Debug)]
+pub struct TooNew(pub i32);
+impl std::fmt::Display for TooNew {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "This data was created by a newer version of Inbox Agent (format {}). Update the app, or move the data folder aside to start fresh.",
+            self.0
+        )
+    }
+}
+impl std::error::Error for TooNew {}
+
+/// The integrity check found damage.
+#[derive(Debug)]
+struct Corrupt(String);
+impl std::fmt::Display for Corrupt {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "the local database failed its integrity check: {}",
+            self.0
+        )
+    }
+}
+impl std::error::Error for Corrupt {}
+
+/// Damage to the file itself, as opposed to a busy, locked, full or read-only database.
+fn is_corruption(e: &anyhow::Error) -> bool {
+    use rusqlite::ErrorCode::{DatabaseCorrupt, NotADatabase};
+    e.downcast_ref::<Corrupt>().is_some()
+        || e.downcast_ref::<rusqlite::Error>().is_some_and(|r| {
+            matches!(r, rusqlite::Error::SqliteFailure(f, _) if matches!(f.code, DatabaseCorrupt | NotADatabase))
+        })
+}
+
+/// Removes files the app leaves beside the database that can hold mail text: the pre-upgrade backup, damaged
+/// databases that were set aside, and the crash log. Used by "Sign out and reset".
+pub fn remove_leftover_files(dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for e in entries.flatten() {
+        let n = e.file_name().to_string_lossy().to_string();
+        if n == "crash.log" || n.starts_with("agent.db.") {
+            let _ = std::fs::remove_file(e.path());
+        }
+    }
+}
+
 impl Store {
     pub fn open(path: &Path) -> anyhow::Result<Self> {
         let db = Connection::open(path)?;
         db.busy_timeout(std::time::Duration::from_secs(5))?;
         let _ = db.query_row("PRAGMA journal_mode=WAL", [], |_| Ok(()));
+        // deleted rows are overwritten with zeros, so a wipe does not leave mail text in free pages
+        db.pragma_update(None, "secure_delete", "ON")?;
+        let version: i32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+        if version > SCHEMA_VERSION {
+            return Err(TooNew(version).into());
+        }
+        if version < SCHEMA_VERSION {
+            let has_data = db
+                .query_row("SELECT 1 FROM sqlite_master WHERE name='tasks'", [], |_| {
+                    Ok(())
+                })
+                .is_ok();
+            if has_data {
+                // keep one copy of the data as it was before this upgrade touches it
+                let _ = db.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()));
+                let mut bak = path.as_os_str().to_owned();
+                bak.push(".bak");
+                let _ = std::fs::copy(path, bak);
+            }
+        }
         db.execute_batch(SCHEMA)?;
         migrate(&db)?;
+        if version != SCHEMA_VERSION {
+            db.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+        }
         Ok(Self { db })
+    }
+
+    /// Opens the database; if the file is damaged, moves it (and its journal files) aside as
+    /// `<name>.corrupt-<time>` and starts a fresh one. Returns the new location of the damaged file when that
+    /// happened. Only real corruption is treated this way: a busy or locked database, a full disk or a read-only
+    /// folder is an ordinary error and the file is left exactly where it is. A database from a newer app version
+    /// is an error and is never moved.
+    pub fn open_recovering(path: &Path) -> anyhow::Result<(Self, Option<std::path::PathBuf>)> {
+        let checked = Self::open(path).and_then(|s| {
+            let verdict: String = s.db.query_row("PRAGMA quick_check", [], |r| r.get(0))?;
+            if verdict == "ok" {
+                Ok(s)
+            } else {
+                Err(Corrupt(verdict).into())
+            }
+        });
+        match checked {
+            Ok(s) => Ok((s, None)),
+            Err(e) if is_corruption(&e) && path.exists() => {
+                let stamp = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| d.as_secs());
+                let name = |suffix: &str| {
+                    let mut p = path.as_os_str().to_owned();
+                    p.push(suffix);
+                    std::path::PathBuf::from(p)
+                };
+                let moved = name(&format!(".corrupt-{stamp}"));
+                std::fs::rename(path, &moved)?;
+                for ext in ["-wal", "-shm"] {
+                    let _ = std::fs::rename(name(ext), name(&format!(".corrupt-{stamp}{ext}")));
+                }
+                let fresh = Self::open(path)?;
+                fresh.log("the local database was damaged; it was set aside and rebuilt, and your mail will sync again")?;
+                Ok((fresh, Some(moved)))
+            }
+            Err(e) => Err(e),
+        }
     }
 
     pub fn memory() -> anyhow::Result<Self> {
@@ -228,12 +362,13 @@ impl Store {
             _ => {}
         }
         self.db.execute(
-            "INSERT OR REPLACE INTO tasks(uid,message_id,sender,addr,subject,received,priority,category,action,urgent,excerpt,why,signals,body,needs_reply,due,reply_to,refs,auth_fail)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19)",
+            "INSERT OR REPLACE INTO tasks(uid,message_id,sender,addr,subject,received,priority,category,action,urgent,excerpt,why,signals,body,needs_reply,due,reply_to,refs,auth_fail,attachments,attachment_count,unsubscribe)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22)",
             params![
                 e.uid, e.message_id, e.sender_name, e.sender_addr, e.subject, e.received, t.priority, t.category,
                 t.action, t.urgent as i32, e.excerpt, t.why, serde_json::to_string(s)?, e.body,
-                t.needs_reply as i32, t.due, e.reply_to, e.references, e.auth_fail as i32
+                t.needs_reply as i32, t.due, e.reply_to, e.references, e.auth_fail as i32,
+                serde_json::to_string(&e.attachments)?, e.attachment_count as i64, e.unsubscribe
             ],
         )?;
         self.log(&format!(
@@ -456,8 +591,61 @@ impl Store {
         Ok(true)
     }
 
+    // ---- notes and tasks you add yourself ----
+    /// Saves the free-text note on a task (control characters other than line breaks are dropped).
+    pub fn set_note(&self, uid: u32, note: &str) -> anyhow::Result<bool> {
+        if self.get(uid).is_none() || note.chars().count() > MAX_NOTE_CHARS {
+            return Ok(false);
+        }
+        let clean: String = note
+            .chars()
+            .filter(|c| !c.is_control() || *c == '\n' || *c == '\t')
+            .collect();
+        self.db
+            .execute("UPDATE tasks SET note=?1 WHERE uid=?2", params![clean, uid])?;
+        Ok(true)
+    }
+
+    /// A task that did not come from an email. Returns its id, or None when the input is not acceptable.
+    pub fn add_local_task(
+        &self,
+        title: &str,
+        priority: u8,
+        due: &str,
+    ) -> anyhow::Result<Option<u32>> {
+        let title = title.trim();
+        if title.is_empty()
+            || title.chars().count() > 200
+            || title.chars().any(|c| c.is_control())
+            || !(1..=5).contains(&priority)
+            || !(due.is_empty() || crate::dates::valid_iso(due))
+        {
+            return Ok(None);
+        }
+        let top: Option<u32> = self
+            .db
+            .query_row(
+                "SELECT MAX(uid) FROM tasks WHERE uid >= ?1",
+                [LOCAL_UID_BASE],
+                |r| r.get(0),
+            )
+            .optional()?
+            .flatten();
+        let uid = top.map_or(LOCAL_UID_BASE, |t| t + 1);
+        self.db.execute(
+            "INSERT INTO tasks(uid,message_id,sender,addr,subject,received,priority,category,action,urgent,excerpt,why,signals,body,needs_reply,due,reply_to,refs,auth_fail)
+             VALUES(?1,'','You','',?2,strftime('%s','now'),?3,'personal',?2,0,'','Added by you','{}','',0,?4,'','',0)",
+            params![uid, title, priority, due],
+        )?;
+        self.log(&format!("added task “{title}”"))?;
+        Ok(Some(uid))
+    }
+
     // ---- outbox ----
     pub fn queue(&self, uid: u32, op: &str, arg: &str) -> anyhow::Result<()> {
+        if uid >= LOCAL_UID_BASE {
+            return Ok(()); // your own tasks have no message in a mailbox to change
+        }
         self.db.execute(
             "INSERT INTO outbox(uid,op,arg,at) VALUES(?1,?2,?3,strftime('%s','now'))",
             params![uid, op, arg],
@@ -562,6 +750,31 @@ impl Store {
         self.meta_set("last_uid", &uid.to_string())
     }
 
+    /// Marks a message as "being handled right now" and returns how many times in a row this same message has
+    /// been started without finishing. A crash leaves the marker behind, so the next start sees a count above 1.
+    pub fn begin_attempt(&self, uid: u32) -> anyhow::Result<u32> {
+        let tries = match self
+            .meta_get("attempt")
+            .as_deref()
+            .and_then(|v| v.split_once(':'))
+        {
+            Some((u, n)) if u.parse() == Ok(uid) => n.parse::<u32>().unwrap_or(0) + 1,
+            _ => 1,
+        };
+        self.meta_set("attempt", &format!("{uid}:{tries}"))?;
+        Ok(tries)
+    }
+
+    /// Clears the marker once a message has been handled (stored, rejected or skipped).
+    pub fn end_attempt(&self) -> anyhow::Result<()> {
+        self.meta_set("attempt", "")
+    }
+
+    /// The message a previous run was in the middle of, if it never finished.
+    pub fn in_flight(&self) -> Option<u32> {
+        self.meta_get("attempt")?.split_once(':')?.0.parse().ok()
+    }
+
     /// Data minimisation: drop finished tasks (and their drafts) and log lines past their retention.
     /// Open tasks are never touched.
     pub fn prune(&self, done_days: i64, log_days: i64) -> anyhow::Result<(usize, usize)> {
@@ -600,6 +813,15 @@ impl Store {
         self.db.execute_batch(
             "DELETE FROM tasks; DELETE FROM drafts; DELETE FROM outbox; DELETE FROM meta; DELETE FROM log; DELETE FROM overrides; DELETE FROM sender_prefs;",
         )?;
+        // Best effort: fold the journal into the file and rewrite it, so no copy of the deleted rows is left
+        // in the write-ahead log or in unused pages. A busy database skips this; secure_delete already zeroed rows.
+        let _ = self
+            .db
+            .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()));
+        let _ = self.db.execute_batch("VACUUM");
+        let _ = self
+            .db
+            .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()));
         Ok(())
     }
 
@@ -614,7 +836,7 @@ impl Store {
     /// Forget everything tied to a mailbox (used when the account changes). Sender preferences stay.
     pub fn reset_mailbox_data(&self) -> anyhow::Result<()> {
         self.db.execute_batch(
-            "DELETE FROM tasks; DELETE FROM drafts; DELETE FROM outbox; DELETE FROM meta;",
+            "DELETE FROM tasks WHERE uid < 2000000000; DELETE FROM drafts WHERE uid < 2000000000; DELETE FROM outbox; DELETE FROM meta;",
         )?;
         Ok(())
     }

@@ -83,6 +83,11 @@ soundness), pulled in by the IMAP parser. **Accepted** because it parses only TL
 user's own mail provider and the only newer IMAP release is an alpha with a different API. Revisit
 when `imap` 3.x is stable. The IMAP parser also triggers a Rust future-incompatibility warning.
 
+CI also scans the app shell (`app/src-tauri/Cargo.lock`: Tauri, the webview and plugins) and the npm tree. Today that
+scan shows no vulnerabilities and five notices about unmaintained or unsound crates (`proc-macro-error`,
+`zbus_names`, `zvariant`, `zvariant_derive`, and `glib` RUSTSEC-2024-0429) that only the Linux GTK/D-Bus build pulls
+in; the Windows build does not use them. They wait on upstream Tauri releases.
+
 ## Residual risks and limits
 
 - **The phone hub is plain HTTP.** On a shared Wi-Fi the access code can be sniffed. Use it on a
@@ -102,7 +107,45 @@ when `imap` 3.x is stable. The IMAP parser also triggers a Rust future-incompati
   write-back enabled, reproducible builds.
 - **Releases are unsigned.** Windows SmartScreen and macOS Gatekeeper will warn until you add code
   signing certificates (see `.github/workflows/release.yml`).
-- **CI actions use version tags, not commit SHAs.** Pin them to SHAs before the first public release.
+- **CI actions are pinned to commit SHAs;** Dependabot proposes updates.
+
+## Review 3 (independent Opus review, 2026-11-13): findings and fixes
+
+Each fix has a regression test (`engine/tests/phase1.rs`, `features2.rs`, `imap_flows.rs`).
+
+| Finding | Fix |
+| --- | --- |
+| A malformed `List-Unsubscribe` link (`https://[`) made the UI throw and blank the whole list | The engine accepts only links a browser can parse (real host, valid port, no user info); the UI never throws |
+| `panic = "abort"` defeated the parser's panic guard; the same message was re-fetched after every restart | Unwinding restored; each message is marked before it is handled, a panic skips only that message, and a message that crashes the app twice is skipped |
+| Quadratic HTML stripping (a 1 MB comment flood did not finish in 10 minutes) | One pass, linear time; HTML past 256 KB is ignored |
+| A damaged database silently stopped the watcher | Startup integrity check; a damaged file is set aside as `agent.db.corrupt-<time>` and rebuilt; a schema version refuses data from a newer app; a `.bak` copy is kept before an upgrade |
+| "Sign out" left mail text in free pages and the write-ahead log, and kept the API key | `secure_delete`, checkpoint and `VACUUM` on wipe; every keychain entry is deleted |
+| Any keychain failure showed "no password" | A locked or missing keychain is reported as such |
+| Mail data lived in Roaming AppData | Now in local AppData (`%LOCALAPPDATA%`), which does not sync to domain profile servers |
+| The hub answered any network peer | It answers only loopback, private, link-local, shared-address (Tailscale) and IPv6 local peers |
+| Panics left no trace in a build without a console | `crash.log` beside the database (panic text and location only, 100 KB cap); no telemetry |
+| The app shell's dependencies were not scanned | CI audits both lockfiles |
+
+A Sonnet re-review of these fixes found more, all fixed with tests:
+
+| Finding | Fix |
+| --- | --- |
+| A sync waiting on the network could write mail back into a database that sign-out had just wiped | The sync checks the stop flag before every message and before every write |
+| An ordinary database error (busy, disk full) was counted as a crash, and the third retry skipped the message for good | Only a real crash counts; an ordinary error clears the marker and the message is retried |
+| A busy or locked database was treated as corrupt and renamed away; one failure stopped all background work | Only real corruption (a failed integrity check, "not a database") moves a file; a busy database is an error and the app keeps running |
+| Backups, set-aside databases and `crash.log` survived "Sign out and reset" | All of them are deleted on sign-out |
+| A forged `Date` year (such as 262143) panicked inside date handling | Dates outside 2000-2100 are treated as unknown |
+| A panic outside the per-message guard ended the sync thread silently | A panic in any connection attempt becomes an ordinary error and goes through the retry path |
+| Unsubscribe links to `localhost`, IP addresses or single-label hosts were accepted; links over 500 characters were refused | Public-looking hosts only; links up to 2,000 characters |
+| CSS leaked into the text when the 256 KB cap cut a style block in half | An unfinished block at the cut is dropped |
+| The integrity check ran on every settings save | Once per launch |
+
+Still open from this review: a signed update channel, code signing and notarization, a live-mailbox test, macOS and
+Linux builds run on real machines, a `Host` header check on the hub, two watchers briefly overlapping after a
+settings save (the stop flag now keeps them from writing, but the old one can still sit in IDLE for up to a minute),
+quitting the app twice in the middle of one slow message (which counts like a crash and skips that message),
+the hub dropping phones on unusual public-address networks without a log line, manual-task ids sharing the IMAP UID range, and re-matching tasks by Message-ID after a UIDVALIDITY
+change.
 
 ## Reporting a vulnerability
 

@@ -9,6 +9,8 @@ handles and the test that pins them (see [TESTCASES.md](TESTCASES.md)).
 start():
     stop every thread from the previous start; make a fresh stop flag
     settings = load settings.json            # corrupt or missing -> defaults
+    open the database: integrity check; a damaged file is set aside as agent.db.corrupt-<time> and rebuilt;
+                       data from a newer app version is refused and left alone
     start scheduler thread                    # always (snooze wake-ups, daily digest)
     if hub enabled:      start hub thread
     account = settings + password from OS keychain
@@ -46,11 +48,14 @@ process_new():
     for each chunk of 20 uids:
         sizes = FETCH RFC822.SIZE;  skip (and log) anything over 5 MB
         for each wanted message: FETCH BODY.PEEK[]          # PEEK: never marks mail read
+            mark the message as in flight; if it has been started twice without finishing (it crashed the app): skip it
+            inside a panic guard (a bug on one message skips only that message):
             email = parse(raw)           # section 4; failure -> log, continue
             signals = compute(email, sent_index)
             triage  = AI or rules, falling back to rules on any error
             triage  = apply sender preference (important / mute) unless the sender check failed
             store task; callback(alert, label, auto-draft)
+            clear the in-flight mark
         cursor = max(cursor, highest uid in chunk)           # skipped messages still advance it
 ```
 Edge cases: empty inbox, UID gaps, renumbered mailbox, oversized and hostile mail —
@@ -66,12 +71,16 @@ parse(raw):
         message_id = Message-ID only if it is a plain <visible-ASCII> token <= 200 bytes, else ""
         sender_ok  = Authentication-Results has no dkim/spf/dmarc "=fail"
         text = first text/plain part
-        if text is empty: text = first text/html part rendered to text   # blocks -> newlines, tags dropped,
+        if text is empty: text = first text/html part rendered to text   # only the first 256 KB; one linear pass; blocks -> newlines, tags dropped,
                                                                          # script/style/title/comments removed,
                                                                          # entities decoded
         body = text with quoted ">" lines removed, blank runs collapsed, capped at 3000 chars
         excerpt = first 400 chars on one line
         reply_to = first valid Reply-To address, else the sender
+        attachments = names of parts marked attachment (or non-inline parts with a file name): count them all,
+                      keep five names, path and control characters removed, <= 60 chars; inline images are skipped
+        unsubscribe = first https link in List-Unsubscribe, else the first mailto link; anything else
+                      (http, javascript, data, spaces, > 500 chars) -> ""
 ```
 Edge cases: HTML-only mail, other charsets, base64 and quoted-printable, encoded-word headers, missing From/Subject/
 Date, NUL bytes, attachment-only mail, 20 000-character subjects, forged Message-IDs —
@@ -87,12 +96,16 @@ signals: known    = sender in my Sent recipients   AND sender_ok
 rules score:  reply or (known and not bulk) -> 4;  bulk -> 1 (2 if known);  otherwise 3
               category from subject words (finance/travel/promo/work), else notification/personal/other
               needs_reply = not bulk and (reply or known) and the text contains "?"
+              due = first date in the subject or first 1500 body characters that follows a cue word
+                    (due, by, before, until, deadline, on ...): ISO, "20 Nov [2026]", "Nov 20th", weekday names
+                    (the same day counts), today/eod, tomorrow; no cue -> no date; impossible dates (30 Feb) ignored;
+                    a year-less date more than 45 days past means next year. Relative words use the day the mail arrived.
 
 AI (optional, local Ollama or own API key):
     prompt = signals + recent corrections + the email with < > swapped so it cannot close its wrapper
     reply  = first JSON object that has a priority   # tolerant: prose, fences, 4.0, "4", "yes", extra objects
     category must be one of eight known names (else "other"); due must be a real YYYY-MM-DD
-    any failure -> rules
+    any failure -> rules;  if the model left due empty, the rules' date extraction fills it
 ```
 Edge cases: spoofed sender, prompt injection, hostile category strings, malformed model output —
 `failed_dkim_or_spf…`, `email_text_cannot_close…`, `unknown_or_hostile_categories…`, `model_replies_in_many_shapes…`.
@@ -101,6 +114,7 @@ Edge cases: spoofed sender, prompt injection, hostile category strings, malforme
 
 ```
 user action (done / star / priority / save draft) -> update local task AND queue an outbox item
+    (tasks you added yourself, uid >= 2,000,000,000, and notes never queue anything: there is no message to change)
 
 drain():                                           # in order; stops at the first failure
     for item in outbox:
@@ -120,6 +134,7 @@ Edge cases: decoy IDs that merely contain the real one, duplicate copies, missin
 
 ```
 draft_generate(task):                              # desktop only
+    if the task is one you added yourself: refuse (nothing to reply to)
     if the existing draft has the user's edits and no explicit "replace": refuse
     model = configured AI;  text = model.draft(email) or, on error/empty, a quick-reply template
     clean: no code fences, no leading "Subject:", no control, zero-width or bidi characters, <= 8000 chars
@@ -142,6 +157,7 @@ Edge cases: header injection, extreme subjects, empty bodies, odd sender names, 
 
 ```
 accept loop (non-blocking, honours the stop flag):
+    if the peer is not on a local network (loopback, private, link-local, 100.64/10, IPv6 local): drop it
     if 32 connections are already open: drop the new one
     spawn a thread:
         5 s read and write timeouts
@@ -180,7 +196,8 @@ save_settings(patch):
     merged = current + patch (unknown fields ignored; wrong types -> error)
     validate: server host = letters digits . - only; ports 1..65535, hub port >= 1024;
               ntfy topic = letters digits _ - only; ntfy and Ollama URLs must be http(s) without whitespace;
-              times "HH:MM"; quiet hours need both ends; draft tone, signature length, limits in range
+              times "HH:MM"; quiet hours need both ends; draft tone, signature length, limits in range;
+              alert categories only from the eight known names (empty = all; urgent mail always alerts)
     hub disabled -> clear its access code;  hub enabled with no code -> make a new random one
     write atomically (temp file then rename)
 ```

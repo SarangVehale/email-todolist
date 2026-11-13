@@ -184,3 +184,9 @@ input[type=time]:focus{border-bottom-color:var(--ink)}
 #foot .cap{margin-left:10px}
 
 .warn{margin:8px 0 10px;padding:9px 12px;border:1px solid var(--red);border-radius:6px;color:var(--red);font:400 12.5px/1.5 var(--mono)}.warn b{font-weight:500;word-break:break-all}
+.note{min-height:60px;margin-top:6px}
+.nl{display:block;margin:14px 0 0}
+.keylist{display:grid;grid-template-columns:1fr 1fr;gap:10px 22px;margin:18px 0 6px}
+.keylist div{display:flex;align-items:center;gap:12px}.keylist .cap{margin:0;min-width:34px}.keylist b{font-weight:400;color:var(--soft);font-size:13.5px}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+@media (max-width:560px){.keylist{grid-template-columns:1fr}}

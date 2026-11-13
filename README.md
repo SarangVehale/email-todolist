@@ -14,7 +14,10 @@ and alerts you only when something is important.
   chosen AI (or a quick-reply template), editable, copyable, and saveable to your mailbox's Drafts folder.
 - **Sorts everything.** Priority, category, due date and "needs a reply" for every message; filter chips,
   search, five sort orders, snooze, "always important" or "mute" per sender, quiet hours and a daily digest.
-- **Keyboard first.** `j` `k` move, `x` done, `1`-`5` priority, `s` star, `r` reply draft, `h` snooze, `/` search, `z` undo.
+- **Your own tasks and notes.** Add tasks that never came by email (`a`), and keep a note on any task. Attachments and a
+  copy-only unsubscribe link show on each message; due dates are found even without AI.
+- **Keyboard first.** `j` `k` move, `x` done, `1`-`5` priority, `s` star, `r` reply draft, `h` snooze, `a` add task,
+  `/` search, `z` undo, `?` for the full list.
 
 ## Repository
 
@@ -48,7 +51,7 @@ IMAP_HOST=imap.example.com IMAP_USER=you@example.com IMAP_PASS=... cargo run --e
 
 ## Status
 
-Built and tested: engine (109 tests, including protocol tests against a scripted mock IMAP server and a dedicated edge-case suite), UI in a browser, phone hub, installer build.
+Built and tested: engine (157 tests, including protocol tests against a scripted mock IMAP server and a dedicated edge-case suite), UI in a browser, phone hub, installer build.
 The IMAP sync and write-back are tested against a scripted mock server, which proves what the client sends and how it parses
 standard responses, but a real Gmail or other server may differ. Not yet exercised against a live mailbox, and releases are unsigned.
 See [SECURITY.md](SECURITY.md) for the full list of limits.

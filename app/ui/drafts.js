@@ -10,6 +10,7 @@ const SOURCE_LABEL = { ai: "Written by AI", template: "Quick reply", user: "Edit
 
 const isoToday = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 const dueLabel = iso => { const [, m, d] = iso.split("-"); return `${+d} ${MONTHS[+m - 1]}`; };
+const isLocal = t => t.uid >= 2000000000;
 const editing = () => document.activeElement?.closest?.("#view textarea, #view input");
 
 /* small tags in the row's meta line */
@@ -18,13 +19,32 @@ function tagsHTML(t) {
   if (t.draft) out.push(`<span class="tg">Draft${t.draft.saved ? " · saved" : ""}</span>`);
   else if (t.needs_reply) out.push('<span class="tg">↩ Reply</span>');
   if (t.due) out.push(`<span class="tg ${t.due <= isoToday() ? "r" : ""}">Due ${dueLabel(t.due)}</span>`);
+  if (t.attachment_count) out.push(`<span class="tg">Files ${t.attachment_count}</span>`);
+  if (isLocal(t)) out.push('<span class="tg">Mine</span>');
   if (t.pref === "important") out.push('<span class="tg">★ Sender</span>');
   if (t.pref === "mute") out.push('<span class="tg">Muted</span>');
   return out.join("");
 }
 
+/* Where an unsubscribe link goes. Never throws: one odd header must not stop the whole list from drawing. */
+function unsubWhere(u) {
+  try { return /^mailto:/i.test(u) ? "by email" : new URL(u).hostname || "link" } catch { return "link" }
+}
+
+/* attachments, the unsubscribe link and a free-text note */
+function extraHTML(t) {
+  const files = t.attachment_count ? `<div class="spec"><div><span>Files</span><b>${t.attachments.map(esc).join(" · ")}${t.attachment_count > t.attachments.length ? ` · and ${t.attachment_count - t.attachments.length} more` : ""}</b></div></div>` : "";
+  const unsub = t.unsubscribe ? `<div class="drow"><span class="lbl">Newsletter</span><button class="mini" data-act="copy-unsub">Copy unsubscribe link</button><span class="lbl">${esc(unsubWhere(t.unsubscribe))}</span></div>` : "";
+  const note = `<label class="lbl nl" for="n${t.uid}">Note</label><textarea id="n${t.uid}" class="dtext note" data-note="${t.uid}" rows="2" maxlength="2000" placeholder="Anything to remember about this" aria-label="Note">${esc(t.note || "")}</textarea>`;
+  return files + unsub + note;
+}
+
 /* the controls inside an expanded row */
 function replyHTML(t) {
+  if (isLocal(t)) return extraHTML(t) + `<div class="drow"><span class="lbl">Snooze</span><button class="mini" data-act="snooze" data-preset="3h">3 hours</button><button class="mini" data-act="snooze" data-preset="tomorrow">Tomorrow</button><button class="mini" data-act="snooze" data-preset="nextweek">Next week</button>${isSnoozed(t) ? '<button class="mini" data-act="snooze" data-preset="clear">Bring back</button>' : ""}</div>`;
+  return extraHTML(t) + replyBlock(t);
+}
+function replyBlock(t) {
   const d = t.draft, ctl = (act, label, extra = "") => `<button class="mini ${extra}" data-act="${act}">${label}</button>`;
   const chips = (list, act) => list.map(([l, ins]) => `<button class="mini" data-act="${act}" data-ins="${esc(ins)}">${l}</button>`).join("");
   const hasLink = d && /(https?:\/\/|www\.)/i.test(d.body);
@@ -73,6 +93,13 @@ function saveDraftText(uid, body, now) {
   draftTimer = setTimeout(() => call("draft_update", { uid, body }), now ? 0 : 600);
 }
 
+let noteTimer;
+function saveNote(uid, note, now) {
+  const t = find(uid); if (t) t.note = note;
+  clearTimeout(noteTimer);
+  noteTimer = setTimeout(() => call("set_note", { uid, note }), now ? 0 : 600);
+}
+
 async function copyText(text) {
   try { await navigator.clipboard.writeText(text); toast("Copied") }
   catch { toast("Couldn’t copy. Select the text and copy it by hand") }
@@ -87,6 +114,7 @@ function handleExtra(e, t, act) {
       if (edited && !twice(el, "Replace your edits? Click again")) return true;
       genDraft(t, el.dataset.ins || "", edited); return true;
     }
+    case "copy-unsub": copyText(t.unsubscribe || ""); return true;
     case "draft-copy": copyText(t.draft?.body || ""); return true;
     case "draft-discard": t.draft = null; call("draft_discard", { uid: t.uid }); render(); return true;
     case "draft-save":
@@ -120,10 +148,12 @@ document.addEventListener("click", e => {
 document.addEventListener("input", e => {
   if (e.target.id === "q") { flt.q = e.target.value; render() }
   else if (e.target.dataset?.draft) saveDraftText(+e.target.dataset.draft, e.target.value, false);
+  else if (e.target.dataset?.note) saveNote(+e.target.dataset.note, e.target.value, false);
 });
 document.addEventListener("change", e => { if (e.target.id === "sort") { flt.sort = e.target.value; render() } });
 document.addEventListener("focusout", e => {
   if (e.target.dataset?.draft) saveDraftText(+e.target.dataset.draft, e.target.value, true);
+  if (e.target.dataset?.note) saveNote(+e.target.dataset.note, e.target.value, true);
   if (pendingRender && !editing()) { pendingRender = false; render() }
 });
 document.addEventListener("keydown", e => { if (e.target.id === "q" && e.key === "Escape") { flt.q = ""; e.target.blur(); render() } });
@@ -136,4 +166,44 @@ document.addEventListener("click", e => {
   l.forEach(t => { t.status = "done"; call("set_done", { uid: t.uid, done: true }) });
   undoStack.push(() => ids.forEach(u => { const t = find(u); if (t) { t.status = "open"; call("set_done", { uid: u, done: false }) } }));
   showUndo(`${ids.length} done`); render();
+});
+
+/* ───────── add a task of your own, and the shortcuts card ───────── */
+const vl = () => $("#veil");
+function openAdd() {
+  vl().dataset.kind = "add"; vl().classList.add("show");
+  vl().innerHTML = `<div class="panel"><h2>Add a task</h2><p>For things that did not come by email. It lives in your list only.</p>
+    <label class="f" for="at-title">What needs doing</label><input id="at-title" type="text" maxlength="200" autocomplete="off" placeholder="Renew passport">
+    <div class="row2" style="grid-template-columns:1fr 1fr"><div><label class="f" for="at-pri">Priority</label><select id="at-pri">${[1, 2, 3, 4, 5].map(n => `<option value="${n}" ${n === 3 ? "selected" : ""}>${n}${n === 5 ? " (highest)" : n === 1 ? " (lowest)" : ""}</option>`).join("")}</select></div>
+    <div><label class="f" for="at-due">Due (optional)</label><input id="at-due" type="date"></div></div>
+    <div class="foot"><span class="sp"></span><button class="btn" data-vc="1">Cancel</button><button class="btn pri" data-add="1">Add</button></div></div>`;
+  setTimeout(() => $("#at-title")?.focus(), 30);
+}
+async function submitAdd() {
+  const title = $("#at-title").value.trim(); if (!title) { toast("Give the task a title"); return }
+  try {
+    const uid = await rpc("add_task", { title, priority: +$("#at-pri").value, due: $("#at-due").value || "" });
+    view = "todo"; flt.cat = "all"; flt.only = ""; flt.q = ""; cur = uid; closeVeil(); toast("Task added");
+  } catch (err) { toast(String(err).replace(/^Error: /, "")) }
+}
+const HELP = [["J K", "Move down / up"], ["Enter", "Open or close a task"], ["X", "Mark done"], ["1–5", "Set priority"], ["S", "Star"], ["R", "Reply draft"], ["H", "Snooze until tomorrow"], ["A", "Add a task"], ["/", "Search"], ["Z", "Undo"], [",", "Settings"], ["?", "This card"]];
+function openHelp() {
+  vl().dataset.kind = "help"; vl().classList.add("show");
+  vl().innerHTML = `<div class="panel"><h2>Keyboard</h2><div class="keylist">${HELP.map(([k, l]) => `<div><span class="cap">${k}</span><b>${l}</b></div>`).join("")}</div>
+    <div class="foot"><span class="sp"></span><button class="btn pri" data-vc="1">Close</button></div></div>`;
+}
+document.addEventListener("click", e => {
+  if (vl().dataset.kind === "add" && e.target.closest("[data-add]")) submitAdd();
+  else if ((vl().dataset.kind === "add" || vl().dataset.kind === "help") && e.target === vl()) closeVeil();
+  else if (e.target.closest("[data-act=addtask]")) openAdd();
+});
+document.addEventListener("keydown", e => {
+  const k = vl().dataset.kind;
+  if (vl().classList.contains("show") && (k === "add" || k === "help")) {
+    if (e.key === "Escape") closeVeil();
+    else if (k === "add" && e.key === "Enter" && e.target.id === "at-title") { e.preventDefault(); submitAdd() }
+    return;
+  }
+  if (e.metaKey || e.ctrlKey || e.altKey || vl().classList.contains("show") || /INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) return;
+  if (e.key === "a") { e.preventDefault(); openAdd() } else if (e.key === "?") { e.preventDefault(); openHelp() }
 });

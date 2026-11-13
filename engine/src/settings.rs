@@ -50,6 +50,8 @@ pub struct AlertCfg {
     pub quiet_end: String,
     /// Local time "HH:MM" for a once-a-day summary notification. Empty = off.
     pub digest_time: String,
+    /// Only these categories raise alerts (urgent mail always does). Empty = every category.
+    pub categories: Vec<String>,
 }
 impl Default for AlertCfg {
     fn default() -> Self {
@@ -60,6 +62,7 @@ impl Default for AlertCfg {
             quiet_start: String::new(),
             quiet_end: String::new(),
             digest_time: String::new(),
+            categories: vec![],
         }
     }
 }
@@ -241,6 +244,14 @@ impl Settings {
             || al.quiet_start.is_empty() != al.quiet_end.is_empty()
         {
             bail!("Times must look like 22:30, and quiet hours need both a start and an end");
+        }
+        if al.categories.len() > 8
+            || al
+                .categories
+                .iter()
+                .any(|c| !crate::ai::CATEGORIES.contains(&c.as_str()))
+        {
+            bail!("Unknown alert category");
         }
         let d = &self.drafts;
         if !matches!(d.tone.as_str(), "friendly" | "concise" | "formal") {

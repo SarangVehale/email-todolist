@@ -2,6 +2,8 @@
 pub mod ai;
 pub mod commands;
 pub mod core;
+pub mod dates;
+pub mod diag;
 pub mod drafts;
 pub mod hub;
 pub mod jobs;

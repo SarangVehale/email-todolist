@@ -284,6 +284,29 @@ fn handle(mut stream: TcpStream, core: &Arc<Core>, token: &str, limiter: &Limite
     }
 }
 
+/// Loopback, private (RFC 1918), link-local, shared-address (100.64/10, used by Tailscale) and IPv6 local ranges.
+/// The hub listens on every interface so a phone can reach it, but it answers only peers on such networks, so a
+/// laptop on a public or hotspot interface is not exposed to the wider internet.
+pub fn local_peer(ip: std::net::IpAddr) -> bool {
+    use std::net::IpAddr;
+    match ip {
+        IpAddr::V4(v) => {
+            let o = v.octets();
+            v.is_loopback()
+                || v.is_private()
+                || v.is_link_local()
+                || (o[0] == 100 && (64..=127).contains(&o[1]))
+        }
+        IpAddr::V6(v) => {
+            if let Some(m) = v.to_ipv4_mapped() {
+                return local_peer(IpAddr::V4(m));
+            }
+            let seg = v.segments();
+            v.is_loopback() || (seg[0] & 0xfe00) == 0xfc00 || (seg[0] & 0xffc0) == 0xfe80
+        }
+    }
+}
+
 fn bind(port: u16, stop: &AtomicBool) -> Option<TcpListener> {
     // A previous hub thread may still hold the port for a moment after a settings save.
     for _ in 0..60 {
@@ -315,7 +338,10 @@ pub fn serve(core: Arc<Core>, stop: Arc<AtomicBool>) {
     let active = Arc::new(AtomicUsize::new(0));
     while !stop.load(Ordering::Relaxed) {
         match listener.accept() {
-            Ok((stream, _)) => {
+            Ok((stream, peer)) => {
+                if !local_peer(peer.ip()) {
+                    continue; // not a local network: drop the connection
+                }
                 if active.load(Ordering::Relaxed) >= MAX_CONNECTIONS {
                     continue; // dropping the stream refuses the connection
                 }

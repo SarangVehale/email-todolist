@@ -98,6 +98,7 @@ veil.addEventListener("click", async e => {
   }
 });
 
+const ALERT_CATS = ["work", "personal", "finance", "travel", "notification", "promo", "reading", "other"];
 function openSettings() { veil.dataset.kind = "settings"; veil.classList.add("show"); drawSettings() }
 async function drawSettings() {
   const s = S.settings, a = s.alerts || {}, ai = s.ai || {}, dr = s.drafts || { auto: false, tone: "friendly", signature: "", min_priority: 3, daily_cap: 25 };
@@ -115,6 +116,8 @@ async function drawSettings() {
     <div class="sect">Alert schedule</div>
     <div class="row2" style="grid-template-columns:1fr 1fr"><div><label class="f">Quiet from</label><input type="time" data-s="quiet_start" value="${esc(a.quiet_start)}"></div><div><label class="f">Quiet until</label><input type="time" data-s="quiet_end" value="${esc(a.quiet_end)}"></div></div>
     <p>Urgent mail still gets through during quiet hours.</p>
+    <label class="f">Alert me about</label><div class="chips">${ALERT_CATS.map(c => `<button class="chip ${!(a.categories || []).length || a.categories.includes(c) ? "on" : ""}" data-s="alertcat" data-cat="${c}">${c}</button>`).join("")}</div>
+    <p>Urgent mail always alerts. Choose none to hear about every category.</p>
     <label class="f">Daily digest at</label><input type="time" data-s="digest_time" value="${esc(a.digest_time)}">
     <div class="sect">Reply drafts</div>
     <label class="sw"><input type="checkbox" data-s="draft_auto" ${dr.auto ? "checked" : ""}><div><b>Write drafts automatically</b><span>For mail that needs a reply. Needs an AI model (Ollama or your own key). Drafts are never sent; they appear inside the task.</span></div></label>
@@ -147,6 +150,13 @@ async function settingsChange(t) {
 async function settingsClick(e) {
   const k = e.target.closest("[data-s]")?.dataset.s;
   if (k === "aitest") { const r = $("#aitres"); r.textContent = "Testing…"; try { const x = await rpc("test_ai"); r.innerHTML = `<span class="ok">Works · P${x.priority} · ${esc(x.action)}</span>` } catch (err) { r.innerHTML = `<span class="bad">${esc(String(err))}</span>` } }
+  if (k === "alertcat") {
+    const c = e.target.closest("[data-cat]").dataset.cat, cur = S.settings.alerts?.categories || [];
+    const all = cur.length ? cur : [...ALERT_CATS];
+    let next = all.includes(c) ? all.filter(x => x !== c) : [...all, c];
+    if (next.length === ALERT_CATS.length || !next.length) next = [];
+    try { S.settings = await rpc("save_settings", { patch: { alerts: { categories: next } } }); drawSettings() } catch (err) { toast("Couldn't save: " + err) }
+  }
   if (k === "export") { try { await navigator.clipboard.writeText(await rpc("export_markdown")); toast("Copied as Markdown") } catch (err) { toast("Couldn’t copy: " + err) } }
   if (k === "rotate") { await rpc("rotate_hub_token"); toast("New access code. Scan the code again on your phone."); drawSettings() }
   if (k === "signout" && twice(e.target.closest("[data-s]"), "Click again: removes password and local list")) { await rpc("sign_out"); W = { ...W, step: 0, tested: null, pw: "" }; closeVeil() }

@@ -27,7 +27,9 @@ pub fn run() {
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--minimized"])))
         .invoke_handler(tauri::generate_handler![rpc])
         .setup(|app| {
-            let dir = app.path().app_data_dir()?;
+            // Local, not roaming: mail text must not sync to a domain profile server on managed Windows PCs.
+            let dir = app.path().app_local_data_dir()?;
+            engine::diag::install_crash_log(dir.clone());
             let handle = app.handle().clone();
             let notify: engine::core::Notify = Arc::new(move |title, body| {
                 let _ = handle.notification().builder().title(title).body(body).show();

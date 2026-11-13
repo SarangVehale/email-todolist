@@ -2,7 +2,7 @@
 /* ───────── demo backend (design preview; also the fallback when no engine is present) ───────── */
 const M = (() => {
   const H = 3600, now = () => Date.now() / 1000;
-  const mk = (uid, sender, addr, subject, hrs, p, category, action, urgent, star, excerpt, why, sig) => ({ uid, message_id: "<" + uid + ">", sender, addr, subject, received: now() - hrs * H, priority: p, category, action, urgent, status: "open", star, excerpt, why, signals: sig, needs_reply: false, due: "", snooze_until: 0, reply_to: addr, reply_warn: false, draft: null, pref: "" });
+  const mk = (uid, sender, addr, subject, hrs, p, category, action, urgent, star, excerpt, why, sig) => ({ uid, message_id: "<" + uid + ">", sender, addr, subject, received: now() - hrs * H, priority: p, category, action, urgent, status: "open", star, excerpt, why, signals: sig, needs_reply: false, due: "", snooze_until: 0, reply_to: addr, reply_warn: false, draft: null, pref: "", attachments: [], attachment_count: 0, unsubscribe: "", note: "" });
   return {
     settings: { onboarded: qs.get("demo") !== null, account: { host: "imap.gmail.com", user: "you@example.com", port: 993 }, ai: { mode: "rules", ollama_model: "" }, alerts: { desktop: true, ntfy_topic: "" }, hub: { enabled: false, port: 8787, token: "" }, writeback: false },
     tasks: [
@@ -21,9 +21,11 @@ const M = (() => {
 /* sample reply, due date and category so the design can be previewed */
 Object.assign(M.tasks[0], { needs_reply: true, due: new Date(Date.now() + 864e5).toISOString().slice(0, 10), draft: { body: "Hi Priya,\n\nThanks for flagging this. Legal's changes look good to me, so I'll sign it this afternoon and send it back before 5pm.\n\nBest,\nSam", source: "ai", saved: false, updated: Date.now() / 1000 } });
 Object.assign(M.tasks[1], { needs_reply: true });
+Object.assign(M.tasks[3], { attachments: ["statement-october.pdf"], attachment_count: 1 });
+Object.assign(M.tasks[5], { unsubscribe: "https://digest.example/unsubscribe?u=1" });
 Object.assign(M.tasks[2], { needs_reply: true, due: "2026-11-11", reply_to: "ravi@other-domain.example", reply_warn: true });
 M.settings.drafts = { auto: false, tone: "friendly", signature: "Best,\nSam", min_priority: 3, daily_cap: 25 };
-Object.assign(M.settings.alerts, { quiet_start: "", quiet_end: "", digest_time: "" });
+Object.assign(M.settings.alerts, { quiet_start: "", quiet_end: "", digest_time: "", categories: [] });
 const TEMPLATES = { thanks: "Thanks for your message. I've received it and will get back to you shortly.", confirm: "Thanks, that works for me. Consider it confirmed.", decline: "Thank you for thinking of me. Unfortunately I can't make this work, so I'll have to decline.", later: "Thanks for reaching out. I need a little more time and will reply properly by [date]." };
 function mock(cmd, a) {
   const log = m => M.log.unshift({ at: Date.now() / 1000, msg: m });
@@ -41,6 +43,13 @@ function mock(cmd, a) {
       res({ body, source: t().draft.source });
     }, 700));
     case "draft_update": if (t().draft) { t().draft.body = a.body; t().draft.source = "user" } return Promise.resolve(true);
+    case "set_note": if (!t() || String(a.note).length > 2000) return Promise.resolve(false); t().note = a.note; return Promise.resolve(true);
+    case "add_task": {
+      const title = String(a.title || "").trim(); if (!title || title.length > 200) return Promise.reject("Give the task a title (up to 200 characters)");
+      const uid = Math.max(2000000000, ...M.tasks.map(x => x.uid)) + (M.tasks.some(x => x.uid >= 2000000000) ? 1 : 0);
+      M.tasks.push({ uid, message_id: "", sender: "You", addr: "", subject: title, received: Date.now() / 1000, priority: a.priority || 3, category: "personal", action: title, urgent: false, status: "open", star: false, excerpt: "", why: "Added by you", signals: {}, needs_reply: false, due: a.due || "", snooze_until: 0, reply_to: "", reply_warn: false, draft: null, pref: "", attachments: [], attachment_count: 0, unsubscribe: "", note: "" });
+      return Promise.resolve(uid);
+    }
     case "draft_discard": t().draft = null; return Promise.resolve(true);
     case "draft_to_mailbox": if (!M.settings.writeback) return Promise.reject("Turn on “Let Inbox Agent file mail” in Settings to save drafts to your mailbox"); if (t().draft) t().draft.saved = true; return Promise.resolve(true);
     case "export_markdown": return Promise.resolve("# To-do\n" + M.tasks.filter(x => x.status === "open" && !(x.snooze_until > Date.now() / 1000)).map(x => `\n- [ ] **P${x.priority}** ${x.action || x.subject} — ${x.sender} (${x.category})`).join("") + "\n");

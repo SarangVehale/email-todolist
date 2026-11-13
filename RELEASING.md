@@ -74,6 +74,6 @@ Do this on **clean machines** (a fresh Windows user or VM, a Mac, a Linux box), 
 
 ## Data and uninstall notes for users
 
-Uninstalling removes the program but keeps the user's data folder (`app.inboxagent.desktop` under their application-data
-folder) and their keychain entries. "Settings → Sign out and reset" removes the password and local data first. See
+Uninstalling removes the program but keeps the user's data folder (`app.inboxagent.desktop` under their local application-data
+folder, `%LOCALAPPDATA%` on Windows) and their keychain entries. "Settings → Sign out and reset" removes the password and local data first. See
 `PRIVACY.md`.

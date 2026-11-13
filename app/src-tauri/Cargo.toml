@@ -6,7 +6,7 @@ authors = ["Inbox Agent"]
 license = "MIT"
 repository = ""
 edition = "2021"
-rust-version = "1.77"
+rust-version = "1.82"
 
 [lib]
 name = "app_lib"
@@ -29,4 +29,3 @@ opt-level = "s"
 lto = true
 strip = true
 codegen-units = 1
-panic = "abort"

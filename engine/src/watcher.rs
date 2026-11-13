@@ -16,6 +16,8 @@ pub type Sess = Session<TlsStream<TcpStream>>;
 
 /// Messages larger than this are skipped (memory and parse-time DoS).
 const MAX_MESSAGE_BYTES: u32 = 5 * 1024 * 1024;
+/// How many times one message may be started without finishing (a crash each time) before it is skipped.
+const MAX_ATTEMPTS: u32 = 2;
 
 #[derive(Clone)]
 pub struct Account {
@@ -131,6 +133,32 @@ pub fn process_new<T: Read + Write>(
     first_run_limit: usize,
     on_new: &mut dyn FnMut(&Email, &Triage),
 ) -> Result<usize> {
+    process_new_until(
+        s,
+        store,
+        triager,
+        sent,
+        first_run_limit,
+        on_new,
+        &AtomicBool::new(false),
+    )
+}
+
+/// Like `process_new`, but gives up promptly once `stop` is set (the app is signing out or restarting), so a
+/// sync that was waiting on the network cannot write mail into a database that has just been wiped.
+pub fn process_new_until<T: Read + Write>(
+    s: &mut Session<T>,
+    store: &Store,
+    triager: &dyn Triager,
+    sent: &SentIndex,
+    first_run_limit: usize,
+    on_new: &mut dyn FnMut(&Email, &Triage),
+    stop: &AtomicBool,
+) -> Result<usize> {
+    let stopped = || stop.load(Ordering::Relaxed);
+    if stopped() {
+        return Ok(0);
+    }
     let mailbox = s.examine("INBOX")?;
     if let Some(v) = mailbox.uid_validity {
         if store.reconcile_uid_validity(v)? {
@@ -153,6 +181,9 @@ pub fn process_new<T: Read + Write>(
     }
     let mut n = 0;
     for chunk in uids.chunks(20) {
+        if stopped() {
+            return Ok(n);
+        }
         let mut wanted: Vec<u32> = vec![];
         for m in s.uid_fetch(uid_set(chunk), "RFC822.SIZE")?.iter() {
             let Some(uid) = m.uid else { continue };
@@ -175,21 +206,57 @@ pub fn process_new<T: Read + Write>(
             let (Some(uid), Some(body)) = (m.uid, m.body()) else {
                 continue;
             };
+            if stopped() {
+                return Ok(n);
+            }
             if store.seen(uid) {
                 continue;
             }
-            let email = match mail::parse(uid, body) {
-                Ok(e) => e,
-                Err(e) => {
-                    store.log(&format!("could not parse message {uid}: {e}"))?;
-                    continue;
+            // A message that keeps taking the app down must not do it on every start: it gets two tries.
+            let tries = store.begin_attempt(uid)?;
+            if tries > MAX_ATTEMPTS {
+                store.log(&format!(
+                    "skipped message {uid}: handling it crashed the app {} times",
+                    tries - 1
+                ))?;
+                store.end_attempt()?;
+                continue;
+            }
+            // A bug triggered by one message (a panic) is contained to that message.
+            let handled =
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> Result<bool> {
+                    let email = match mail::parse(uid, body) {
+                        Ok(e) => e,
+                        Err(e) => {
+                            store.log(&format!("could not parse message {uid}: {e}"))?;
+                            return Ok(false);
+                        }
+                    };
+                    let sig = signals::compute(&email, sent);
+                    let t = triage_with_fallback(triager, &email, &sig);
+                    if stopped() {
+                        return Ok(false); // signing out: do not store anything new
+                    }
+                    let t = store.add(&email, &t, &sig)?; // sender preferences may change the priority
+                    on_new(&email, &t);
+                    Ok(true)
+                }));
+            match handled {
+                Ok(Ok(stored)) => {
+                    if stored {
+                        n += 1;
+                    }
                 }
-            };
-            let sig = signals::compute(&email, sent);
-            let t = triage_with_fallback(triager, &email, &sig);
-            let t = store.add(&email, &t, &sig)?; // sender preferences may change the priority
-            on_new(&email, &t);
-            n += 1;
+                // an ordinary error (database busy, disk full) is not a crash of this message: do not count it
+                Ok(Err(e)) => {
+                    let _ = store.end_attempt();
+                    return Err(e);
+                }
+                Err(_) => {
+                    store.log(&format!("skipped message {uid}: processing it crashed"))?;
+                }
+            }
+            store.end_attempt()?;
         }
         if let Some(max) = chunk.last() {
             store.set_last_uid(store.last_uid().max(*max))?;
@@ -211,25 +278,42 @@ pub fn run(
 ) {
     while !stop.load(Ordering::Relaxed) {
         status("connecting");
-        let result: Result<()> = (|| {
+        // a panic anywhere in a connection attempt becomes an ordinary error and goes through the retry path
+        let attempt = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> Result<()> {
             let mut s = connect(a)?;
             let folder = find_sent_folder(&mut s)?;
             let sent = build_sent_index(&mut s, &folder, 500)?;
             store.log(&format!("connected as {}; Sent folder “{folder}”", a.user))?;
             status("syncing");
-            process_new(&mut s, store, triager, &sent, first_run_limit, on_new)?;
+            process_new_until(&mut s, store, triager, &sent, first_run_limit, on_new, stop)?;
             status("idle");
             while !stop.load(Ordering::Relaxed) {
                 s.examine("INBOX")?; // read-only; IDLE works on an examined mailbox
                 let outcome = s.idle()?.wait_with_timeout(Duration::from_secs(60))?;
+                if stop.load(Ordering::Relaxed) {
+                    break;
+                }
                 if matches!(outcome, imap::extensions::idle::WaitOutcome::MailboxChanged) {
                     status("syncing");
-                    process_new(&mut s, store, triager, &sent, first_run_limit, on_new)?;
+                    process_new_until(
+                        &mut s,
+                        store,
+                        triager,
+                        &sent,
+                        first_run_limit,
+                        on_new,
+                        stop,
+                    )?;
                     status("idle");
                 }
             }
             Ok(())
-        })();
+        }));
+        let result = attempt.unwrap_or_else(|_| {
+            Err(anyhow::anyhow!(
+                "internal error, see crash.log in the app's data folder"
+            ))
+        });
         if let Err(e) = result {
             status(&format!("error: {e}"));
             let _ = store.log(&format!("connection lost ({e}); retrying in 30s"));
