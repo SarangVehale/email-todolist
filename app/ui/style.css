@@ -203,3 +203,5 @@ input::placeholder,textarea::placeholder{color:var(--mute)}
 .thread{margin:10px 0 0;font:400 12.5px/1.7 var(--mono);color:var(--mute)}
 .thread .lbl{display:block;margin-bottom:2px}
 .thread div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.notice{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:14px 0 0;padding:10px 14px;border:1px solid var(--line2);border-radius:6px;font:400 12.5px var(--mono);color:var(--soft)}
+.notice span{margin-right:auto}

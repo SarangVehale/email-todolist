@@ -131,7 +131,8 @@ async function drawSettings() {
     <div class="row2" style="grid-template-columns:1fr 1fr"><div><label class="f">Only for priority</label><select data-s="draft_min">${[1, 2, 3, 4, 5].map(n => `<option value="${n}" ${dr.min_priority === n ? "selected" : ""}>${n} and up</option>`).join("")}</select></div><div><label class="f">Daily limit</label><input type="number" min="0" max="200" data-s="draft_cap" value="${dr.daily_cap}"></div></div>
     <div class="sect">Mailbox</div>
     <label class="sw"><input type="checkbox" data-s="writeback" ${s.writeback ? "checked" : ""}><div><b>Let Inbox Agent file mail</b><span>Done archives, star flags, priorities label (Gmail). ${S.pending ? S.pending + " change(s) waiting." : ""}</span></div></label>
-    <div class="sect">Export</div><div class="foot" style="margin-top:8px"><button class="btn sm" data-s="export">Copy to-do list as Markdown</button></div>
+    ${S.update_feature ? `<div class="sect">Updates</div><label class="sw"><input type="checkbox" data-s="update_check" ${s.updates?.check !== false ? "checked" : ""}><div><b>Check for a newer version</b><span>Once a day the app asks GitHub for the latest release. Nothing is downloaded or installed; you only see a notice and a link. GitHub sees your network address, like any web request.</span></div></label>` : ""}
+    <div class="sect">Export and support</div><div class="foot" style="margin-top:8px"><button class="btn sm" data-s="export">Copy to-do list as Markdown</button><button class="btn sm" data-s="diag">Copy diagnostics</button></div><p>Diagnostics has the version, counts, option names and recent activity with names, subjects and addresses removed. Read it before you paste it into a bug report.</p>
     <div class="sect">Phone and tablet</div>
     <label class="sw"><input type="checkbox" data-s="hub" ${s.hub?.enabled ? "checked" : ""}><div><b>Phone hub</b><span>Serves this app on your network. Scan the code on a phone on the same Wi-Fi, then Add to Home Screen. Plain HTTP: use a trusted network or a private VPN.</span></div></label>
     ${hub ? `<div class="qr">${hub.svg}</div><p style="word-break:break-all;font-size:11px;margin-top:10px">${esc(hub.url)}</p><div class="foot" style="margin-top:10px"><button class="btn sm" data-s="rotate">Rotate access code</button></div>` : ""}
@@ -141,7 +142,7 @@ async function settingsChange(t) {
   const k = t.dataset.s; if (!k) return;
   const patch = { aimode: { ai: { mode: t.value } }, ollama_model: { ai: { ollama_model: t.value } }, desktop: { alerts: { desktop: t.checked } }, topic: { alerts: { ntfy_topic: t.value.trim() } }, writeback: { writeback: t.checked }, hub: { hub: { enabled: t.checked } },
     digest_time: { alerts: { digest_time: t.value } }, draft_auto: { drafts: { auto: t.checked } }, draft_tone: { drafts: { tone: t.value } },
-    draft_sig: { drafts: { signature: t.value } }, draft_min: { drafts: { min_priority: +t.value } }, draft_cap: { drafts: { daily_cap: +t.value || 0 } } }[k];
+    draft_sig: { drafts: { signature: t.value } }, update_check: { updates: { check: t.checked } }, draft_min: { drafts: { min_priority: +t.value } }, draft_cap: { drafts: { daily_cap: +t.value || 0 } } }[k];
   if (k === "quiet_start" || k === "quiet_end") {
     const st = veil.querySelector("[data-s=quiet_start]").value, en = veil.querySelector("[data-s=quiet_end]").value;
     if (!!st !== !!en) { toast("Set both a start and an end for quiet hours"); return }
@@ -162,6 +163,7 @@ async function settingsClick(e) {
     if (next.length === ALERT_CATS.length || !next.length) next = [];
     try { S.settings = await rpc("save_settings", { patch: { alerts: { categories: next } } }); drawSettings() } catch (err) { toast("Couldn't save: " + err) }
   }
+  if (k === "diag") { try { await navigator.clipboard.writeText(await rpc("diagnostics")); toast("Diagnostics copied. Read it, then paste it into your bug report.") } catch (err) { toast("Couldn’t copy: " + err) } }
   if (k === "export") { try { await navigator.clipboard.writeText(await rpc("export_markdown")); toast("Copied as Markdown") } catch (err) { toast("Couldn’t copy: " + err) } }
   if (k === "rotate") { await rpc("rotate_hub_token"); toast("New access code. Scan the code again on your phone."); drawSettings() }
   if (k === "signout" && twice(e.target.closest("[data-s]"), "Click again: removes password and local list")) { await rpc("sign_out"); W = { ...W, step: 0, tested: null, pw: "" }; closeVeil() }

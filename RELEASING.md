@@ -64,6 +64,23 @@ Do this on **clean machines** (a fresh Windows user or VM, a Mac, a Linux box), 
 - **A security problem:** follow `SECURITY.md`, ship a patch release, and say plainly in the notes what was fixed.
 - **A bad dependency:** Dependabot opens update PRs; CI's `audit` job fails the build on a vulnerable dependency.
 
+## Switching on the update notice
+
+The app can tell users when a newer version exists. It is off until you name the repository: set `UPDATE_REPO` in
+`engine/src/updates.rs` to `"owner/name"` (and the `repository` fields in the two `Cargo.toml` files and `package.json`),
+rebuild, and tag a release. From then on the app asks GitHub once a day and shows a notice with a link to the release page. It
+never downloads or installs anything, so it needs no signing keys. The test `the_check_is_off_until_a_repository_is_set`
+documents the switch; update it when you flip it. Release tags must look like `v1.2.3` (an optional short suffix such as
+`-rc.1` is allowed); anything else is ignored by the check.
+
+## Free code signing
+
+Unsigned installers work but show warnings (Windows SmartScreen, macOS Gatekeeper). Paying for certificates is not
+needed to start. As far as we know, the SignPath Foundation offers free Windows code signing to open-source projects; it
+needs a public repository, builds done in CI, and an application on their site, so it is a step for the repository owner
+(check their current terms). macOS notarization requires an Apple Developer account, which is paid; until then macOS users
+must open the app with right-click, Open. Say so in the release notes.
+
 ## What is not set up yet
 
 - **Automatic updates.** Users must download new versions by hand. To add them: generate an updater key pair

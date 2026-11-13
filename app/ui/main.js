@@ -56,7 +56,7 @@ const SORTS = {
 };
 /* Automated mail the user has not touched: bulk, low priority, no due date. It folds into one row in the plain to-do view. */
 const foldable = t => !!(t.signals && t.signals.bulk) && maxp(t) <= 2 && !t.star && !t.urgent && !t.due && !t.draft && !t._anyDraft;
-let autoOpen = false, goneOpen = false, curIdx = 0;
+let autoOpen = false, goneOpen = false, curIdx = 0, updateDismissed = "";
 const folding = () => view === "todo" && flt.cat === "all" && !flt.only && !flt.q.trim();
 /* the tasks that belong to the current tab, before filters */
 function baseList() {
@@ -131,6 +131,7 @@ function render() {
   const names = { todo: "To<em>-do</em>", star: "Starred", snoozed: "Snoozed", done: "Done", log: "Log" };
   const d = new Date(), kick = `${{ todo: "Inbox", star: "Marked", snoozed: "Resting", done: "Filed", log: "Record" }[view]} · ${d.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" })}`;
   let h = `<div class="kick">${kick}</div><h1>${names[view]}</h1>`;
+  if (S.update && S.update.version !== updateDismissed && !isHub) h += `<div class="notice" role="status"><span>Version ${esc(S.update.version)} is available.</span><button class="mini" data-act="copy-update">Copy download link</button><button class="mini" data-act="dismiss-update">Not now</button></div>`;
   if (view === "log") {
     h += `<p class="sub2">Everything the agent does, in order.</p><div class="log">${S.log.map(l => `<div><b>${new Date(l.at * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</b>${esc(l.msg)}</div>`).join("") || "<div>Nothing yet.</div>"}</div>`;
   } else {
@@ -210,6 +211,8 @@ document.addEventListener("click", e => {
   if (a === "addtask") return openAdd();
   if (a === "autofold") { autoOpen = !autoOpen; render(); return }
   if (a === "gonefold") { goneOpen = !goneOpen; render(); return }
+  if (a === "copy-update" && S.update) { copyText(S.update.url); return }
+  if (a === "dismiss-update" && S.update) { updateDismissed = S.update.version; render(); return }
   const row = e.target.closest(".row"); if (!row) return;
   const t = find(+row.dataset.uid); if (!t) return; cur = t.uid;
   const pb = e.target.closest("[data-p]");
@@ -243,7 +246,7 @@ $("#undoBtn").onclick = () => { undoStack.pop()?.(); $("#undo").style.display = 
 async function load() {
   if (busy) return;
   try {
-    const d = await rpc("state"), snap = JSON.stringify([d.tasks, d.log, d.status, d.pending, d.settings]);
+    const d = await rpc("state"), snap = JSON.stringify([d.tasks, d.log, d.status, d.pending, d.settings, d.update]);
     if (snap === lastSnap) return; lastSnap = snap; S = d;
     const v = $("#veil");
     if (!d.settings.onboarded && !isHub) { if (!v.classList.contains("show")) openWizard() }

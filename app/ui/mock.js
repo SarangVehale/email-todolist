@@ -16,7 +16,7 @@ const M = (() => {
       mk(22, "FoodApp", "offers@foodapp.example", "50% off your next order", 3, 1, "promo", "", false, false, "Treat yourself tonight with code FEAST50.", "Promotion, no action.", { known: false, reply: false, bulk: true }),
     ],
     log: [{ at: now() - 60, msg: "connected as you@example.com; Sent folder “[Gmail]/Sent Mail”" }, { at: now() - 50, msg: "triaged “Re: Q4 contract” → P5, work, urgent" }],
-    status: "idle", pending: 0, gmail: true,
+    status: "idle", pending: 0, gmail: true, update_feature: true, update: { version: "0.2.0", url: "https://github.com/example/inbox-agent/releases/tag/v0.2.0" },
   };
 })();
 /* sample reply, due date and category so the design can be previewed */
@@ -56,6 +56,7 @@ function mock(cmd, a) {
     case "set_due": if (!t() || (a.due && !/^\d{4}-\d{2}-\d{2}$/.test(a.due))) return Promise.resolve(false); t().due = a.due || ""; return Promise.resolve(true);
     case "set_title": if (!t() || t().uid < 2000000000 || !String(a.title || "").trim()) return Promise.resolve(false); t().subject = t().action = String(a.title).trim(); return Promise.resolve(true);
     case "read_body": return Promise.resolve(t() ? (t().excerpt || "") + "\n\n(This is demo text. The real app shows the stored message text, up to 3,000 characters.)" : "");
+    case "diagnostics": return Promise.resolve("Inbox Agent diagnostics\nVersion: demo\nSystem: demo\nStatus: idle\nTasks: 9 open, 1 done, 1 left the inbox\nOptions: ranking rules · write-back off · phone hub off · quiet hours off · Google sign-in off\nMail server: imap.gmail.com\n\nRecent activity (newest first, private text removed):\n  triaged “…” → P5, work, urgent\n\nCrash log (last lines, private text removed):\n  none\n");
     case "set_note": if (!t() || String(a.note).length > 2000) return Promise.resolve(false); t().note = a.note; return Promise.resolve(true);
     case "add_task": {
       const title = String(a.title || "").trim(); if (!title || title.length > 200) return Promise.reject("Give the task a title (up to 200 characters)");

@@ -8,6 +8,10 @@ versions may change behaviour.
 First public build.
 
 ### Added
+- Update notice: once the project has a GitHub repository the app asks GitHub once a day whether a newer version exists and
+  shows a link (it downloads nothing). Off until a repository is set; a Settings switch turns it off.
+- "Copy diagnostics" in Settings: a report with counts, option names and recent activity, with names, subjects and
+  addresses removed, for bug reports.
 - Tasks close themselves when you reply to the message (forwards do not count), and mail that left the inbox is
   marked and folded away instead of cluttering the list; nothing about this ever changes your mailbox.
 - Conversations are one row, with a count and the highest priority; done, star and snooze apply to the whole row.
@@ -38,7 +42,7 @@ First public build.
 - Third review (Opus, 2026-11-13): one bad unsubscribe link could blank the list; a crashing message could crash the app on every start; hostile HTML could stall the watcher; sign-out left mail text in the database files; the hub answered public networks; mail data sat in Roaming AppData. All fixed with tests; see SECURITY.md.
 - A damaged database is set aside and rebuilt, newer data is refused, and a `crash.log` records internal errors (no telemetry).
 - Two independent security reviews; all confirmed findings fixed with regression tests. See SECURITY.md.
-- 208 automated tests, including protocol tests against a scripted mock IMAP server and a dedicated edge-case suite.
+- 235 automated tests, including protocol tests against a scripted mock IMAP server and a dedicated edge-case suite.
 
 ### Known limitations
 - Microsoft (Outlook, Microsoft 365) accounts are not supported: Microsoft turned off password sign-in for IMAP.

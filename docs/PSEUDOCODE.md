@@ -228,3 +228,24 @@ save_settings(patch):
 ```
 Edge cases: corrupt or older settings files fall back safely — `corrupt_or_old_settings_files…`,
 `bad_settings_patches_are_errors_not_crashes`.
+
+## 11. Update check and diagnostics (`updates.rs`, `diag.rs`)
+
+```
+every scheduler tick:
+    if UPDATE_REPO is empty, or the user turned the check off, or an attempt was already made today: do nothing
+    record today as the attempt date
+    on another thread: GET https://api.github.com/repos/<repo>/releases/latest     # 5 s, no redirects, <= 256 KB
+        tag = tag_name, only if it is a plain version (digits, dots, optional short alphanumeric suffix)
+        store the tag if it is newer than the running version, else clear it
+state():  show the stored tag only while it is still newer than the running version; the page address is rebuilt
+          from the repository and the tag; phones never get it
+
+diagnostics():                                                                      # desktop only
+    counts + option names + server host name
+    activity lines: quoted text -> ellipsis, around "@" -> <address>, home paths -> <path>, error details removed
+    crash lines: keep time, thread and file:line only
+```
+Edge cases: hostile tags and page addresses, oversized or silent servers, redirects, a rate limit, quotes inside subjects,
+backticks in panic messages, folder names with spaces — `tags_that_are_not_plain_versions_are_never_used`,
+`the_page_address_is_built_from_the_checked_tag…`, `redaction_handles_quotes_inside_text…`.

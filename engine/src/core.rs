@@ -61,6 +61,14 @@ impl Core {
         Store::open(&self.dir.join("agent.db"))
     }
 
+    /// The sync status as shown in the app (for the support report).
+    pub fn status_text(&self) -> String {
+        self.status
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
     fn set_status(&self, s: &str) {
         *self.status.lock().unwrap_or_else(|e| e.into_inner()) = s.to_string();
     }
@@ -288,6 +296,17 @@ impl Core {
             "pending": store.pending(1000).len(),
             "has_anthropic_key": !public && secrets::get("anthropic-key").is_some(),
             "gmail": is_gmail(&s.account.host),
+            "update_feature": !crate::updates::UPDATE_REPO.is_empty(),
+            "update": if public || !s.updates.check || crate::updates::UPDATE_REPO.is_empty() {
+                None
+            } else {
+                crate::updates::pending(
+                    store.meta_get("update_available").as_deref(),
+                    crate::updates::UPDATE_REPO,
+                    env!("CARGO_PKG_VERSION"),
+                )
+                .map(|u| json!({"version": u.version, "url": u.url}))
+            },
         }))
     }
 
@@ -339,7 +358,23 @@ impl Core {
                 Ok(json!(true))
             }
             "save_settings" => {
-                let mut s = self.settings().patched(&a["patch"])?;
+                // The account (server, user, password, and the data tied to them) changes only through
+                // save_account, which resets the old mailbox's data, and onboarding only through finish_setup.
+                // A patch must be an object: any other shape replaces every setting at once (serde reads a list
+                // in field order), which would slip around both.
+                let patch = &a["patch"];
+                if !patch.is_object() {
+                    return Err(anyhow!("A settings change must be an object"));
+                }
+                let now = self.settings();
+                let mut s = now.patched(patch)?;
+                if serde_json::to_value(&s.account)? != serde_json::to_value(&now.account)?
+                    || s.onboarded != now.onboarded
+                {
+                    return Err(anyhow!(
+                        "The account is changed with save_account, not with settings"
+                    ));
+                }
                 s.validate()?;
                 if !s.hub.enabled {
                     s.hub.token.clear(); // a fresh access code every time the hub is switched on

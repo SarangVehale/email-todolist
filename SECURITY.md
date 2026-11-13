@@ -181,6 +181,32 @@ tasks older than the newest 500 are not checked for replies; mail you sent to yo
 that as a reminder); a mail returned to the inbox after being archived through write-back arrives under a new UID and can
 appear as a second task.
 
+### Phase 3 design review (Opus, 2026-11-13, before any code)
+
+| Risk found | Decision |
+| --- | --- |
+| Google sign-in would send a bearer token for the whole mailbox to whatever host the account setting names; `is_gmail` was a suffix match (`evilgmail.com` counted); a settings patch could change the account and skip the data reset | `is_gmail` is now an exact or dot-boundary match; a settings patch cannot touch the account (only `save_account`, which resets the old data, can); Google sign-in itself is deferred with a written list of what it needs |
+| Diagnostics redaction leaked: subjects containing the closing quote, backticks in panic text, errors with no quotes, login names with no `@`, home folders with spaces | Redaction rewritten (first to last quote, backticks, error details cut, paths to end of line); crash lines keep only time, thread and file:line; tested with those exact strings |
+| The update check trusted `html_url` after a prefix check, counted successes (so a rate limit retried all day) and could be pointed anywhere by a taken-over repository | The page address is built from the configured repository and a strictly checked tag; one attempt a day is recorded; off until a repository is set |
+
+A Sonnet review of the finished Phase 3 code found more, all fixed with tests:
+
+| Finding | Fix |
+| --- | --- |
+| The account guard checked only for an `account` key, so a patch that was a list (serde reads one in field order) rewrote every setting, host and user included, skipping the data reset; `onboarded` could also be set | A patch must be an object, and the account and setup flag must come out of it unchanged |
+| Addresses were only partly removed: `jane.o'connor@…` left "jane.o'", and VERP bounce addresses leaked the recipient's name | Any piece of text holding an "@" is replaced whole |
+| An error line was kept whole if a safe phrase appeared anywhere in it, so "…bad header Jane Doe you replied" survived | The text after an error colon is kept only when it starts with a safe phrase |
+| The Drafts folder name and a custom mail-server host identify the user, and both were in the report | Folder and path-like names become `<name>`; only well-known provider hosts are named, anything else is "custom server" |
+| The day's update check was spent before the network was tried, so a laptop with no Wi-Fi at login never checked again that day | The day counts only once the server answers; a transport failure is retried in an hour, one check at a time |
+| The stored tag was rebuilt as "v" + version, so a tag without a "v" produced a dead link | The real tag is stored, and a tag may carry at most one leading "v" |
+| A pre-release was never told about its own final release | A final release counts as newer than its pre-releases |
+| Tests that could not fail: the update gates (short-circuited by the empty repository) and the end-to-end diagnostics check (which passed with no log at all) | Both strengthened; the gates are now tested directly |
+
+Known and accepted: an account change or a server renumbering clears the stored "checked today" marker, so one extra
+check can happen that day; a renamed repository stops notices silently (GitHub answers with a redirect, which the app
+does not follow); the check is on by default and the wizard does not ask about it (PRIVACY.md describes it, and it does
+nothing until the project has a repository).
+
 Still open from this review: a signed update channel, code signing and notarization, a live-mailbox test, macOS and
 Linux builds run on real machines, a `Host` header check on the hub, two watchers briefly overlapping after a
 settings save (the stop flag now keeps them from writing, but the old one can still sit in IDLE for up to a minute),

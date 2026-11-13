@@ -458,7 +458,11 @@ fn task_commands_work_through_the_core() {
         .unwrap_err()
         .to_string();
     assert!(err.contains("Let Inbox Agent file mail"), "{err}");
-    c.rpc("save_settings", &json!({"patch": {"writeback": true, "account": {"host": "imap.example.com", "user": "me@example.com"}}})).unwrap();
+    c.settings()
+        .patched(&json!({"writeback": true, "account": {"host": "imap.example.com", "user": "me@example.com"}}))
+        .unwrap()
+        .save(&c.dir)
+        .unwrap();
     c.rpc("draft_to_mailbox", &json!({"uid": 1})).unwrap();
     assert!(c
         .store()

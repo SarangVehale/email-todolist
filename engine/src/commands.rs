@@ -34,6 +34,7 @@ const DESKTOP_ONLY: &[&str] = &[
     "draft_to_mailbox",
     "export_markdown",
     "read_body",
+    "diagnostics",
 ];
 
 /// Automatic drafting runs one message at a time so the daily budget cannot be overshot.
@@ -272,6 +273,41 @@ pub fn run(core: &Arc<Core>, cmd: &str, a: &Value) -> Option<Result<Value>> {
                 Ok(json!(true))
             }
             "export_markdown" => Ok(json!(markdown_export(&store.all_tasks()?))),
+            "diagnostics" => {
+                let s = core.settings();
+                let tasks = store.all_tasks()?;
+                let open = tasks.iter().filter(|t| t.status == "open").count();
+                let done = tasks.iter().filter(|t| t.status == "done").count();
+                let gone = tasks
+                    .iter()
+                    .filter(|t| t.status == "open" && t.gone)
+                    .count();
+                let log: Vec<String> = store.recent_log(30).into_iter().map(|l| l.1).collect();
+                let crash: Vec<String> = std::fs::read_to_string(core.dir.join("crash.log"))
+                    .unwrap_or_default()
+                    .lines()
+                    .rev()
+                    .take(20)
+                    .map(String::from)
+                    .collect();
+                let status = core.status_text();
+                Ok(json!(crate::diag::report(&crate::diag::ReportInput {
+                    version: env!("CARGO_PKG_VERSION"),
+                    os: &format!("{} {}", std::env::consts::OS, std::env::consts::ARCH),
+                    status: &status,
+                    open,
+                    done,
+                    gone,
+                    ai_mode: &s.ai.mode,
+                    writeback: s.writeback,
+                    hub: s.hub.enabled,
+                    quiet_hours: !s.alerts.quiet_start.is_empty(),
+                    google: false,
+                    host: &s.account.host,
+                    log: &log,
+                    crash: &crash,
+                })))
+            }
             _ => Err(anyhow!("unknown command: {cmd}")),
         }
     })();

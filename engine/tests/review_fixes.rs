@@ -187,17 +187,23 @@ fn saving_a_draft_is_queued_once_and_needs_a_usable_from_address() {
         true,
     );
     c.rpc("draft_generate", &json!({"uid": 1})).unwrap();
-    c.rpc("save_settings", &json!({"patch": {"writeback": true, "account": {"host": "imap.example.com", "user": "bob"}}})).unwrap();
+    c.settings()
+        .patched(
+            &json!({"writeback": true, "account": {"host": "imap.example.com", "user": "bob"}}),
+        )
+        .unwrap()
+        .save(&c.dir)
+        .unwrap();
     let err = c
         .rpc("draft_to_mailbox", &json!({"uid": 1}))
         .unwrap_err()
         .to_string();
     assert!(err.contains("isn't an email address"), "{err}");
-    c.rpc(
-        "save_settings",
-        &json!({"patch": {"account": {"user": "bob@example.com"}}}),
-    )
-    .unwrap();
+    c.settings()
+        .patched(&json!({"account": {"user": "bob@example.com"}}))
+        .unwrap()
+        .save(&c.dir)
+        .unwrap();
     for _ in 0..3 {
         c.rpc("draft_to_mailbox", &json!({"uid": 1})).unwrap();
     }

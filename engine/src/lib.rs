@@ -13,5 +13,6 @@ pub mod settings;
 pub mod signals;
 pub mod store;
 pub mod triage;
+pub mod updates;
 pub mod watcher;
 pub mod writeback;

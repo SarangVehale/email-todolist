@@ -60,6 +60,58 @@ pub fn snooze_until(preset: &str, from: chrono::DateTime<Local>) -> Option<f64> 
     }
 }
 
+/// Once a day (an attempt, not a success: a rate limit or a deleted repository must not be retried all day, and the
+/// scheduler restarts whenever settings are saved) asks GitHub for the latest release, if the project has a repository
+/// and the user has not turned the check off. Runs on its own thread so a slow network never delays a snooze wake-up.
+fn check_for_update(
+    core: &Arc<Core>,
+    store: &crate::store::Store,
+    s: &crate::settings::Settings,
+    today: &str,
+) {
+    static RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    let now = Local::now().timestamp();
+    let waiting = store
+        .meta_get("update_next_try")
+        .and_then(|v| v.parse::<i64>().ok())
+        .is_some_and(|t| now < t);
+    if crate::updates::UPDATE_REPO.is_empty()
+        || !s.updates.check
+        || waiting
+        || store.meta_get("update_checked").as_deref() == Some(today)
+        || RUNNING.swap(true, Ordering::SeqCst)
+    {
+        return;
+    }
+    let (core, today) = (core.clone(), today.to_string());
+    std::thread::spawn(move || {
+        let found = crate::updates::check(
+            "https://api.github.com",
+            crate::updates::UPDATE_REPO,
+            env!("CARGO_PKG_VERSION"),
+        );
+        if let Ok(store) = core.store() {
+            match found {
+                // the server answered: that is this day's check, whatever it said
+                Ok(found) => {
+                    let tag = found.map(|u| u.tag).unwrap_or_default();
+                    let _ = store.meta_set("update_available", &tag);
+                    let _ = store.meta_set("update_checked", &today);
+                    let _ = store.meta_set("update_next_try", "0");
+                }
+                // no answer (no network yet after a reboot, a sleeping machine): try again in an hour, not tomorrow
+                Err(_) => {
+                    let _ = store.meta_set(
+                        "update_next_try",
+                        &(Local::now().timestamp() + 3600).to_string(),
+                    );
+                }
+            }
+        }
+        RUNNING.store(false, Ordering::SeqCst);
+    });
+}
+
 /// One line per conversation (not per message) for tasks whose snooze just ended.
 pub fn wake_notices(due: &[crate::store::Task]) -> Vec<String> {
     let mut seen = std::collections::HashSet::new();
@@ -101,6 +153,7 @@ fn tick(core: &Arc<Core>) {
         }
     }
     let today = now.format("%Y-%m-%d").to_string();
+    check_for_update(core, &store, &s, &today);
     if digest_due(
         &s.alerts.digest_time,
         now_minutes(),

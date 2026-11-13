@@ -252,7 +252,7 @@ fn save_draft<T: Read + Write>(
     s.append_with_flags(&f.drafts, &msg, &[imap::types::Flag::Draft])?;
     store.mark_draft_saved(uid)?;
     store.log(&format!(
-        "saved a reply draft to {} for “{}”",
+        "saved a reply draft to “{}” for “{}”",
         f.drafts, t.subject
     ))?;
     Ok(())

@@ -20,6 +20,11 @@ and the recipients and Message-IDs of your Sent folder to learn who you write to
 - If you set an **ntfy topic**: the sender name and a short action text of high-priority mail go to
   the ntfy server you configured (ntfy.sh by default). Treat the topic like a password.
 - The **phone hub** serves the list only to devices that hold its access code, on your network.
+- **Update check.** Once the project has a public repository, the app asks api.github.com once a day for the latest release
+  (the request carries only "InboxAgent/<version>" and your network address). It never downloads anything. You can turn it
+  off in Settings. Until a repository is set, nothing is sent.
+- **Copy diagnostics** only puts text on your clipboard. Nothing is sent unless you paste it somewhere. It holds counts, option
+  names and recent activity with names, subjects and addresses removed; read it first.
 
 **Deleting everything.** Settings, "Sign out and reset" removes the saved password and the task list.
 Uninstalling removes the program; the data folder is `app.inboxagent.desktop` under your user

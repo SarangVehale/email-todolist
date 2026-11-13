@@ -111,6 +111,18 @@ impl Default for HubCfg {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
+pub struct UpdateCfg {
+    /// Once a day, ask GitHub whether a newer version exists. Only has an effect once the project names its repository.
+    pub check: bool,
+}
+impl Default for UpdateCfg {
+    fn default() -> Self {
+        Self { check: true }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(default)]
 pub struct Settings {
     pub onboarded: bool,
     pub account: AccountCfg,
@@ -118,6 +130,7 @@ pub struct Settings {
     pub alerts: AlertCfg,
     pub hub: HubCfg,
     pub drafts: DraftCfg,
+    pub updates: UpdateCfg,
     /// Apply done/star/priority changes to the real mailbox. Off until the user opts in.
     pub writeback: bool,
     pub first_run_limit: usize,
@@ -131,6 +144,7 @@ impl Default for Settings {
             alerts: AlertCfg::default(),
             hub: HubCfg::default(),
             drafts: DraftCfg::default(),
+            updates: UpdateCfg::default(),
             writeback: false,
             first_run_limit: 50,
         }
@@ -172,9 +186,13 @@ fn merge(a: &mut serde_json::Value, b: &serde_json::Value) {
     }
 }
 
+/// Gmail's own hosts: the name itself or a sub-domain of it. A look-alike such as `evilgmail.com` or
+/// `imap.gmail.com.evil.example` is not Gmail.
 pub fn is_gmail(host: &str) -> bool {
-    let h = host.to_lowercase();
-    h.ends_with("gmail.com") || h.ends_with("googlemail.com")
+    let h = host.trim().trim_end_matches('.').to_lowercase();
+    ["gmail.com", "googlemail.com"]
+        .iter()
+        .any(|d| h == *d || h.ends_with(&format!(".{d}")))
 }
 
 fn is_printable(s: &str, max: usize) -> bool {
