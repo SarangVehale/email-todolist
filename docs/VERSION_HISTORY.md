@@ -37,7 +37,7 @@ different questions:
 | Phase 7 | 2026-11-14 | `e0fb142` | 453 | Backup and restore, and these history documents | `SECURITY.md` Review 8, `docs/2026-11-14_PHASE7_REVIEW.md` |
 | Phase 8 | 2026-11-14 | `d262695` | 459 | A big mailbox stays fast (the window is sent the newest finished tasks, draws 150 rows at a time and moves the cursor without redrawing) | `docs/designs/phase8.md`, `docs/2026-11-14_PHASE8_REVIEW.md` |
 | Phase 9 | 2026-11-14 | `e6be8ee` | 459 + 49 window | Tests for the window: the real files in a real browser, with nothing to install (`cd app && npm test`) | `docs/designs/phase9.md`, `docs/2026-11-14_PHASE9_REVIEW.md` |
-| Phase 10 | 2026-11-14 | _pending_ | 461 + 49 window + 38 documentation-check | Documentation as code: a documentation map, architecture with diagrams, 14 decision records, API and reference documents, guides, runbooks, product requirements, standards, a testing strategy and templates, with a checker run by CI; a fix for the ranking Test button | `docs/designs/phase10.md`, `docs/2026-11-14_PHASE10_REVIEW.md` |
+| Phase 10 | 2026-11-14 | `e9a88f8` | 461 + 49 window + 38 documentation-check | Documentation as code: a documentation map, architecture with diagrams, 14 decision records, API and reference documents, guides, runbooks, product requirements, standards, a testing strategy and templates, with a checker run by CI; a fix for the ranking Test button | `docs/designs/phase10.md`, `docs/2026-11-14_PHASE10_REVIEW.md` |
 
 ## What has not happened yet
 
