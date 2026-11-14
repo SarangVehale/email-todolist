@@ -135,7 +135,7 @@ jobs:
       # passed only by the step that runs when the secrets exist, and the unsigned step carries none of them. Keep the two steps' `with` the same.
       - name: Build and attach the installer (signed and notarized where the secrets exist)
         if: env.HAS_APPLE_CERT == 'true'
-        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
+        uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -154,7 +154,7 @@ jobs:
           args: ${{ matrix.args }}
       - name: Build and attach the installer (unsigned)
         if: env.HAS_APPLE_CERT != 'true'
-        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
+        uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
