@@ -36,7 +36,7 @@ different questions:
 | Phase 6 | 2026-11-13 | `4a525eb` | 412 | Several mailboxes in one list (up to five) | `SECURITY.md` Review 7, `docs/2026-11-13_PHASE6_REVIEW.md` |
 | Phase 7 | 2026-11-14 | `e0fb142` | 453 | Backup and restore, and these history documents | `SECURITY.md` Review 8, `docs/2026-11-14_PHASE7_REVIEW.md` |
 | Phase 8 | 2026-11-14 | `d262695` | 459 | A big mailbox stays fast (the window is sent the newest finished tasks, draws 150 rows at a time and moves the cursor without redrawing) | `docs/designs/phase8.md`, `docs/2026-11-14_PHASE8_REVIEW.md` |
-| Phase 9 | 2026-11-14 | _pending_ | 459 + 49 window | Tests for the window: the real files in a real browser, with nothing to install (`cd app && npm test`) | `docs/designs/phase9.md`, `docs/2026-11-14_PHASE9_REVIEW.md` |
+| Phase 9 | 2026-11-14 | `e6be8ee` | 459 + 49 window | Tests for the window: the real files in a real browser, with nothing to install (`cd app && npm test`) | `docs/designs/phase9.md`, `docs/2026-11-14_PHASE9_REVIEW.md` |
 
 ## What has not happened yet
 
