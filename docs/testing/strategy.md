@@ -10,7 +10,7 @@ through. The plan for one release, with its sign-off, is [the test plan](test-pl
 
 | Layer | What it proves | Where | Count | Run it with |
 | --- | --- | --- | --- | --- |
-| Engine tests | What the engine does: parsing, ranking, the store, the commands, the phone hub, and the IMAP client against a scripted server | `engine/tests/*.rs` | 470 in 21 files | `cd engine && cargo test` |
+| Engine tests | What the engine does: parsing, ranking, the store, the commands, the phone hub, and the IMAP client against a scripted server | `engine/tests/*.rs` | 477 in 22 files | `cd engine && cargo test` |
 | Window tests | What the real window does with the demo backend's answers, driven by real key presses and clicks in a headless browser | `app/test/*.test.mjs` | 62 in 6 files | `cd app && npm test` |
 | Scripts | The version fields agree, the release check works, the catalogue and the documents are current | `scripts/` | the checks, and tests of two of them (`test_bump_version.py` has 9) | see below |
 | Packaged app | The built program as a user and a hostile neighbour meet it, its installer, and a heavy mailbox (Windows only) | `scripts/packaged_check/`, `scripts/scale_check/` | 114 checks, an install cycle, one measurement | `python scripts/packaged_check/check_app.py` |
@@ -23,7 +23,7 @@ are slow, few and need a person or a machine set aside.
 
 ```mermaid
 flowchart BT
-    E["Engine tests: 470, no network, a scripted IMAP server on localhost"] --> W["Window tests: 62, the real files in a real headless browser"]
+    E["Engine tests: 477, no network, a scripted IMAP server on localhost"] --> W["Window tests: 62, the real files in a real headless browser"]
     W --> P["Packaged app: 114 checks, the install cycle, the scale check, Windows only"]
     P --> M["Manual cases: 129, a live mailbox and clean machines"]
 ```
@@ -32,6 +32,7 @@ flowchart BT
   against a scripted server on `127.0.0.1` (`engine/tests/imap_flows.rs`, 61 tests, which use `connect_plain`, so the TLS
   handshake itself is not covered). The phone hub is tested over real sockets (`hub.rs`, `hub_edge.rs`, 14 tests). The files
   `phase1.rs` to `phase8.rs` (280 tests) and `phase11.rs` (9 tests) pin each run's behaviour; the security files hold the hostile-input cases.
+  `fuzz_inputs.rs` (7 tests) feeds the parsers that read text nobody here wrote (a mail message, a calendar invitation, the text helpers, a due date in a message, rule matching) thousands of damaged variants of valid samples from a fixed seed, and fails on a panic or an input that takes over two seconds; `FUZZ_FACTOR=20 FUZZ_SEED=3 cargo test --test fuzz_inputs` looks longer and from other seeds (a run of 660,000 inputs found nothing, the slowest taking 145 ms). It is not a coverage-guided fuzzer.
 * **The window tests** run the real `app/ui` files from a small server of Node's own in a browser already on the machine, against
   `mock.js`, the demo backend. They prove what the window does with the answers it is given and what it asks for. They do not
   prove the engine's answers are right. Design: [phase 9](../designs/phase9.md); record:
