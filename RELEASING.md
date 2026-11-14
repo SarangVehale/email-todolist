@@ -51,24 +51,32 @@ The workflow then runs: **verify** (tag = every version field = a dated changelo
 macOS (a red test stops the release) → **build** the installers in parallel → **checksums** (`SHA256SUMS.txt` plus a
 build-provenance attestation). Tags containing a dash (`v0.2.0-beta.1`) become pre-releases.
 
-## What a rehearsal found, and what is still unproven
+## What the rehearsals found
 
-`release.yml` was rehearsed once, on 2026-11-14, with a throwaway tag (`v0.1.0-rc.1` on a branch that was never merged). `verify`, the
-three `test` jobs and the Windows and Linux builds passed. **The macOS build failed**, and the cause was found by building the same
-thing on a branch that reported its own output: the workflow passed `APPLE_CERTIFICATE` and the other signing variables from secrets
+`release.yml` was rehearsed three times on 2026-11-14 and 2026-11-15, each with a throwaway tag (`v0.1.0-rc.1` to `-rc.3`, on branches
+that were never merged). **The third ran to the end** (30 minutes): `verify`, the three `test` jobs, the builds and `checksums`. The first two
+failed, and each showed something real.
+
+*Rehearsal 1:* `verify`, the three `test` jobs and the Windows and Linux builds passed. **The macOS build failed**, and the cause was found
+by building the same thing on a branch that reported its own output: the workflow passed `APPLE_CERTIFICATE` and the other signing variables from secrets
 that did not exist, and an unset secret reaches a step as an *empty string*, not as nothing. Tauri takes an empty `APPLE_CERTIFICATE`
 for a certificate, tries to import it and stops ("failed to import the signing certificate"). Now the variables are passed only by the
 step that runs when the secrets exist; the unsigned step carries none. The `build` jobs also run one at a time now, because each finds or
 creates the draft release for the tag and two doing that together may make two drafts.
 
-Still unproven until the fixed workflow has run to the end: the `checksums` job, which runs `gh release download <tag>` and
-`gh release upload <tag>` on a release that is still a draft (if `gh` answers "release not found", find the draft by listing releases
-with `gh api repos/<repo>/releases` and use its id), and the attestation step, a composite action that pulls in other actions at
-versions this repository does not pin. The `checksums` job writes the files it found into an annotation ("Files on the draft release"),
-which can be read without signing in.
+*Rehearsal 2:* the Ubuntu `test` job failed in the window's tests, in a part of the harness that had nothing to do with the release: it
+waited a fixed 15 seconds for the browser to open its debugging port, which is too short on a busy runner (CI had failed twice the same way).
+Fixed, with a test.
 
-To rehearse again: `python scripts/bump_version.py 0.1.0-rc.2` on a branch, a dated `## [0.1.0-rc.2]` changelog heading and a row in
-`docs/RELEASE_HISTORY.md`, then tag `v0.1.0-rc.2`. It becomes a pre-release draft. Afterwards delete the draft (on the Releases page: it
+*Rehearsal 3:* everything passed. `gh release download <tag>` and `gh release upload <tag>` work on a release that is still a draft, the
+attestation step ran, and the `checksums` job's annotation ("Files on the draft release") listed what a release carries: the Windows
+installer (`..._x64-setup.exe`), a universal macOS disk image and app archive (`..._universal.dmg`, `..._universal.app.tar.gz`) and Linux
+`.deb` and AppImage packages, all on one draft. That annotation can be read without signing in. Nothing was opened or run on a Mac or a Linux
+machine, and the builds are unsigned. Two Dependabot updates for `tauri-apps/tauri-action` (1.0) and `actions/attest-build-provenance` (4.2)
+change this workflow: rehearse again after taking either.
+
+To rehearse again: `python scripts/bump_version.py 0.1.0-rc.4` on a branch, a dated `## [0.1.0-rc.4]` changelog heading and a row in
+`docs/RELEASE_HISTORY.md`, then tag `v0.1.0-rc.4`. It becomes a pre-release draft. Afterwards delete the draft (on the Releases page: it
 needs a sign-in), the tag and the branch. A rehearsal builds three installers one after the other, so it takes about an hour.
 
 ## Before you publish the draft
