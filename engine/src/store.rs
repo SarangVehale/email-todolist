@@ -10,6 +10,8 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 use std::path::Path;
 
+mod transfer;
+
 pub const MAX_DRAFT_CHARS: usize = 8000;
 pub const MAX_NOTE_CHARS: usize = 2000;
 /// Bumped whenever the database layout changes in a way an older app cannot read.
@@ -176,6 +178,12 @@ CREATE TABLE IF NOT EXISTS rules (
 CREATE TABLE IF NOT EXISTS followups (
   message_id TEXT PRIMARY KEY, state TEXT NOT NULL, at REAL NOT NULL, task_uid INTEGER NOT NULL DEFAULT 0,
   acct INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS tasks_message_id ON tasks(message_id);
+CREATE INDEX IF NOT EXISTS tasks_addr ON tasks(addr);
+CREATE TABLE IF NOT EXISTS restored_state (
+  mailbox INTEGER NOT NULL, message_id TEXT NOT NULL, state TEXT NOT NULL, at REAL NOT NULL,
+  PRIMARY KEY (mailbox, message_id)
 );
 ";
 
@@ -741,6 +749,8 @@ impl Store {
                 params![e.thread, uid, lo, hi],
             )?;
         }
+        // what you did with this message before a restore (it was not read yet then) is applied now, once
+        self.apply_parked(uid, &e.message_id)?;
         self.log(&format!(
             "triaged “{}” → P{}, {}{}{}",
             e.subject,
@@ -1646,7 +1656,7 @@ impl Store {
             return 0;
         }
         let Ok(mut q) = self.db.prepare(
-            "SELECT new_priority-old_priority FROM overrides WHERE addr=?1 ORDER BY id DESC LIMIT 3",
+            "SELECT new_priority-old_priority FROM overrides WHERE addr=?1 ORDER BY at DESC, id DESC LIMIT 3",
         ) else {
             return 0;
         };
@@ -1669,7 +1679,7 @@ impl Store {
     pub fn recent_overrides(&self, n: i64) -> Vec<Override> {
         let Ok(mut st) = self
             .db
-            .prepare("SELECT sender,subject,old_priority,new_priority FROM overrides ORDER BY id DESC LIMIT ?1")
+            .prepare("SELECT sender,subject,old_priority,new_priority FROM overrides ORDER BY at DESC, id DESC LIMIT ?1")
         else {
             return vec![];
         };
@@ -1771,6 +1781,7 @@ impl Store {
             "DELETE FROM drafts WHERE uid NOT IN (SELECT uid FROM tasks)",
             [],
         )?;
+        self.prune_parked()?;
         let logs = self.db.execute(
             "DELETE FROM log WHERE at < CAST(strftime('%s','now') AS INTEGER) - ?1 * 86400",
             [log_days],
@@ -1809,7 +1820,7 @@ impl Store {
     /// Sign-out: forget everything this app stored about the mailbox and the user's corrections.
     pub fn wipe_all(&self) -> anyhow::Result<()> {
         self.db.execute_batch(
-            "DELETE FROM tasks; DELETE FROM drafts; DELETE FROM outbox; DELETE FROM meta; DELETE FROM log; DELETE FROM overrides; DELETE FROM sender_prefs; DELETE FROM rules; DELETE FROM followups; INSERT INTO tasks_fts(tasks_fts) VALUES('delete-all');",
+            "DELETE FROM tasks; DELETE FROM drafts; DELETE FROM outbox; DELETE FROM meta; DELETE FROM log; DELETE FROM overrides; DELETE FROM sender_prefs; DELETE FROM rules; DELETE FROM followups; DELETE FROM restored_state; INSERT INTO tasks_fts(tasks_fts) VALUES('delete-all');",
         )?;
         // Best effort: fold the journal into the file and rewrite it, so no copy of the deleted rows is left
         // in the write-ahead log or in unused pages. A busy database skips this; secure_delete already zeroed rows.
@@ -1868,6 +1879,7 @@ impl Store {
             )?;
         }
         tx.execute("DELETE FROM followups WHERE acct=?1", [n])?;
+        tx.execute("DELETE FROM restored_state WHERE mailbox=?1", [n])?;
         tx.commit()?;
         Ok(())
     }

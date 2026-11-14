@@ -307,6 +307,27 @@ Accepted, documented: removing a mailbox leaves the short activity-log lines tha
 phone is told a task's id, which encodes a mailbox number but no name or address; Gmail's per-address link form
 (`/mail/u/<address>/`) is untested against a live account; nothing was run against a live mailbox, macOS or Linux.
 
+## Review 8 (Phase 7: backup and restore; council, drift passes and an Opus review loop, 2026-11-14)
+
+An Opus seat and a Sonnet seat reviewed blind and both said **ship with caveats**. A Sonnet pass compared the design, pseudocode and
+history documents with the code (14 disagreements) and a Haiku pass compared the promises (6). An Opus reviewer then went through the
+fixed tree in three rounds (a blocker and two other findings, then one regression, then one race) and approved it. Full ledger:
+`docs/2026-11-14_PHASE7_REVIEW.md`. A backup file is untrusted input when it is restored, and a private document when it is written,
+and most of the findings are about one of those two things.
+
+| Finding | Fix |
+| --- | --- |
+| **A restored file could switch the ranking to the paid cloud service.** With the options box ticked and an API key saved, mail details would go to Anthropic and the key would be billed | The cloud ranking is never taken from a file; the preview says so. A local model or rules only can come back |
+| **A restored mailbox could sign in with a password left in the keychain under its number** (by an earlier install, or a mailbox removed in a hurry), sending it to whatever server the file names | A new mailbox's number is cleared of data and keychain password before it is used; the preview lists each new mailbox with its server so it is seen before an app password is pasted |
+| **The backup could hold text written about your mail**: reply drafts from the AI or from a template, which paraphrase the message | Only drafts you edited yourself are saved; corrections (which hold a sender and subject) are the one place mail details appear, and PRIVACY.md says so |
+| **Restoring could change what you have**: old corrections counted as the newest; a restored correction was filed under mailbox 0 and lost when it was removed; a snooze could be unlimited; "restoring twice changes nothing" was false in four cases | Corrections go by date and belong to no mailbox; a snooze is limited like one you type; every case of restoring twice is a test; the exceptions that remain (a later snooze, ticked options, a sender choice's effect on that sender's open mail) are named in the dialog and the documents |
+| **A restore of the biggest file took about 45 seconds and locked the database**, and one that started while a sync was saving mail failed with "database is locked" | Indexes on the columns it looks up; the transaction takes the write lock first and waits for it |
+| A restore was possible in a window that showed the wrong preview, with unsaved rule edits, or during an apply that could not be cancelled; the rule editor kept stale rules and the next "Save rules" removed what was restored | The preview always belongs to what the box says; unsaved rules block a restore; the editor reads the rules again; Cancel is off while applying |
+| The release check said "dated" but only rejected the word "Unreleased", and the version and release histories had no check | A tag now needs a dated changelog heading and a row in `docs/RELEASE_HISTORY.md`; the check has its own tests, run by CI |
+
+Accepted, documented: the backup is not encrypted; a restored mailbox's server comes from the file (shown in the preview, with a warning
+to restore only your own file); nothing was run against a live mailbox, macOS or Linux.
+
 ## Reporting a vulnerability
 
 Please report privately to the maintainer rather than opening a public issue. Add a contact address

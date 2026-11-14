@@ -45,6 +45,9 @@ jobs:
       - name: Versions agree across the project
         shell: bash
         run: python3 scripts/bump_version.py --check
+      - name: The release check itself works
+        shell: bash
+        run: python3 scripts/test_bump_version.py
       - name: Test catalogue is up to date
         shell: bash
         run: |

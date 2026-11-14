@@ -329,8 +329,8 @@ impl Core {
                 let _ = store.queue(uid, "category", &format!("AI/{label}"));
             }
         }
-        if let Some(task) = store.get(uid) {
-            commands::auto_draft(self, task);
+        if let Some(task) = store.get(uid).filter(|t| t.status == "open") {
+            commands::auto_draft(self, task); // finished mail (a restore can finish it as it arrives) needs no reply
         }
     }
 
@@ -526,6 +526,23 @@ impl Core {
                 self.start(); // the syncs were stopped above: start them again even if the removal failed halfway
                 removed?;
                 Ok(json!(true))
+            }
+            "backup_export" => {
+                // a file in Downloads (or your user folder), never over another one
+                let dir = crate::calendar::downloads_dir()
+                    .ok_or_else(|| anyhow!("The app could not find your Downloads folder"))?;
+                let out = crate::backup::export_in(self, &dir)?;
+                Ok(json!({"path": out.path.to_string_lossy(), "counts": out.counts}))
+            }
+            "backup_import" => {
+                // `apply` false only reports what would happen; `settings` also restores options and mailboxes
+                let report = crate::backup::import(
+                    self,
+                    a["json"].as_str().unwrap_or(""),
+                    a["apply"].as_bool().unwrap_or(false),
+                    a["settings"].as_bool().unwrap_or(false),
+                )?;
+                Ok(serde_json::to_value(report)?)
             }
             "save_settings" => {
                 // The account (server, user, password, and the data tied to them) changes only through

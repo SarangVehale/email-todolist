@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """One version for the whole project.
 
-  python scripts/bump_version.py --check            all version fields agree and CHANGELOG.md has an entry for it
-  python scripts/bump_version.py --check 0.2.0      ...and they all equal 0.2.0 (the release workflow passes the tag)
+  python scripts/bump_version.py --check            all version fields agree, CHANGELOG.md has an entry for it, and the
+                                                    version and release history documents exist
+  python scripts/bump_version.py --check 0.2.0      ...and they all equal 0.2.0 (the release workflow passes the tag), the
+                                                    changelog heading is dated (not "Unreleased") and docs/RELEASE_HISTORY.md
+                                                    has a row for 0.2.0
   python scripts/bump_version.py 0.2.0              set every version field to 0.2.0
   python scripts/bump_version.py 0.2.0 --dry-run    show what would change
 
@@ -25,6 +28,8 @@ LOCKS = {
     "engine/Cargo.lock": (ROOT / "engine" / "Cargo.lock", ["engine"]),
 }
 CHANGELOG = ROOT / "CHANGELOG.md"
+VERSION_HISTORY = ROOT / "docs" / "VERSION_HISTORY.md"
+RELEASE_HISTORY = ROOT / "docs" / "RELEASE_HISTORY.md"
 
 
 def read(p):
@@ -73,10 +78,22 @@ def check(expected=None):
     if version:
         if not CHANGELOG.exists() or not re.search(r"(?m)^## \[?%s\]?" % re.escape(version), read(CHANGELOG)):
             problems.append(f"CHANGELOG.md has no '## [{version}]' heading")
+    for doc in (VERSION_HISTORY, RELEASE_HISTORY):
+        if not doc.exists():
+            problems.append(f"{doc.relative_to(ROOT).as_posix()} is missing")
+    if version and expected and CHANGELOG.exists():
+        heading = re.search(r"(?m)^## \[?%s\]?.*$" % re.escape(version), read(CHANGELOG))
+        if heading and "unreleased" in heading.group(0).lower():
+            problems.append(f"the CHANGELOG.md heading for {version} still says Unreleased: give it the release date")
+        elif heading and not re.search(r"\d{4}-\d{2}-\d{2}", heading.group(0)):
+            problems.append(f"the CHANGELOG.md heading for {version} has no date: write it as '## [{version}] - YYYY-MM-DD'")
+    if version and expected and RELEASE_HISTORY.exists():
+        if not re.search(r"(?m)^\|\s*%s\s*\|" % re.escape(version), read(RELEASE_HISTORY)):
+            problems.append(f"docs/RELEASE_HISTORY.md has no row for {version} (add it when preparing the release)")
     if problems:
         print("\n".join("FAIL " + p for p in problems))
         return 1
-    print(f"OK: every version field is {version}, and CHANGELOG.md has an entry for it")
+    print(f"OK: every version field is {version}, CHANGELOG.md has an entry for it, and the version and release history exist")
     return 0
 
 

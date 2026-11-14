@@ -47,7 +47,7 @@ Edge cases: network drops, server hangs — timeouts; `a_failing_server…`, IMA
 ## 3. Fetching new mail (`watcher.rs: process_new`)
 
 ```
-prune old data (done tasks past 90 days, log past 30, corrections past 365)
+prune old data (done tasks past 90 days, log past 30, corrections past 365, restored mail state past 90 days)
 
 process_new():
     mailbox = EXAMINE INBOX
@@ -308,7 +308,8 @@ UIDVALIDITY changed (the mailbox was renumbered):
     corrections made on its messages are kept (what was learned about senders holds) but unlinked: parked on the first
     number of this mailbox's block, which no message has, so they go with this mailbox and with no other
 server or address changed, or the mailbox removed:
-    all of the above, plus its corrections, its follow-up tasks and its follow-up records (every record carries its mailbox;
+    all of the above, plus its corrections, its follow-up tasks, its follow-up records and its restored mail state (every record
+    carries its mailbox;
     a follow-up task with no record at all, left by the old clean-up, counts as the first mailbox's)
 keep, always: the other mailboxes, your own tasks, rules, sender choices, the log, the update-check date
 
@@ -347,6 +348,61 @@ with others left, the last mailbox removed, a sixth mailbox, the same address tw
 mailbox, a sync stopped while it ranks a message, data left behind in a number that is reused, a first place refilled after it was
 emptied, the phone's log, many threads opening a new database at once —
 `phase6.rs` and the `mailboxes` module of `imap_flows.rs`.
+
+## 5i. Backup and restore (`backup.rs`, `store/transfer.rs`)
+
+```
+backup_export():                                     # desktop only
+    file = { format "inbox-agent-backup", version 1, app_version, created,
+             settings: allow-list only (ranking mode and Ollama model name, desktop alerts, alert categories, quiet hours, digest time,
+                       reply-draft options, follow-up days, update check),
+             mailboxes: [server, port, address] of every mailbox, no password,
+             rules, sender_choices (important | mute; 5,000), corrections (sender, subject, old, new, address, date; newest 2,000),
+             own_tasks (not follow-ups: title, priority, due, reminder, repeat and its anchor, done or open, star, note;
+                        open first, 2,000),
+             mail_state: for mail with something of yours (finished, starred, snoozed, a note, a draft YOU edited; newest 5,000):
+                         { mailbox position in the list above, Message-ID, done, star, snooze_until, note, draft }
+                         (no subject, sender or text; drafts written by the AI or from a template are not included) }
+    say how many of each kind did not fit;  refuse a result over 8 MB;  write a NEW file inbox-agent-backup-<date>-<time>.json (-2, -3 ... if taken) in Downloads
+    (the user folder if there is none), readable by the owner only where the system has that
+
+backup_import(json, apply, with_options):            # desktop only
+    refuse unless setup is finished
+    parse(json):  <= 8 MB;  format and version known (a newer one -> "update the app");
+                  lists within limits (5 mailboxes, 50 rules, 5,000 choices, 2,000 corrections, 2,000 own tasks, 5,000 mail entries);
+                  every item through the check the same thing typed in would pass (rules: rules::validate; titles, priorities, dates,
+                  reminders, repeats, notes; Message-IDs; a snooze no more than a year ahead; a correction no later than now;
+                  draft length and source; mailbox server and address; the options through the
+                  settings check);  ONE bad value refuses the whole file
+    boxes   = which local mailbox each mailbox of the file is, by server and address in a normal form
+              (with_options: the ones not set up are added, without a password, up to five; the first mailbox is never changed)
+    options = (with_options) the allow-listed options laid over the current settings and checked; ranking "anthropic" (the paid
+              cloud service) is never taken from a file, and the preview says so
+    in ONE database transaction that takes the write lock at once (a preview rolls it back, so a preview cannot disagree with a restore):
+        rules:           add those not already there (same field, text, outcome), new ids, up to 50 in all
+        sender choices:  add where the sender has none (the same effect on that sender's open mail as choosing it: priority at
+                         least 4, or priority 1; no log line for each)
+        corrections:     add those not already there (compared in the form a backup writes them); filed under no mailbox; the ranker
+                         and the model's "recent corrections" go by date, so old ones never outweigh newer ones
+        own tasks:       add those not already there (same title and due date; a repeating one: same title, repeat and anchor;
+                         unless it has another reminder still to come); a reminder that has passed is dropped; a repeating one
+                         moves to its next time and its due date with it; a done one keeps no reminder and no repeat
+        mail entries:    mailbox not set up here -> counted and skipped
+                         task with that Message-ID in that mailbox -> apply_state
+                         else -> park it in restored_state (at most 5,000), to be applied when that message is read
+        apply_state:     finished stays finished; a star stays; the later snooze wins (open mail only); an existing note and
+                         an existing draft win; NOTHING is queued for the mailbox
+    if applied: a mailbox that is new here is cleared of anything an earlier one with that number left, its keychain password
+                included (before the transaction)
+    if applied and (options changed or mailboxes added): save the settings and start() again (new mailboxes ask for a password)
+
+when a message is read (Store::add):  if restored_state has (its mailbox, its Message-ID): apply_state, delete the row
+restored_state:  pruned at 90 days; cleared with its mailbox (remove, address change) and by sign-out
+```
+Edge cases: not JSON, another format, version 0 and a newer one, every limit at its edge (accepted) and one past it (refused), each kind of bad value, a late database
+failure (rolled back), repeated ids in a file, the same file twice, a preview against a restore, a mailbox that is not set up, state
+that must not cross mailboxes, a hostile options section (hub, write-back, network addresses, `onboarded`, `account`), the limit of five
+mailboxes, a reminder in the past, expiry and the bound of the parked table, the phone refused — `phase7.rs`.
 
 ## 6. Changing the real mailbox (`writeback.rs`) — only when the user turned it on
 
@@ -418,7 +474,7 @@ Edge cases: stalled clients, floods, hostile headers, odd methods — `stalled_c
 every 20 s:
     for tasks whose snooze time has passed: clear the snooze, notify once ("Back from snooze")
     for your reminders that have come due: notify once each up to three, one summary for more (section 5e)
-    once a day: the clean-up of old data (done tasks past 90 days, log past 30, corrections past 365, follow-up records past 60)
+    once a day: the clean-up of old data (done tasks past 90 days, log past 30, corrections past 365, follow-up records past 60, restored mail state past 90)
     if digest time is set, now >= that time, and no digest has been sent today:
         record today; if anything is open: notify "N open · H high · D due [· U urgent] · R draft(s) ready"
         N counts conversations, not messages; snoozed tasks and ones that left the inbox are left out; the urgent

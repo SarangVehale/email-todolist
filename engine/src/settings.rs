@@ -260,6 +260,34 @@ fn valid_model(m: &str) -> bool {
     is_printable(m, 100) && !m.chars().any(char::is_whitespace)
 }
 
+/// Which mailbox this is: its server and address in a normal form. The same server written another way (letter case, a
+/// trailing dot, Google's other name for it) is the same mailbox.
+pub fn mailbox_key(a: &AccountCfg) -> (String, String) {
+    let host = a.host.trim().trim_end_matches('.').to_lowercase();
+    let host = match host.strip_suffix("googlemail.com") {
+        Some(front) => format!("{front}gmail.com"),
+        None => host,
+    };
+    (host, a.user.trim().to_lowercase())
+}
+
+impl AccountCfg {
+    /// A mailbox that names a real server and address, as every mailbox after the first must.
+    pub fn check(&self) -> anyhow::Result<()> {
+        use anyhow::bail;
+        if self.host.is_empty() || !valid_host(&self.host) {
+            bail!("That mail server name isn't valid");
+        }
+        if self.port == 0 {
+            bail!("That mail server port isn't valid");
+        }
+        if self.user.trim().is_empty() || !is_printable(&self.user, 320) {
+            bail!("That email address isn't valid");
+        }
+        Ok(())
+    }
+}
+
 impl Settings {
     /// The extra mailboxes: at most four, numbers 1 to 4 each used once, a real server and user each, and no mailbox (server
     /// and user, ignoring case) twice, the first one included.
@@ -268,15 +296,7 @@ impl Settings {
         if self.more_accounts.len() > (crate::store::MAX_MAILBOXES - 1) as usize {
             bail!("At most five mailboxes can be read at once");
         }
-        // the same server written another way (letter case, a trailing dot, Google's other name) is the same mailbox
-        let key = |a: &AccountCfg| {
-            let host = a.host.trim().trim_end_matches('.').to_lowercase();
-            let host = match host.strip_suffix("googlemail.com") {
-                Some(front) => format!("{front}gmail.com"),
-                None => host,
-            };
-            (host, a.user.trim().to_lowercase())
-        };
+        let key = mailbox_key;
         let mut seen_pairs = std::collections::HashSet::new();
         if !self.account.host.is_empty() {
             seen_pairs.insert(key(&self.account));
@@ -286,15 +306,7 @@ impl Settings {
             if !(1..crate::store::MAX_MAILBOXES).contains(&a.id) || !seen_ids.insert(a.id) {
                 bail!("Every extra mailbox needs its own number from 1 to 4");
             }
-            if a.host.is_empty() || !valid_host(&a.host) {
-                bail!("That mail server name isn't valid");
-            }
-            if a.port == 0 {
-                bail!("That mail server port isn't valid");
-            }
-            if a.user.trim().is_empty() || !is_printable(&a.user, 320) {
-                bail!("That email address isn't valid");
-            }
+            a.check()?;
             if !seen_pairs.insert(key(a)) {
                 bail!("That mailbox is already in the app");
             }

@@ -3,11 +3,28 @@
 All notable changes to Inbox Agent. Versions follow [Semantic Versioning](https://semver.org). Before 1.0, minor
 versions may change behaviour.
 
+This is the user-facing record, kept up to date with every piece of work. Two companion documents answer other questions:
+[`docs/VERSION_HISTORY.md`](docs/VERSION_HISTORY.md) says which development build had what (commit, date, tests, review), and
+[`docs/RELEASE_HISTORY.md`](docs/RELEASE_HISTORY.md) says what was actually published. Until the first release is published, all
+work goes under `[0.1.0] - Unreleased`; after it, new work goes under `## [Unreleased]` at the top, and the next release dates it.
+
 ## [0.1.0] - Unreleased
 
 First public build.
 
 ### Added
+- Backup and restore (Settings, "Backup"): "Save a backup file" writes your rules, sender choices, corrections, tasks (with notes, reminders
+  and repeats), what you did with mail (finished, starred, snoozed, your note and a reply draft you edited, by message ID and never its
+  text), your mailboxes and a set of options into one new file in Downloads (not encrypted; no passwords, no phone code, no message
+  bodies; a correction keeps the sender and subject of the mail you corrected). A file holds up to 5,000 sender choices, 2,000
+  corrections, 2,000 tasks of yours and 5,000 entries about mail, and says how many it left out. "Restore from a backup file" shows a
+  preview and then adds what is missing and never removes anything: restoring the same file twice changes nothing, though a later
+  snooze, and the options if you tick a box, replace yours. What you did with mail not yet read waits (up to 5,000 entries, 90 days)
+  and is applied when that message arrives. Options and mailboxes come back only if you tick a box; a restored mailbox has no password
+  until you paste one, and the preview names its server; a file can never turn on the phone hub, write-back or the paid cloud ranking,
+  or change where notifications go. Desktop only.
+- Documents of record: this changelog, `docs/VERSION_HISTORY.md` (each development build) and `docs/RELEASE_HISTORY.md` (what was
+  published), and a release check that refuses a tag without a dated changelog entry and a release-history row.
 - Several mailboxes: add up to five (Settings, "Add another mailbox") and read them as one list. Each task is tagged with its
   mailbox and there is a filter chip per mailbox; every mailbox has its own connection, password in the keychain, sent-mail
   learning, follow-ups and write-back (a change goes only to the mailbox the message is in). "Remove" on a mailbox deletes its
@@ -75,7 +92,7 @@ First public build.
 - Third review (Opus, 2026-11-13): one bad unsubscribe link could blank the list; a crashing message could crash the app on every start; hostile HTML could stall the watcher; sign-out left mail text in the database files; the hub answered public networks; mail data sat in Roaming AppData. All fixed with tests; see SECURITY.md.
 - A damaged database is set aside and rebuilt, newer data is refused, and a `crash.log` records internal errors (no telemetry).
 - Two independent security reviews; all confirmed findings fixed with regression tests. See SECURITY.md.
-- 412 automated tests, including protocol tests against a scripted mock IMAP server and a dedicated edge-case suite.
+- 453 automated tests, including protocol tests against a scripted mock IMAP server and a dedicated edge-case suite.
 
 ### Known limitations
 - Microsoft (Outlook, Microsoft 365) accounts are not supported: Microsoft turned off password sign-in for IMAP.

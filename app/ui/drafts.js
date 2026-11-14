@@ -372,6 +372,7 @@ document.addEventListener("keydown", e => {
   const k = vl().dataset.kind;
   if (vl().classList.contains("show") && e.key === "Escape" && k === "settings") { closeVeil(); return }
   if (vl().classList.contains("show") && e.key === "Escape" && k === "mailbox") { mailboxBack(); return }
+  if (vl().classList.contains("show") && e.key === "Escape" && k === "restore") { restoreBack(); return }
   if (vl().classList.contains("show") && (k === "add" || k === "help")) {
     if (e.key === "Escape") closeVeil();
     else if (k === "add" && e.key === "Enter" && e.target.id === "at-title") { e.preventDefault(); submitAdd() }

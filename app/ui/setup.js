@@ -73,6 +73,7 @@ veil.addEventListener("click", async e => {
   if (e.target.closest("[data-vc]") || e.target === veil && veil.dataset.kind === "settings") return closeVeil();
   if (veil.dataset.kind === "settings") return settingsClick(e);
   if (veil.dataset.kind === "mailbox") return mailboxClick(e);
+  if (veil.dataset.kind === "restore") return restoreClick(e);
   const ai = e.target.closest("[data-ai]"); if (ai) { W.ai = ai.dataset.ai; W.aiTest = null; if (W.ai === "ollama") { W.ollamaModels = await rpc("detect_ollama").catch(() => []); W.model = W.ollamaModels[0] || "" } drawWizard(); return }
   const w = e.target.closest("[data-w]")?.dataset.w; if (!w) return;
   if (w === "back") { W.step--; drawWizard() }
@@ -216,6 +217,83 @@ async function mailboxClick(e) {
 }
 /* task ids are reused when a mailbox number is: what was read or can be undone for a removed mailbox must not follow the number */
 function clearReadCaches() { for (const k of Object.keys(bodies)) delete bodies[k]; undoStack.length = 0; const u = $("#undo"); if (u) u.style.display = "none" }
+/* ───────── restore from a backup file ───────── */
+let RS = null;
+const MAX_BACKUP = 8 * 1024 * 1024;
+async function pickBackup(input) {
+  const file = input.files && input.files[0]; if (!file) return;
+  const out = $("#bkres");
+  if (rulesDirty) { out.innerHTML = '<span class="bad">You have rule changes that are not saved. Save the rules first, then restore.</span>'; return }
+  if (file.size > MAX_BACKUP) { out.innerHTML = '<span class="bad">That file is too large to be one of this app\'s backups (the limit is 8 MB)</span>'; return }
+  let text; try { text = await file.text() } catch (err) { out.innerHTML = '<span class="bad">That file could not be read</span>'; return }
+  RS = { name: file.name, json: text, withOptions: false, preview: null, error: "", busy: false };
+  const rs = RS;
+  veil.dataset.kind = "restore"; await previewRestore();
+  if (RS !== rs) return; // closed while the file was being read
+  drawRestore();
+  setTimeout(() => veil.querySelector("[data-q=go]:not([disabled]), [data-q=cancel]")?.focus(), 30);
+}
+async function previewRestore() {
+  const rs = RS, asked = rs.withOptions; rs.error = ""; rs.preview = null;
+  // an answer is kept only if it is for what the box says now: the preview shown is the preview of what Restore will do
+  try { const p = await rpc("backup_import", { json: rs.json, apply: false, settings: asked }); if (RS === rs && rs.withOptions === asked) rs.preview = p }
+  catch (err) { if (RS === rs && rs.withOptions === asked) rs.error = String(err).replace(/^Error: /, "") }
+}
+function previewLines(p) {
+  const n = (k, one, many) => p[k] ? `<li>${p[k]} ${p[k] === 1 ? one : many}</li>` : "";
+  const l = [
+    n("rules_added", "rule will be added", "rules will be added"),
+    n("sender_choices_added", "sender choice will be added", "sender choices will be added"),
+    n("corrections_added", "correction will be added", "corrections will be added"),
+    n("own_tasks_added", "task of yours will be added", "tasks of yours will be added"),
+    n("mail_applied", "message already here will get what you did with it", "messages already here will get what you did with them"),
+    n("mail_parked", "message is kept for when it is read", "messages are kept for when they are read"),
+    p.reminders_dropped ? `<li>${p.reminders_dropped} reminder that has already passed is left out</li>` : "",
+    p.mailboxes_added ? `<li>${p.mailboxes_added} mailbox will be added, with no password: each asks for its app password in Settings</li>` : "",
+    p.options_changed && p.options_changed.length ? `<li>${p.options_changed.length} option${p.options_changed.length === 1 ? "" : "s"} will change</li>` : "",
+  ].join("");
+  const skipped = p.mail_skipped_no_mailbox ? `<p>${p.mail_skipped_no_mailbox} ${p.mail_skipped_no_mailbox === 1 ? "entry is" : "entries are"} about a mailbox that is not set up here. Add that mailbox, then restore again.</p>` : "";
+  const same = (p.rules_skipped || 0) + (p.own_tasks_skipped || 0) + (p.sender_choices_skipped || 0) + (p.corrections_skipped || 0) + (p.mail_unchanged || 0);
+  const already = same ? `<p>What you already have is kept as it is; ${same} item${same === 1 ? " was" : "s were"} already here.</p>` : "";
+  const rules = (p.rules_new || []).length ? `<p>New rules:</p><ul class="plist">${p.rules_new.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : "";
+  const boxes = (p.mailboxes_new || []).length ? `<p><b>Mailboxes to add</b> (each asks for its app password, so check the server: restore only a file you made yourself):</p><ul class="plist">${p.mailboxes_new.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : "";
+  const cloud = (p.options_skipped || []).includes("ai.mode") ? "<p>The file asks for ranking with Claude and your own key. That is not restored: choose it in Settings if you want it.</p>" : "";
+  return { l, extra: rules + boxes + cloud + skipped + already };
+}
+function drawRestore() {
+  const rs = RS, p = rs.preview;
+  let body;
+  if (rs.error) body = `<p class="bad">${esc(rs.error)}</p>`;
+  else if (!p) body = "<p>Reading the file…</p>";
+  else { const { l, extra } = previewLines(p); body = (l ? `<p>Restoring this file will:</p><ul class="plist">${l}</ul>` : "<p>Nothing in this file is new to this computer.</p>") + extra }
+  const can = !!p && !rs.error && !rs.busy && !!previewLines(p).l;
+  veil.innerHTML = panel(`<h2>Restore from a backup</h2><p>${esc(rs.name)}</p>${body}
+    <label class="sw"><input type="checkbox" data-q="options" ${rs.withOptions ? "checked" : ""} ${rs.busy ? "disabled" : ""}><div><b>Also restore options and mailboxes</b><span>Ranking mode (rules or a local model, never the paid cloud choice), alerts, reply-draft options, follow-up days and the list of mailboxes. They replace your current values. Never a password, the phone code or write-back.</span></div></label>
+    <p>Restoring adds what is missing and never removes anything you have. A later snooze, and the options if you tick the box, replace yours; choosing a sender important or muted changes that sender's open mail, as choosing it yourself does.</p>
+    <div class="foot"><span class="sp"></span><button class="btn" data-q="cancel" ${rs.busy ? "disabled" : ""}>Cancel</button><button class="btn pri" data-q="go" ${can ? "" : "disabled"}>${rs.busy ? "Restoring…" : "Restore"}</button></div>`);
+  veil.querySelector(".panel")?.setAttribute("aria-label", "Restore from a backup");
+}
+function restoreBack() { if (RS && RS.busy) return; /* a restore in progress cannot be cancelled */ RS = null; veil.dataset.kind = "settings"; drawSettings().then(() => veil.querySelector("[data-s=restore]")?.focus()) }
+async function restoreClick(e) {
+  const q = e.target.closest("[data-q]")?.dataset.q, rs = RS; if (!rs || !q) return;
+  if (q === "cancel") return restoreBack();
+  if (q === "go" && !rs.busy && rs.preview) {
+    rs.busy = true; drawRestore();
+    try {
+      const r = await rpc("backup_import", { json: rs.json, apply: true, settings: rs.withOptions });
+      lastSnap = ""; await load();
+      const said = [r.rules_added && `${r.rules_added} rule${r.rules_added === 1 ? "" : "s"}`, r.own_tasks_added && `${r.own_tasks_added} task${r.own_tasks_added === 1 ? "" : "s"}`, (r.mail_applied + r.mail_parked) && `${r.mail_applied + r.mail_parked} thing${r.mail_applied + r.mail_parked === 1 ? "" : "s"} you did with mail`].filter(Boolean).join(", ");
+      toast("Restored" + (said ? ": " + said : ""));
+      rulesDraft = null; rulesDirty = false; // the editor reads the rules again, so the next Save cannot drop the restored ones
+      rs.busy = false; // done: the dialog may close now
+      if (RS === rs) restoreBack();
+    } catch (err) { rs.busy = false; rs.error = String(err).replace(/^Error: /, ""); if (RS === rs) drawRestore() }
+  }
+}
+veil.addEventListener("change", async e => {
+  if (veil.dataset.kind !== "restore" || !RS || e.target.dataset.q !== "options") return;
+  const rs = RS; if (rs.busy) return; rs.withOptions = e.target.checked; rs.preview = null; drawRestore(); await previewRestore(); if (RS === rs) { drawRestore(); veil.querySelector("[data-q=options]")?.focus() }
+});
 veil.addEventListener("input", e => {
   const f = e.target.dataset?.f; if (!f || veil.dataset.kind !== "mailbox" || !MB) return;
   MB[f] = e.target.type === "number" ? +e.target.value : e.target.value;
@@ -264,12 +342,17 @@ async function drawSettings() {
     <label class="sw"><input type="checkbox" data-s="writeback" ${s.writeback ? "checked" : ""}><div><b>Let Inbox Agent file mail</b><span>Done archives, star flags, priorities label (Gmail). ${S.pending ? S.pending + " change(s) waiting." : ""}</span></div></label>
     ${S.update_feature ? `<div class="sect">Updates</div><label class="sw"><input type="checkbox" data-s="update_check" ${s.updates?.check !== false ? "checked" : ""}><div><b>Check for a newer version</b><span>Once a day the app asks GitHub for the latest release. Nothing is downloaded or installed; you only see a notice and a link. GitHub sees your network address, like any web request.</span></div></label>` : ""}
     <div class="sect">Export and support</div><div class="foot" style="margin-top:8px"><button class="btn sm" data-s="export">Copy to-do list as Markdown</button><button class="btn sm" data-s="diag">Copy diagnostics</button></div><p>Diagnostics has the version, counts, option names and recent activity with names, subjects and addresses removed. Read it before you paste it into a bug report.</p>
+    <div class="sect">Backup</div>
+    <p>Saves your rules, sender choices, corrections, tasks, notes and what you did with mail into one file, so a new computer or a fresh start does not lose them. It holds no password, no phone code and no message bodies (a correction keeps the sender and subject of the mail you corrected). It is not encrypted: keep it like any private document.</p>
+    <div class="foot" style="margin-top:8px"><button class="btn sm" data-s="backup">Save a backup file</button><button class="btn sm" data-s="restore">Restore from a backup file</button></div>
+    <p id="bkres" style="word-break:break-all"></p><input type="file" id="bk-file" accept=".json,application/json" hidden aria-label="Backup file">
     <div class="sect">Phone and tablet</div>
     <label class="sw"><input type="checkbox" data-s="hub" ${s.hub?.enabled ? "checked" : ""}><div><b>Phone hub</b><span>Serves this app on your network. Scan the code on a phone on the same Wi-Fi, then Add to Home Screen. Plain HTTP: use a trusted network or a private VPN.</span></div></label>
     ${hub ? `<div class="qr">${hub.svg}</div><p style="word-break:break-all;font-size:11px;margin-top:10px">${esc(hub.url)}</p><div class="foot" style="margin-top:10px"><button class="btn sm" data-s="rotate">Rotate access code</button></div>` : ""}
     <div class="foot"><span class="sp"></span><button class="btn pri" data-vc="1">Close</button></div>`);
 }
 async function settingsChange(t) {
+  if (t.id === "bk-file") return pickBackup(t);
   if (t.dataset.r) return ruleEdit(t);
   const k = t.dataset.s; if (!k) return;
   const patch = { aimode: { ai: { mode: t.value } }, ollama_model: { ai: { ollama_model: t.value } }, desktop: { alerts: { desktop: t.checked } }, topic: { alerts: { ntfy_topic: t.value.trim() } }, writeback: { writeback: t.checked }, hub: { hub: { enabled: t.checked } },
@@ -314,6 +397,15 @@ async function settingsClick(e) {
     if (!twice(btn, "Click again: removes this mailbox, its tasks and its saved password from the app")) return;
     try { await rpc("remove_account", { id }); clearReadCaches(); lastSnap = ""; await load(); drawSettings() } catch (err) { toast("Couldn't remove: " + String(err).replace(/^Error: /, "")) }
   }
+  if (k === "backup") {
+    const out = $("#bkres"); out.textContent = "Saving…";
+    try {
+      const r = await rpc("backup_export"), left = Object.entries(r.counts.left_out || {}).map(([k, n]) => `${n} ${k.replace(/_/g, " ")}`);
+      out.textContent = "Saved " + r.path + (left.length ? `. A backup file holds at most 5,000 sender choices, 2,000 corrections, 2,000 tasks of yours and 5,000 entries about mail; left out: ${left.join(", ")}.` : ""); toast("Backup saved");
+    } catch (err) { out.innerHTML = `<span class="bad">${esc(String(err).replace(/^Error: /, ""))}</span>` }
+    return;
+  }
+  if (k === "restore") { const f = $("#bk-file"); f.value = ""; f.click(); return }
   if (k === "diag") { try { await navigator.clipboard.writeText(await rpc("diagnostics")); toast("Diagnostics copied. Read it, then paste it into your bug report.") } catch (err) { toast("Couldn’t copy: " + err) } }
   if (k === "export") { try { await navigator.clipboard.writeText(await rpc("export_markdown")); toast("Copied as Markdown") } catch (err) { toast("Couldn’t copy: " + err) } }
   if (k === "rotate") { await rpc("rotate_hub_token"); toast("New access code. Scan the code again on your phone."); drawSettings() }

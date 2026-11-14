@@ -77,6 +77,29 @@ function mock(cmd, a) {
     }
     case "draft_discard": t().draft = null; return Promise.resolve(true);
     case "draft_to_mailbox": if (!M.settings.writeback) return Promise.reject("Turn on “Let Inbox Agent file mail” in Settings to save drafts to your mailbox"); if (t().draft) t().draft.saved = true; return Promise.resolve(true);
+    case "backup_export": return Promise.resolve({ path: "C:/Users/you/Downloads/inbox-agent-backup-20261114-091500.json", counts: { rules: M.rules.length, sender_choices: 0, corrections: 1, own_tasks: M.tasks.filter(x => x.uid >= 2000000000 && x.kind !== "followup").length, mail_state: 3, mailboxes: M.accounts.length, left_out: {} } });
+    case "backup_import": {
+      let b; try { b = JSON.parse(String(a.json || "")) } catch { return Promise.reject("This is not a backup made by Inbox Agent: it could not be read") }
+      if (!b || b.format !== "inbox-agent-backup") return Promise.reject("This is not a backup made by Inbox Agent");
+      if (!(b.version >= 1)) return Promise.reject("This is not a backup made by Inbox Agent: it has no version");
+      if (b.version > 1) return Promise.reject("This backup was made by a newer version of Inbox Agent. Update the app, then restore it");
+      if (!M.settings.onboarded) return Promise.reject("Finish setting up your first mailbox before restoring a backup");
+      const newRules = (b.rules || []).filter(r => !M.rules.some(x => x.field === r.field && String(x.text).toLowerCase() === String(r.text).toLowerCase())).slice(0, 50 - M.rules.length);
+      const newOwn = (b.own_tasks || []).filter(t => !M.tasks.some(x => x.uid >= 2000000000 && x.subject === t.title && (x.due || "") === (t.due || "")));
+      const newBoxes = a.settings ? (b.mailboxes || []).filter(m => !M.accounts.some(x => x.user.toLowerCase() === String(m.user).toLowerCase() && x.host.toLowerCase() === String(m.host).toLowerCase())) : [];
+      const rep = { applied: !!a.apply, rules_added: newRules.length, rules_skipped: (b.rules || []).length - newRules.length, sender_choices_added: (b.sender_choices || []).length, sender_choices_skipped: 0, corrections_added: (b.corrections || []).length, corrections_skipped: 0,
+        own_tasks_added: newOwn.length, own_tasks_skipped: (b.own_tasks || []).length - newOwn.length, reminders_dropped: 0, mail_applied: 0, mail_unchanged: 0, mail_parked: (b.mail_state || []).length, mail_skipped_no_mailbox: 0, mail_skipped_full: 0,
+        options_changed: a.settings && b.settings ? Object.keys(b.settings).map(k => k + ".*") : [], mailboxes_added: newBoxes.length, mailboxes_skipped: (b.mailboxes || []).length - newBoxes.length,
+        options_skipped: a.settings && b.settings && b.settings.ai && b.settings.ai.mode === "anthropic" ? ["ai.mode"] : [],
+        mailboxes_new: newBoxes.map(m => `${m.user} (${m.host}:${m.port || 993})`),
+        rules_new: newRules.slice(0, 20).map(r => `If the ${r.field === "subject" ? "subject contains" : r.field === "domain" ? "domain is" : "address is"} ${r.text}: ${r.file ? "file the mail away (mark it done)" : "priority " + r.priority}`) };
+      if (a.apply) {
+        newRules.forEach(r => M.rules.push({ id: Math.random().toString(36).slice(2, 10), field: r.field, text: r.text, priority: r.priority ?? null, category: r.category ?? null, file: !!r.file }));
+        newOwn.forEach((t, i) => M.tasks.push(Object.assign(M.mk(2000000300 + M.tasks.length + i, "You", "", t.title, 1, t.priority || 3, "personal", t.title, false, !!t.star, "", "Added by you", {}), { message_id: "", reply_to: "", thread: "uid:r" + i + t.title, mailbox: null, due: t.due || "", note: t.note || "" })));
+        newBoxes.forEach(m => { const used = new Set(M.accounts.map(x => x.id)); let id = 0; while (used.has(id)) id++; if (id < 5) { if (id === 0) M.settings.account = { id, host: m.host, port: m.port || 993, user: m.user }; else M.settings.more_accounts.push({ id, host: m.host, port: m.port || 993, user: m.user }); syncAccounts() } });
+      }
+      return Promise.resolve(rep);
+    }
     case "export_markdown": return Promise.resolve("# To-do\n" + M.tasks.filter(x => x.status === "open" && !(x.snooze_until > Date.now() / 1000)).map(x => `\n- [ ] **P${x.priority}** ${x.action || x.subject} — ${x.sender} (${x.category})`).join("") + "\n");
     case "set_star": t().star = a.star; return Promise.resolve(true);
     case "set_priority": log(`P${t().priority}→P${a.priority} saved as a correction`); t().priority = a.priority; return Promise.resolve(true);

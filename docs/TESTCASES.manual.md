@@ -156,3 +156,24 @@ a case changes mail. Record the result and, for any failure, the **Activity log*
 | MT-109 | Open the phone hub with two mailboxes | The same list, no tags, no mailbox names anywhere in the page or its data |
 | MT-110 | Upgrade from the earlier build with an existing list | Nothing moves, no task is lost, the old mailbox is mailbox 0 and shows no tag until a second is added |
 | MT-111 | A second mailbox with a large inbox, first connect | The first load takes only the newest messages (as for the first mailbox) and the app stays responsive while both read |
+
+## K. Backup and restore
+
+| ID | Case | Expected |
+| --- | --- | --- |
+| MT-112 | Settings, "Save a backup file" | A new `inbox-agent-backup-<date>-<time>.json` appears in Downloads and the path is shown; saving again makes a second file and leaves the first |
+| MT-113 | Open the file in a text editor | Readable JSON; it holds your rules, tasks and notes; it has no password, no API key, no phone code, no notification topic and no message body (only a correction you made holds the sender and subject of its mail); a reply draft the AI wrote is not in it |
+| MT-114 | Set up the app on a second computer (or after "Sign out and reset"), then "Restore from a backup file" and choose the file | A preview lists what will be added; "Restore" adds it; your rules, own tasks (with reminders and repeats), notes and sender choices are back |
+| MT-115 | Restore before the first sync has finished, then wait for your mail to load | Mail you had finished stays finished, starred mail is starred, your notes and drafts are on the right messages |
+| MT-116 | Restore the same file a second time | The preview says nothing is new; nothing changes |
+| MT-117 | Restore on a computer that already has rules, notes and finished mail | What you have is kept; only what is missing is added (a later snooze in the file replaces an earlier one; a sender you chose "important" or "mute" changes that sender's open mail) |
+| MT-118 | Tick "Also restore options and mailboxes" | Alert times and reply-draft options come back; each extra mailbox is listed in Settings as needing its app password; no mailbox starts reading until you paste one |
+| MT-119 | Choose a file that is not a backup (a photo, a text file, an empty file) | A plain message says it is not a backup; nothing changes |
+| MT-120 | Edit a copy of the file so that one rule has no text, then restore it | The whole restore is refused with a message; nothing was added |
+| MT-121 | A backup from a newer version of the app | The message says to update the app |
+| MT-122 | Restore with write-back switched on | Nothing is archived or flagged in the mailbox because of the restore |
+| MT-123 | A reminder that was due last week and a weekly repeat, in the file | The past reminder is left out; the repeat is on its next time |
+| MT-125 | Tick "Also restore options and mailboxes" with a file that asks for ranking with Claude | The preview says that is not restored; your ranking mode is unchanged |
+| MT-126 | Restore a file whose mailbox names a server you do not know | The preview lists that mailbox and its server before you confirm |
+| MT-127 | Save a backup on a computer with a very large history | The message says how many entries did not fit |
+| MT-124 | A backup made on a phone-hub computer, restored on another | The second computer's phone hub stays off and its write-back setting is unchanged |

@@ -29,19 +29,22 @@ with a `SHA256SUMS.txt`, to a **draft** GitHub release. Nothing is public until 
 python scripts/bump_version.py 0.1.0
 
 # 2. Write the changelog: rename "Unreleased" to the date and make sure the notes are true
-#    (CHANGELOG.md must contain a "## [0.1.0]" heading; CI checks this)
+#    (CHANGELOG.md must contain a dated "## [0.1.0]" heading; CI checks this)
+#    Add the version's row to docs/RELEASE_HISTORY.md ("in preparation"; CI refuses a tag without it)
+#    and its milestone to docs/VERSION_HISTORY.md
 
 # 3. Everything must be green locally
 cd engine && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cd ..
 python scripts/gen_testcases.py          # keeps docs/TESTCASES.md current
-python scripts/bump_version.py --check
+python scripts/bump_version.py --check 0.1.0      # the release checks too: a dated changelog heading, a release-history row
+python scripts/test_bump_version.py
 
 # 4. Commit, tag, push the tag (the tag triggers the release workflow)
 git add -A && git commit -m "Release 0.1.0"
 git tag v0.1.0 && git push && git push origin v0.1.0
 ```
 
-The workflow then runs: **verify** (tag = every version field = changelog entry) → **test** on Linux, Windows and
+The workflow then runs: **verify** (tag = every version field = a dated changelog entry = a row in `docs/RELEASE_HISTORY.md`) → **test** on Linux, Windows and
 macOS (a red test stops the release) → **build** the installers in parallel → **checksums** (`SHA256SUMS.txt` plus a
 build-provenance attestation). Tags containing a dash (`v0.2.0-beta.1`) become pre-releases.
 
@@ -56,6 +59,8 @@ Do this on **clean machines** (a fresh Windows user or VM, a Mac, a Linux box), 
    without a Gatekeeper block (`spctl -a -vv "Inbox Agent.app"`); Linux AppImage/deb launches and the tray icon shows.
 4. Uninstall and confirm it leaves nothing running.
 5. Edit the release notes (copy from `CHANGELOG.md`), then click **Publish**.
+6. Finish the release's row in `docs/RELEASE_HISTORY.md` (the date, whether it is signed, the checksums, which manual tests passed,
+   known problems), commit it, and push. A release that is withdrawn keeps its row, marked withdrawn.
 
 ## If something is wrong after publishing
 
