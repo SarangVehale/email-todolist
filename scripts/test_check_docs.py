@@ -232,6 +232,15 @@ class CheckDocsMore(unittest.TestCase):
         for bad in ("[t](missing.md 'a title')", "[t](</docs/missing.md>)", "[t](/docs/missing.md)", "See [r][ref].\n\n[ref]: missing.md"):
             self.assertTrue(any("broken link" in e for e in problems({**base, "docs/guides/a.md": doc(bad)})), bad)
 
+    def test_a_workflow_value_with_a_colon_and_a_space_must_be_quoted(self):
+        base = {"docs/README.md": GOOD_MAP, "docs/guides/a.md": doc("x")}
+        bad = "jobs:\n  t:\n    steps:\n      - name: Scan (the shell: Tauri, webview)\n        run: echo hi\n"
+        out = problems({**base, ".github/workflows/ci.yml": bad})
+        self.assertTrue(any("ci.yml:4" in e and "colon and a space" in e for e in out), out)
+        good = ('jobs:\n  t:\n    steps:\n      - name: "Scan (the shell: Tauri, webview)"\n        run: |\n          echo "a: b"\n          x: y z: w\n'
+                "      - uses: actions/checkout@abc # v4: pinned\n        env:\n          RUSTDOCFLAGS: -D warnings\n")
+        self.assertEqual([e for e in problems({**base, ".github/workflows/ci.yml": good}) if "ci.yml" in e], [])
+
     def test_an_image_inside_a_link_and_a_footnote(self):
         base = {"docs/README.md": GOOD_MAP}
         ok = doc("A [![alt](a.md)](a.md) and a footnote[^1].\n\n[^1]: See the guide for more.\n")

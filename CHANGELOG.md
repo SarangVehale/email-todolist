@@ -13,13 +13,14 @@ work goes under `[0.1.0] - Unreleased`; after it, new work goes under `## [Unrel
 First public build.
 
 ### Added
+- The first push to GitHub showed that CI had never been able to run: `.github/workflows/ci.yml` was not valid YAML (a step name held a colon and a space), so GitHub refused it without starting a job. The name is quoted, every pinned action was checked to exist, and `scripts/check_docs.py` now catches the mistake in a workflow or the OpenAPI file before a push. The first real CI results are still to come.
 - Documentation as code. A [documentation map](docs/README.md) and about 80 documents in the repository, with 54 diagrams (Mermaid, so they are
   reviewed like code): the architecture (the system, the life of a message, the data model, the threads and the poll loop, the trust
   boundaries), fourteen architecture decision records, a reference for every one of the engine's 36 commands, the phone hub's HTTP
   interface (with an OpenAPI file), the answer to `state` and every setting, guides for each service the app connects to, runbooks,
   a troubleshooting page and a FAQ, product requirements and 40 user stories that name the tests checking them, coding standards,
   a documentation style guide (the Google developer documentation style guide plus this project's rules), a testing strategy and a
-  release test plan, and templates for every kind of document. `python scripts/check_docs.py` (38 tests of its own; also run by CI and
+  release test plan, and templates for every kind of document. `python scripts/check_docs.py` (39 tests of its own; also run by CI and
   by the release workflow) checks every link and anchor, every code block and diagram, the header and review date of each document
   (180 days), that the map reaches every document, that each engine command has an entry in the reference and none is invented, the
   numbering of the decision records, and that every public item of the engine has a doc comment (100 were added); the Rust

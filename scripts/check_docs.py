@@ -13,7 +13,8 @@ What it checks (the rules are in docs/standards/docs-style-guide.md):
     command the window calls is one of them;
   * ADR files are numbered without gaps, their titles match their numbers, and docs/adr/README.md lists each one;
   * every public Rust item of the engine has a doc comment (fields and variants are left to the reference documents);
-  * no filler words ("simply", "obviously", "please note") in the documents this phase wrote.
+  * no filler words ("simply", "obviously", "please note") in the documents this phase wrote;
+  * the workflow files and the OpenAPI file are valid YAML (a plain value with a colon and a space is the usual mistake).
 """
 import argparse
 import datetime
@@ -429,6 +430,52 @@ def check_hub(root):
     return errors
 
 
+def yaml_files(root):
+    out = []
+    for folder in (".github", ".github/workflows"):
+        d = os.path.join(root, *folder.split("/"))
+        if os.path.isdir(d):
+            out += [os.path.join(d, f) for f in sorted(os.listdir(d)) if f.endswith((".yml", ".yaml"))]
+    api = os.path.join(root, "docs", "api", "openapi.yaml")
+    return out + ([api] if os.path.isfile(api) else [])
+
+
+def check_yaml(root):
+    """The workflow and API files are valid YAML. GitHub rejects a workflow it cannot read without running anything, and it showed
+    up only on the first push: a step name such as `Scan (the shell: Tauri)` holds `: ` and is not a plain scalar. This looks for
+    that mistake without a YAML library, and also parses the files when PyYAML happens to be installed."""
+    errors = []
+    key = re.compile(r"^(\s*)(?:- )?([A-Za-z_][\w.-]*):\s+(\S.*)$")
+    for f in yaml_files(root):
+        r = rel(f, root)
+        block = None  # the indent of the key whose block scalar (| or >) we are inside
+        for n, line in enumerate(read(f).splitlines(), 1):
+            if block is not None:
+                if not line.strip() or len(line) - len(line.lstrip()) > block:
+                    continue
+                block = None
+            m = key.match(line)
+            if not m:
+                continue
+            value = re.sub(r"\s+#.*$", "", m.group(3)).strip()
+            if value[:1] in ("|", ">"):
+                block = len(m.group(1)) + (2 if line.lstrip().startswith("- ") else 0)
+                continue
+            if value[:1] in ("\"", "'", "[", "{", "&", "*", "!", "#", "@", "`"):
+                continue
+            if ": " in value or value.endswith(":"):
+                errors.append(f"{r}:{n}: the value of {m.group(2)!r} holds a colon and a space, which YAML reads as another key: put it in quotes")
+        try:
+            import yaml  # optional: used when installed
+        except ImportError:
+            continue
+        try:
+            yaml.safe_load(read(f))
+        except yaml.YAMLError as e:
+            errors.append(f"{r}: not valid YAML: {str(e).splitlines()[0]}")
+    return errors
+
+
 def check_counts(root):
     """The README says how many tests there are; docs/TESTCASES.md (generated) says how many there really are."""
     cat, readme = os.path.join(root, "docs", "TESTCASES.md"), os.path.join(root, "README.md")
@@ -475,6 +522,7 @@ def run(root=ROOT, today=None):
     errors += check_rust_docs(root)
     errors += check_hub(root)
     errors += check_counts(root)
+    errors += check_yaml(root)
     return errors
 
 
