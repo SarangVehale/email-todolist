@@ -639,9 +639,12 @@ fn a_mailbox_with_no_password_says_so_and_does_not_stop_the_other_from_starting(
         list[0]["status"], "no password",
         "the first mailbox has a password and is being read: {list:?}"
     );
-    assert_eq!(
-        st["status"], "no password",
-        "and the one status the window shows is the worst of the two"
+    // the one status the window shows is the worst of the two: an error outranks "no password" (see worst_status), and the first
+    // mailbox's refused connection becomes an error at once on Linux and a moment later on Windows
+    let shown = st["status"].as_str().unwrap();
+    assert!(
+        shown == "no password" || shown.starts_with("error"),
+        "the window shows the worst of the two: {shown}"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }

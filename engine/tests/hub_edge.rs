@@ -29,7 +29,15 @@ fn hub(name: &str) -> Hub {
     )
     .unwrap();
     let token = core.settings().hub.token;
-    std::thread::sleep(Duration::from_millis(600));
+    // wait until the hub answers: a fixed pause is too short on a slow machine (macOS CI started it later than 600 ms)
+    let up = Instant::now();
+    while TcpStream::connect(("127.0.0.1", port)).is_err() {
+        assert!(
+            up.elapsed() < Duration::from_secs(30),
+            "the hub did not start"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
     Hub {
         core,
         port,

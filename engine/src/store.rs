@@ -808,7 +808,10 @@ impl Store {
     /// Replaces the whole rule list, in order. A list that fails validation changes nothing.
     pub fn set_rules(&self, list: &[Rule]) -> anyhow::Result<()> {
         rules::validate(list)?;
-        let tx = self.db.unchecked_transaction()?;
+        let tx = rusqlite::Transaction::new_unchecked(
+            &self.db,
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
         tx.execute("DELETE FROM rules", [])?;
         for (i, r) in list.iter().enumerate() {
             tx.execute(
@@ -1552,7 +1555,10 @@ impl Store {
             m.to
         );
         // the task and its record are written together or not at all
-        let tx = self.db.unchecked_transaction()?;
+        let tx = rusqlite::Transaction::new_unchecked(
+            &self.db,
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
         tx.execute(
             "INSERT INTO tasks(uid,message_id,sender,addr,subject,received,priority,category,action,urgent,excerpt,why,signals,body,needs_reply,due,reply_to,refs,auth_fail,kind)
              VALUES(COALESCE((SELECT MAX(uid)+1 FROM tasks WHERE uid>=?4), ?4),'','You','',?1,?2,3,'personal',?1,0,?3,'Nobody has replied to something you sent','{}','',0,'','','',0,'followup')",
@@ -1929,7 +1935,10 @@ impl Store {
     pub fn clear_mailbox(&self, n: u32) -> anyhow::Result<()> {
         self.delete_mail_rows(n)?;
         let (lo, hi) = Self::block(n);
-        let tx = self.db.unchecked_transaction()?;
+        let tx = rusqlite::Transaction::new_unchecked(
+            &self.db,
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
         tx.execute(
             "DELETE FROM overrides WHERE uid>=?1 AND uid<?2",
             params![lo, hi],
@@ -1956,7 +1965,10 @@ impl Store {
     /// draft budget) is not the mailbox's and stays.
     fn delete_mail_rows(&self, n: u32) -> anyhow::Result<()> {
         let (lo, hi) = Self::block(n);
-        let tx = self.db.unchecked_transaction()?;
+        let tx = rusqlite::Transaction::new_unchecked(
+            &self.db,
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
         for table in ["tasks", "drafts", "outbox"] {
             tx.execute(
                 &format!("DELETE FROM {table} WHERE uid>=?1 AND uid<?2"),
