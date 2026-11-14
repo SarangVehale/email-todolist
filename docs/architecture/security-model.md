@@ -54,7 +54,7 @@ are desktop-only. A local model reached at a non-local address would be a fourth
 | --- | --- | --- | --- |
 | Mail app password, one per mailbox | OS keychain, service `InboxAgent`, entry `imap-password` or `imap-password-<n>` (`secrets::imap_key`) | Memory of that mailbox's watcher and write-back threads; the TLS login to its own server | `settings.json`, `agent.db`, `state`, a backup, the log |
 | Anthropic API key | OS keychain, entry `anthropic-key` | The `x-api-key` header of requests to `https://api.anthropic.com/v1/messages` only | Every file; `state` carries only `has_anthropic_key` (desktop) |
-| Hub access code | `settings.json`, `hub.token`, 32 characters from `rand::thread_rng` (`core::new_token`) | The desktop `state` (settings), the QR code and URL from `hub_info`, the phone's `localStorage`; compared in constant time (`hub::ct_eq`) | A backup; the phone's address bar (removed after the first load) |
+| Hub access code | `settings.json`, `hub.token`, 32 characters from `rand::rng` (`core::new_token`) | The desktop `state` (settings), the QR code and URL from `hub_info`, the phone's `localStorage`; compared in constant time (`hub::ct_eq`) | A backup; the phone's address bar (removed after the first load) |
 | ntfy topic | `settings.json`, `alerts.ntfy_topic` | The URL of each alert | A backup |
 
 The code is cleared when the hub is switched off, and a new one is made when it is switched on again and by "Rotate access

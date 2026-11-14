@@ -765,10 +765,10 @@ pub fn worst_status(all: &[String]) -> String {
 
 /// A random access code of 32 letters and digits, used for the phone hub.
 pub fn new_token() -> String {
-    use rand::Rng;
+    use rand::RngExt;
     const A: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    let mut r = rand::thread_rng();
+    let mut r = rand::rng();
     (0..32)
-        .map(|_| A[r.gen_range(0..A.len())] as char)
+        .map(|_| A[r.random_range(0..A.len())] as char)
         .collect()
 }

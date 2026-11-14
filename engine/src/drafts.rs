@@ -5,7 +5,7 @@ use crate::mail::{clean_message_id, valid_address, Email};
 use crate::triage::{DraftCtx, Triager};
 use anyhow::{bail, Result};
 use base64::{engine::general_purpose::STANDARD, Engine};
-use rand::Rng;
+use rand::RngExt;
 
 /// Quick replies for when no model is available (or as a starting point).
 pub const TEMPLATES: &[(&str, &str)] = &[
@@ -162,7 +162,7 @@ pub fn build_message(m: &DraftMessage) -> Result<Vec<u8>> {
         refs = format!("{refs} {in_reply_to}").trim().to_string();
     }
     let rand: String = (0..24)
-        .map(|_| rand::thread_rng().gen_range(b'a'..=b'z') as char)
+        .map(|_| rand::rng().random_range(b'a'..=b'z') as char)
         .collect();
     let body = m.body.replace("\r\n", "\n").replace('\n', "\r\n");
     let b64 = STANDARD.encode(body.as_bytes());
