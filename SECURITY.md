@@ -328,6 +328,20 @@ and most of the findings are about one of those two things.
 Accepted, documented: the backup is not encrypted; a restored mailbox's server comes from the file (shown in the preview, with a warning
 to restore only your own file); nothing was run against a live mailbox, macOS or Linux.
 
+## Review 9 (Phase 8: a big mailbox stays fast; council, drift passes and an Opus review loop, 2026-11-14)
+
+A performance change with no new input and no new command, reviewed all the same. An Opus seat said **do not ship as it was** and a Sonnet
+seat **ship with caveats**; a Sonnet pass found 10 disagreements between the documents and the code and a Haiku pass 6; an Opus reviewer
+then went through the fixed tree in two rounds and approved it. Full ledger: `docs/2026-11-14_PHASE8_REVIEW.md`. No security finding;
+the one that mattered was about the user's data.
+
+| Finding | Fix |
+| --- | --- |
+| **Undo of a bulk finish silently reopened only some of the tasks.** The window now holds only the newest 200 finished tasks, and the undo closures asked the engine to reopen a task only if the window still held it; after the next poll a "Done all automated" of 300 came back as 198, and the rest were finished tasks that appeared nowhere | The undo asks the engine to reopen every task it finished; the Done tab has "Show older" (the engine takes `state { done }`, at most 20,000) so older finished tasks are reachable |
+| The keyboard could be taken over by a row that had focus (`j` stuck, `x` finished the wrong task); a click in an open fold drew the whole main list; "Show more" under a fold grew the list above it | Focus is released when the cursor moves; each part of the list has its own count |
+| The documents promised a search of finished tasks that does not exist, and counts that were not true on the Done tab | Reworded; the promises now say what the code does |
+| The new scale check could have deleted a real app data folder | It refuses to run if the folder exists; it only removes a folder it created |
+
 ## Reporting a vulnerability
 
 Please report privately to the maintainer rather than opening a public issue. Add a contact address

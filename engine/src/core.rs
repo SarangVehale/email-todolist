@@ -334,7 +334,7 @@ impl Core {
         }
     }
 
-    fn state(&self, public: bool) -> Result<Value> {
+    fn state(&self, public: bool, done_shown: usize) -> Result<Value> {
         let store = self.store()?;
         let s = self.settings();
         // The phone hub only needs to know whether write-back is on; it never sees account or alert details.
@@ -343,9 +343,11 @@ impl Core {
         } else {
             serde_json::to_value(&s)?
         };
+        let (tasks, done_total) = store.tasks_for_window(done_shown)?;
         let mut state = json!({
             "settings": settings,
-            "tasks": store.all_tasks()?,
+            "tasks": tasks,
+            "done_total": done_total,
             "log": store.recent_log(100).into_iter().map(|(at, msg)| json!({"at": at, "msg": if public { for_the_phone(&msg) } else { msg }})).collect::<Vec<_>>(),
             "status": self.status_text(),
             "pending": store.pending(1000).len(),
@@ -382,7 +384,7 @@ impl Core {
     /// Commands reachable from the phone hub (everything else is desktop-only).
     pub fn rpc_public(self: &Arc<Self>, cmd: &str, args: &Value) -> Result<Value> {
         match cmd {
-            "state" => self.state(true),
+            "state" => self.state(true, done_asked(args)),
             c if commands::PUBLIC.contains(&c) => self.rpc(cmd, args),
             _ => Err(anyhow!("not available from the hub")),
         }
@@ -393,7 +395,7 @@ impl Core {
             return r;
         }
         match cmd {
-            "state" => self.state(false),
+            "state" => self.state(false, done_asked(a)),
             "test_account" => {
                 let acct = Account {
                     host: s_arg(a, "host"),
@@ -658,6 +660,18 @@ impl Core {
             _ => Err(anyhow!("unknown command: {cmd}")),
         }
     }
+}
+
+/// How many finished tasks the window and the phone are sent (the newest). The rest are kept, searchable, and pruned as before.
+pub const DONE_SHOWN: usize = 200;
+/// The most finished tasks one answer holds, however many the window asks for ("Show older" on the Done tab asks for more).
+pub const DONE_MAX: usize = 20_000;
+
+/// How many finished tasks the window asks for: at least the default, at most `DONE_MAX`; anything else is the default.
+fn done_asked(args: &Value) -> usize {
+    args["done"].as_u64().map_or(DONE_SHOWN, |n| {
+        (n.min(DONE_MAX as u64) as usize).max(DONE_SHOWN)
+    })
 }
 
 /// A log line as the phone may see it: the login a mailbox connected as is the mailbox's address, which stays on the computer.

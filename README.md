@@ -31,6 +31,8 @@ and alerts you only when something is important.
   its own account, and removing one deletes its tasks, drafts, follow-up records and saved password and leaves the mailbox itself untouched.
 - **Backup and restore.** One file with your rules, sender choices, corrections, tasks, notes and what you did with mail, for a new
   computer or a fresh start. No password goes in it, and no message bodies. Restoring adds what is missing, never removes anything, and shows a preview first.
+- **Fast with a big mailbox.** The window is sent every open task but only the newest finished ones (the Done tab can show older ones), and
+  the list draws 150 rows at a time, so thousands of tasks do not slow it down.
 - **Keyboard first.** `j` `k` or the arrow keys move, `Enter` opens a task, `x` (or `e`) done, `1`-`5` priority,
   `s` star, `r` reply draft (mail only), `h` snooze, `v` select several, `a` add task, `/` search, `z` undo, `,` settings, `?` for the full
   list. Capitals work too.
@@ -68,7 +70,7 @@ IMAP_HOST=imap.example.com IMAP_USER=you@example.com IMAP_PASS=... cargo run --e
 
 ## Status
 
-Built and tested: engine (453 tests, including protocol tests against a scripted mock IMAP server and a dedicated edge-case suite), UI in a browser, phone hub, installer build.
+Built and tested: engine (459 tests, including protocol tests against a scripted mock IMAP server and a dedicated edge-case suite), UI in a browser, phone hub, installer build.
 The IMAP sync and write-back are tested against a scripted mock server, which proves what the client sends and how it parses
 standard responses, but a real Gmail or other server may differ. Not yet exercised against a live mailbox, and releases are unsigned.
 See [SECURITY.md](SECURITY.md) for the full list of limits.

@@ -13,6 +13,13 @@ work goes under `[0.1.0] - Unreleased`; after it, new work goes under `## [Unrel
 First public build.
 
 ### Added
+- A big mailbox stays fast. Measured with the packaged app and 3,000 open plus 5,000 finished tasks: the window was re-reading 6.4 MB
+  every 3 seconds, drawing the list took 2 seconds and each key press about a second. The window is now sent every open task but only
+  the 200 most recently finished ones and how many there are in all (the Done tab says "The 200 most recently finished of N" and has
+  "Show 500 older"; finished tasks are kept 90 days as before), draws 150 rows at a time with "Show 150 more" and "Show all N more"
+  (the cursor keys draw more as they reach it), draws a row's detail only for the open row, moves the cursor without redrawing the
+  page, and stops asking for updates while the window is hidden. Counts, "Select all" and "Done all" cover the whole list the window
+  holds, and undo of a bulk finish reopens every task it finished. Measured afterwards on the same mailbox: loading 0.25 s, a key press 2 ms, the Done tab 13 ms, an answer to a poll about 0.13 s and 2.6 MB. There is no search of finished tasks (there never was one).
 - Backup and restore (Settings, "Backup"): "Save a backup file" writes your rules, sender choices, corrections, tasks (with notes, reminders
   and repeats), what you did with mail (finished, starred, snoozed, your note and a reply draft you edited, by message ID and never its
   text), your mailboxes and a set of options into one new file in Downloads (not encrypted; no passwords, no phone code, no message
@@ -92,7 +99,7 @@ First public build.
 - Third review (Opus, 2026-11-13): one bad unsubscribe link could blank the list; a crashing message could crash the app on every start; hostile HTML could stall the watcher; sign-out left mail text in the database files; the hub answered public networks; mail data sat in Roaming AppData. All fixed with tests; see SECURITY.md.
 - A damaged database is set aside and rebuilt, newer data is refused, and a `crash.log` records internal errors (no telemetry).
 - Two independent security reviews; all confirmed findings fixed with regression tests. See SECURITY.md.
-- 453 automated tests, including protocol tests against a scripted mock IMAP server and a dedicated edge-case suite.
+- 459 automated tests, including protocol tests against a scripted mock IMAP server and a dedicated edge-case suite.
 
 ### Known limitations
 - Microsoft (Outlook, Microsoft 365) accounts are not supported: Microsoft turned off password sign-in for IMAP.

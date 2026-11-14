@@ -404,6 +404,44 @@ failure (rolled back), repeated ids in a file, the same file twice, a preview ag
 that must not cross mailboxes, a hostile options section (hub, write-back, network addresses, `onboarded`, `account`), the limit of five
 mailboxes, a reminder in the past, expiry and the bound of the parked table, the phone refused — `phase7.rs`.
 
+## 5j. A big mailbox (`store.rs: tasks_for_window`, `core.rs: state`, `app/ui/main.js`)
+
+```
+state({ done? }):                          # the answer to every poll, for the window and the phone
+    shown   = done clamped to 200 .. 20,000 (a missing or non-number value: 200)
+    tasks   = every task that is not finished (all of them: they are what you act on)
+            + the `shown` most recently finished, newest first by (done_at, else received, then uid)
+    done_total = how many finished tasks there are in all
+    all three reads in one read transaction
+    (finished tasks are kept 90 days, pruned and searched by the engine as before)
+
+the window:
+    poll every 3 s while it is visible (once at once when it becomes visible), asking { done: 200 } (more on the Done tab, below)
+    render():
+        the list = the tab's tasks, filtered, grouped and sorted once for drawing
+                   (the filter bar and select mode work lists out again)
+        list key = tab + category + reply/draft filter + mailbox + search text + sort;  entering the Log tab forgets the key
+        if the key changed: rows drawn = 150 for each part (main list, "automated", "left your inbox")
+        the cursor is at position p of its own part; if p >= that part's rows drawn: that part's rows drawn = p + 150
+        draw the first `rows drawn` rows of each part (the folds only while open); after a part with rows left:
+            "Show 150 more" (+150 for that part only) and, if more than 150 are left, "Show all N more" (lifts that part's limit)
+        a row draws its detail panel only when it is the open row
+        the Done tab: "The L most recently finished of T finished tasks" and "Show 500 older" when T > L;
+                      T = the engine's total at the last poll, moved by what has been finished or reopened here since
+        "Show N older" (not offered once 20,000 are loaded): ask for L + 500 finished tasks from now on (back to 200 when the Done tab is left)
+    move(d):                               # j, k, arrows
+        cursor = the list's next row (the list drawn last); at the first or last row: only scroll it into view
+        if that row is drawn: let go of a focused row, swap the `cur` class on the row and on the rail, scroll into view
+        else: its part's rows drawn = its position in that part + 150, draw
+    undo of a bulk finish: asks the engine to reopen every task finished, whether or not the window still holds it
+    Select all, Done all, Done all automated, counts: the whole list the window holds, not the drawn part
+    shift-click in select mode: the drawn rows between the two clicks
+```
+Edge cases: more than 200 finished, more than 150 open, a cursor beyond the drawn rows or in a fold, a filter or tab change with the
+cursor deep in the list, an open row, a row with the keyboard focus, select mode, undo of a bulk finish after a poll, the Log tab, a
+window that is hidden, the phone, a finished conversation straddling the limit — `phase8.rs` for the engine's part; the window's part
+is driven in the browser and by `scripts/scale_check` (`docs/designs/phase8.md`).
+
 ## 6. Changing the real mailbox (`writeback.rs`) — only when the user turned it on
 
 ```

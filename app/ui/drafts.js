@@ -296,7 +296,7 @@ document.addEventListener("click", e => {
   const l = parts().auto.flatMap(members); if (!l.length || !twice(b, `Click again: ${l.length} done`)) return;
   const ids = l.map(t => t.uid);
   l.forEach(t => { t.status = "done"; call("set_done", { uid: t.uid, done: true }) });
-  undoStack.push(() => ids.forEach(u => { const t = find(u); if (t) { t.status = "open"; call("set_done", { uid: u, done: false }) } }));
+  undoStack.push(() => ids.forEach(u => { const t = find(u); if (t) t.status = "open"; call("set_done", { uid: u, done: false }) }));
   showUndo(`${ids.length} done`); render();
 });
 
@@ -306,7 +306,7 @@ document.addEventListener("click", e => {
   const l = parts().gone.flatMap(members); if (!l.length || !twice(b, `Click again: ${l.length} done`)) return;
   const ids = l.map(t => t.uid);
   l.forEach(t => { t.status = "done"; call("set_done", { uid: t.uid, done: true }) });
-  undoStack.push(() => ids.forEach(u => { const t = find(u); if (t) { t.status = "open"; call("set_done", { uid: u, done: false }) } }));
+  undoStack.push(() => ids.forEach(u => { const t = find(u); if (t) t.status = "open"; call("set_done", { uid: u, done: false }) }));
   showUndo(`${ids.length} done`); render();
 });
 
@@ -316,7 +316,7 @@ document.addEventListener("click", e => {
   const rows = listFor(); if (rows.length < 2 || !twice(b, `Click again: ${rows.length} done`)) return;
   const all = rows.flatMap(members), rep = all.filter(t => isLocal(t) && t.repeat), l = all.filter(t => !rep.includes(t)), ids = l.map(t => t.uid);
   l.forEach(t => { t.status = "done"; call("set_done", { uid: t.uid, done: true }) });
-  if (ids.length) undoStack.push(() => ids.forEach(u => { const t = find(u); if (t) { t.status = "open"; call("set_done", { uid: u, done: false }) } }));
+  if (ids.length) undoStack.push(() => ids.forEach(u => { const t = find(u); if (t) t.status = "open"; call("set_done", { uid: u, done: false }) }));
   if (rep.length) repeatDone(rep);
   if (ids.length) showUndo(`${ids.length} done${rep.length ? ` · ${rep.length} repeating moved on` : ""}`); // nothing to undo for repeating ones
   render();
@@ -386,7 +386,8 @@ document.addEventListener("keydown", e => {
 
 /* ───────── select many, act once ─────────
    Acts on the same messages a single row would (members()), so mail that arrived after the screen was drawn is
-   never closed unseen. The selection only ever holds rows that are visible now (pruneSel). One undo step per batch. */
+   never closed unseen. The selection only ever holds rows of the list as it is now (pruneSel); a shift-click selects the rows between
+   two clicks that are drawn, and "All" selects the whole list. One undo step per batch. */
 const selRows = () => listFor().filter(t => sel.has(t.uid));
 function pruneSel() {
   const ids = new Set(listFor().map(t => t.uid));
@@ -400,7 +401,7 @@ function enterSelect(withCurrent) {
 }
 function exitSelect() { selMode = false; sel.clear(); selAnchor = null; if (view !== "log") render() }
 function selectClick(e, t) {
-  const l = listFor().map(x => x.uid);
+  const l = [...document.querySelectorAll("#view .row")].map(r => +r.dataset.uid); // the rows drawn, in order
   if (e.shiftKey && selAnchor !== null && l.includes(selAnchor)) {
     const a = l.indexOf(selAnchor), b = l.indexOf(t.uid);
     for (let i = Math.min(a, b); i <= Math.max(a, b); i++) sel.add(l[i]);
@@ -423,7 +424,7 @@ function bulk(k, el) {
   if (k === "done") {
     const v = view !== "done", rep = v ? ms.filter(x => isLocal(x) && x.repeat) : [], rest = ms.filter(x => !rep.includes(x)), was = rest.map(x => [x.uid, x.status]);
     rest.forEach(x => { x.status = v ? "done" : "open"; call("set_done", { uid: x.uid, done: v }) });
-    if (rest.length) undoStack.push(() => was.forEach(([u, s]) => { const x = find(u); if (x) { x.status = s; call("set_done", { uid: u, done: s === "done" }) } }));
+    if (rest.length) undoStack.push(() => was.forEach(([u, s]) => { const x = find(u); if (x) x.status = s; call("set_done", { uid: u, done: s === "done" }) }));
     if (rep.length) repeatDone(rep);
     if (rest.length) showUndo(`${rest.length} ${v ? "done" : "reopened"}${rep.length ? ` · ${rep.length} repeating moved on` : ""}`);
   } else if (k === "star") {

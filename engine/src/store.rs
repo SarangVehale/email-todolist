@@ -906,6 +906,33 @@ impl Store {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
+    /// What the window and the phone are shown: every task that is not finished (they are what you act on), and only the
+    /// `done_shown` most recently finished ones. Also how many finished tasks there are in all. A busy mailbox has thousands
+    /// of finished tasks (they are kept 90 days) and sending all of them on every poll made the window sluggish.
+    pub fn tasks_for_window(&self, done_shown: usize) -> anyhow::Result<(Vec<Task>, usize)> {
+        // one read transaction: a sync saving mail between the three reads cannot make a task arrive twice, or not at all
+        let tx = self.db.unchecked_transaction()?;
+        let mut st = self.db.prepare(&format!(
+            "{SELECT} WHERE t.status<>'done' ORDER BY t.priority DESC, t.received ASC"
+        ))?;
+        let mut tasks: Vec<Task> = st.query_map([], row)?.collect::<Result<_, _>>()?;
+        let mut st = self.db.prepare(&format!(
+            "{SELECT} WHERE t.status='done' ORDER BY COALESCE(NULLIF(t.done_at,0), t.received) DESC, t.uid DESC LIMIT ?1"
+        ))?;
+        let done = st.query_map([done_shown as i64], row)?;
+        for t in done {
+            tasks.push(t?);
+        }
+        drop(st);
+        let total: i64 =
+            self.db
+                .query_row("SELECT COUNT(*) FROM tasks WHERE status='done'", [], |r| {
+                    r.get(0)
+                })?;
+        tx.commit()?;
+        Ok((tasks, total.max(0) as usize))
+    }
+
     fn label(&self, uid: u32) -> String {
         self.get(uid)
             .map(|t| {

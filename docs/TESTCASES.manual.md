@@ -177,3 +177,19 @@ a case changes mail. Record the result and, for any failure, the **Activity log*
 | MT-126 | Restore a file whose mailbox names a server you do not know | The preview lists that mailbox and its server before you confirm |
 | MT-127 | Save a backup on a computer with a very large history | The message says how many entries did not fit |
 | MT-124 | A backup made on a phone-hub computer, restored on another | The second computer's phone hub stays off and its write-back setting is unchanged |
+
+## L. A big mailbox
+
+| ID | Case | Expected |
+| --- | --- | --- |
+| MT-128 | With thousands of open tasks (a long-used mailbox, or a copy of one), open the app | The list appears at once, with 150 rows and "Show 150 more" and "Show all N more" under them (N is how many are still hidden) |
+| MT-129 | Hold `j` down past the 150th row | More rows are drawn as the cursor reaches them (a short pause each time 150 more are drawn); the cursor never leaves the screen |
+| MT-130 | Click "Show all N more" on a long list | Every row is drawn (a moment's pause is fine); the keyboard still works |
+| MT-131 | Change the tab, a category chip, the search text or the sort | The list starts again at 150 rows (more if the cursor's task is still shown further down) |
+| MT-132 | Open the Done tab with more than 200 finished tasks | It says "The 200 most recently finished of N finished tasks" and offers "Show 500 older"; the tab's number is N; "Show 500 older" adds older ones; leaving the tab and coming back shows 200 again |
+| MT-133 | Use "Done all automated" (or select mode, "All", "Done") on more than 200 tasks, wait a few seconds, then press Undo | Every task comes back, not only the ones the window still holds |
+| MT-134 | Mark a task done and press Undo | It comes back into the list (the cursor stays where it is) |
+| MT-135 | Minimise the window for a minute, then bring it back | The list is up to date at once; the app used almost no processor while hidden |
+| MT-136 | Press Tab until a row is focused, then `j` several times and `x` | The highlighted row moves down each time, and `x` finishes the highlighted row |
+| MT-137 | Open "Show automated" on a long list, click a row in it, then "Show 150 more" under the fold | The page does not jump; the row opens where it is; only the fold gets more rows, not the list above it |
+| MT-138 | In select mode click a row, then shift-click a row further down | The rows between them are selected, and no row that is not drawn |

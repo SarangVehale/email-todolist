@@ -73,6 +73,19 @@ const SORTS = {
 /* Automated mail the user has not touched: bulk, low priority, no due date. It folds into one row in the plain to-do view. */
 const foldable = t => !!(t.signals && t.signals.bulk) && maxp(t) <= 2 && !t.star && !t.urgent && !t.due && !t.draft && !t._anyDraft;
 let autoOpen = false, goneOpen = false, curIdx = 0, updateDismissed = "";
+/* a long list draws 150 rows at a time (a busy mailbox has thousands): "Show more" draws more, and moving the cursor past the last drawn row draws more */
+const ROW_PAGE = 150;
+const freshLimits = () => ({ main: ROW_PAGE, auto: ROW_PAGE, gone: ROW_PAGE });
+let lim = freshLimits(), lastListKey = "", lastList = null, lastSplit = [0, 0];
+/* the Done tab holds the newest finished tasks the engine sent; "Show older" asks for more (the poll carries how many) */
+const DONE_PAGE = 500, DONE_MAX = 20000; // DONE_MAX: the most finished tasks one answer holds (the engine's limit)
+let doneWanted = 200;
+/* which part list position i is in, and where inside it: each part is cut at its own count, so "Show more" under a fold never draws more of the list above it */
+/* how many finished tasks there are: the engine's total as of the last poll, moved by what has been finished or reopened here since */
+const doneTotal = () => (S.done_total ?? S.tasks.filter(t => t.status === "done").length) + (S.done_total == null ? 0 : S.tasks.filter(t => t.status === "done").length - (S._doneAtLoad ?? 0));
+const partAt = i => { const [a, b] = lastSplit; return i < a ? ["main", i] : i < a + b ? ["auto", i - a] : ["gone", i - a - b] };
+const drawMore = i => { const [part, at] = partAt(i); if (at >= lim[part]) lim[part] = at + ROW_PAGE }
+const moreRows = (n, part) => n > 0 ? `<div class="fold"><button class="mini" data-act="more" data-part="${part}">Show ${Math.min(n, ROW_PAGE)} more</button>${n > ROW_PAGE ? `<button class="mini" data-act="moreall" data-part="${part}">Show all ${n} more</button>` : ""}</div>` : "";
 /* select mode: act on many rows at once. `sel` holds row ids (the newest message of each conversation) */
 let selMode = false, sel = new Set(), selAnchor = null;
 const folding = () => view === "todo" && flt.cat === "all" && !flt.only && !flt.acct && !flt.q.trim();
@@ -131,67 +144,86 @@ function parts() {
 function listFor() { const p = parts(); return [...p.main, ...(autoOpen ? p.auto : []), ...(goneOpen ? p.gone : [])] }
 
 /* ───────── render ───────── */
-function rowHTML(t) {
+/* what an open row shows below its title: drawn only for the open row (the other rows' panels are hidden anyway, and they were most of the page) */
+function moreHTML(t) {
   const sg = t.signals || {}, why = [sg.known && "Someone you write to", sg.reply && "Replying to you", sg.bulk && "Automated or bulk"].filter(Boolean).join(" · ") || "Unknown sender";
+  return `${t.closed_by === "replied" ? `<div class="note">Closed automatically because ${t.kind === "followup" ? "they replied" : "you replied"}. Press X or the circle to reopen it if it still needs you.</div>` : ""}${t.gone && t.status !== "done" ? '<div class="note">This message is no longer in your inbox. You may have archived or moved it somewhere else.</div>' : ""}<p>${esc(t.excerpt) || "No text."}</p>${t._thread ? `<div class="thread"><span class="lbl">Earlier in this conversation</span>${t._thread.slice(1, 9).map(x => `<div>${esc(x.sender)} · ${esc(x.subject)} · ${ago(x.received)}</div>`).join("")}${t._thread.length > 9 ? `<div>and ${t._thread.length - 9} more</div>` : ""}</div>` : ""}<div class="spec">${isLocal(t) ? "" : `<div><span>From</span><b>${esc(t.sender)} · ${esc(t.addr)}</b></div><div><span>Signals</span><b>${esc(why)}</b></div><div><span>Why</span><b>${esc(t.why)}</b></div><div><span>Mailbox</span><b>${S.settings.writeback ? "Done files it away" : "Write-back off · changes stay here"}</b></div>`}</div>${replyHTML(t)}`;
+}
+function rowHTML(t) {
   const chosen = selMode && sel.has(t.uid);
   return `<div class="row ${t.uid === cur ? "cur" : ""} ${t.uid === openUid && !selMode ? "open" : ""} ${t.status === "done" ? "isdone" : ""} ${selMode ? "selmode" : ""} ${chosen ? "chosen" : ""}" data-uid="${t.uid}">
     <button class="chk" data-act="${selMode ? "sel" : "done"}" ${selMode ? `role="checkbox" aria-checked="${chosen}" aria-label="Select"` : `aria-label="${t.status === "done" ? "Reopen" : "Mark done"}"`}><b>${selMode ? "" : "X"}</b>${CHECK}</button>
     <div class="mid" data-act="open" role="button" tabindex="0" aria-expanded="${t.uid === openUid}"><div class="t">${esc(label(t))}</div><div class="s">${t.urgent ? "<b>Urgent</b> · " : ""}${tagsHTML(t)}${esc(t.sender)} · ${esc(t.subject)} · ${ago(t.received)}</div></div>
     <button class="star ${t.star ? "on" : ""}" data-act="star" aria-label="Star">${t.star ? "★" : "☆"}</button>
     <div class="pri ${t.priority >= 4 ? "hi" : ""}" role="group" aria-label="Priority">${[1, 2, 3, 4, 5].map(n => `<button data-p="${n}" class="${t.priority >= n ? "lit" : ""}" aria-label="Priority ${n}"></button>`).join("")}</div>
-    <div class="more">${t.closed_by === "replied" ? `<div class="note">Closed automatically because ${t.kind === "followup" ? "they replied" : "you replied"}. Press X or the circle to reopen it if it still needs you.</div>` : ""}${t.gone && t.status !== "done" ? '<div class="note">This message is no longer in your inbox. You may have archived or moved it somewhere else.</div>' : ""}<p>${esc(t.excerpt) || "No text."}</p>${t._thread ? `<div class="thread"><span class="lbl">Earlier in this conversation</span>${t._thread.slice(1, 9).map(x => `<div>${esc(x.sender)} · ${esc(x.subject)} · ${ago(x.received)}</div>`).join("")}${t._thread.length > 9 ? `<div>and ${t._thread.length - 9} more</div>` : ""}</div>` : ""}<div class="spec">${isLocal(t) ? "" : `<div><span>From</span><b>${esc(t.sender)} · ${esc(t.addr)}</b></div><div><span>Signals</span><b>${esc(why)}</b></div><div><span>Why</span><b>${esc(t.why)}</b></div><div><span>Mailbox</span><b>${S.settings.writeback ? "Done files it away" : "Write-back off · changes stay here"}</b></div>`}</div>${replyHTML(t)}</div>
+    <div class="more">${t.uid === openUid && !selMode ? moreHTML(t) : ""}</div>
   </div>`;
 }
 function render() {
+  let l = [];
   const open = S.tasks.filter(t => t.status !== "done" && !isSnoozed(t)), snoozed = S.tasks.filter(t => t.status !== "done" && isSnoozed(t)), st = S.status || "";
   const ok = st === "idle" || st === "syncing", err = st.startsWith("error") || st === "no password";
   const rows = list => groupThreads(list).length;
-  const tabs = [["todo", "To-do", rows(open)], ["star", "Starred", rows(open.filter(t => t.star))], ["snoozed", "Snoozed", rows(snoozed)], ["done", "Done", S.tasks.filter(t => t.status === "done").length], ["log", "Log", ""]];
+  const tabs = [["todo", "To-do", rows(open)], ["star", "Starred", rows(open.filter(t => t.star))], ["snoozed", "Snoozed", rows(snoozed)], ["done", "Done", doneTotal()], ["log", "Log", ""]];
   $("#bar").innerHTML = `<div class="brand"><span class="mark">要</span><span class="dot ${ok ? "" : err ? "err" : "off"}" title="${esc(statusTitle(st))}"></span></div>
     <nav>${tabs.map(([k, n, c]) => `<button class="${view === k ? "on" : ""}" data-view="${k}">${n}${c !== "" && c !== 0 ? `<i>${c}</i>` : ""}</button>`).join("")}</nav><span class="sp"></span>${view === "log" ? "" : `<button class="gear ${selMode ? "on" : ""}" data-act="selectmode" aria-pressed="${selMode}">Select</button>`}<button class="gear" data-act="addtask">Add task</button>${isHub ? "" : '<button class="gear" data-act="settings">Settings</button>'}`;
   const names = { todo: "To<em>-do</em>", star: "Starred", snoozed: "Snoozed", done: "Done", log: "Log" };
   const d = new Date(), kick = `${{ todo: "Inbox", star: "Marked", snoozed: "Resting", done: "Filed", log: "Record" }[view]} · ${d.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" })}`;
   let h = `<div class="kick">${kick}</div><h1>${names[view]}</h1>`;
   if (S.update && S.update.version !== updateDismissed && !isHub) h += `<div class="notice" role="status"><span>Version ${esc(S.update.version)} is available.</span><button class="mini" data-act="copy-update">Copy download link</button><button class="mini" data-act="dismiss-update">Not now</button></div>`;
+  if (view !== "done") doneWanted = 200; // the poll asks for more finished tasks only while the Done tab is open
+  if (view === "done") {
+    const loaded = S.tasks.filter(t => t.status === "done").length, total = doneTotal();
+    if (total > loaded) h += `<p class="sub2">The ${loaded} most recently finished of ${total} finished tasks. All of them are kept for 90 days.</p>${loaded < DONE_MAX ? `<div class="fold"><button class="mini" data-act="olderdone">Show ${Math.min(DONE_PAGE, total - loaded, DONE_MAX - loaded)} older</button></div>` : ""}`;
+  }
   if (view === "log" && selMode) exitSelect();
   if (selMode) pruneSel(); // rows that left the list (other tab, filter, done) cannot stay selected
   if (view === "log") {
+    lastListKey = "";
     h += `<p class="sub2">Everything the agent does, in order.</p><div class="log">${S.log.map(l => `<div><b>${new Date(l.at * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</b>${esc(l.msg)}</div>`).join("") || "<div>Nothing yet.</div>"}</div>`;
   } else {
-    const P = parts(), l = listFor();
+    const P = parts();
+    l = [...P.main, ...(autoOpen ? P.auto : []), ...(goneOpen ? P.gone : [])];
+    lastList = l;
+    const listKey = view + "|" + [flt.cat, flt.only, flt.acct, flt.q, flt.sort].join("|");
+    if (listKey !== lastListKey) { lastListKey = listKey; lim = freshLimits() } // another tab, filter, search or sort starts again at the top
     if (!l.some(t => t.uid === cur)) {
       // keep the cursor where it was: on the same conversation if its newest message changed, else the nearest row
       const was = find(cur), th = was?.thread, same = th && l.find(t => t.thread === th && t.mailbox === was.mailbox);
       cur = same ? same.uid : (l[Math.min(curIdx, l.length - 1)]?.uid ?? null);
     }
     curIdx = Math.max(0, l.findIndex(t => t.uid === cur));
+    lastSplit = [P.main.length, autoOpen ? P.auto.length : 0];
+    drawMore(curIdx); // the cursor is always on a drawn row
     const nAuto = P.auto.length, nGone = P.gone.length, shown = P.main;
     const hi = shown.filter(t => maxp(t) >= 4).length, ur = shown.filter(t => t.urgent).length, dr = shown.filter(t => t.draft).length;
     h += shown.length ? `<div class="stats"><div class="stat">${dm(shown.length)}<em>${view === "done" ? "done" : view === "snoozed" ? "resting" : "open"}</em></div>${view === "done" || view === "snoozed" ? "" : `<div class="stat">${dm(hi, hi ? "r" : "")}<em>high</em></div><div class="stat">${dm(ur, ur ? "r" : "")}<em>urgent</em></div><div class="stat">${dm(dr)}<em>drafts</em></div>`}${S.pending ? `<div class="stat">${dm(S.pending)}<em>to file</em></div>` : ""}</div>` : "";
     if (selMode) h += selbarHTML();
     if ((view === "todo" || view === "star") && (baseList().length || flt.q)) h += filterHTML();
     let last = -1;
-    for (const t of shown) {
+    for (const t of shown.slice(0, lim.main)) {
       const s = view === "todo" && flt.sort === "priority" ? sect(ep(t)) : -2;
       if (s >= 0 && s !== last) h += `<div class="sec ${SECT[s][1]}"><span>0${s + 1} // ${SECT[s][0]}</span><i>${shown.filter(x => sect(ep(x)) === s).length}</i></div>`;
       last = s; h += rowHTML(t);
     }
+    h += moreRows(shown.length - lim.main, "main");
     if (nAuto) {
       h += `<div class="fold"><button class="mini" data-act="autofold" aria-expanded="${autoOpen}">${autoOpen ? "Hide" : "Show"} automated · ${nAuto}</button>${nAuto > 1 ? '<button class="mini" data-autodone="1">Done all automated</button>' : ""}</div>`;
-      if (autoOpen) for (const t of P.auto) h += rowHTML(t);
+      if (autoOpen) { for (const t of P.auto.slice(0, lim.auto)) h += rowHTML(t); h += moreRows(P.auto.length - lim.auto, "auto") }
     }
     if (nGone) {
       h += `<div class="fold"><button class="mini" data-act="gonefold" aria-expanded="${goneOpen}">${goneOpen ? "Hide" : "Show"} left your inbox · ${nGone}</button>${nGone > 1 ? '<button class="mini" data-gonedone="1">Done all left your inbox</button>' : ""}</div>`;
-      if (goneOpen) for (const t of P.gone) h += rowHTML(t);
+      if (goneOpen) { for (const t of P.gone.slice(0, lim.gone)) h += rowHTML(t); h += moreRows(P.gone.length - lim.gone, "gone") }
     }
     const reading = st === "syncing" || st === "connecting";
     if (!l.length && !nAuto && !nGone) h += `<div class="empty">${view === "done" ? "Nothing done yet" : view === "snoozed" ? "Nothing resting" : flt.q || flt.cat !== "all" || flt.only || flt.acct ? "No matches" : reading ? "Reading your latest mail…" : ok ? "All clear" : "Waiting for mail"}<small>${reading && view === "todo" ? "The first sync can take a minute." : view === "todo" && ok ? "The agent is still watching your inbox." : ""}</small></div>`;
   }
+  lastList = l; // the list the cursor moves through (empty on the Log tab)
   const wasSearching = document.activeElement?.id === "q", caret = wasSearching ? document.activeElement.selectionStart : 0;
   $("#view").innerHTML = h;
   if (wasSearching) { const q = $("#q"); q.focus(); q.setSelectionRange(caret, caret) }
   const msg = err ? `<span class="e">${esc(st === "no password" ? (isHub ? "Open the desktop app to sign in again" : "Sign in again in Settings") : st)}</span>` : ok ? "Watching your inbox" : st === "connecting" ? "Connecting…" : st === "setup" ? "Setup needed" : esc(st);
-  const rl = view === "log" ? [] : listFor().slice(0, 80), ch = Math.max(5, Math.min(18, Math.floor((innerHeight - 40) / Math.max(rl.length, 1))));
+  const rl = view === "log" ? [] : l.slice(0, 80), ch = Math.max(5, Math.min(18, Math.floor((innerHeight - 40) / Math.max(rl.length, 1))));
   $("#rail").style.setProperty("--ch", ch + "px");
   $("#rail").innerHTML = rl.map(t => `<div class="rc ${t.uid === cur ? "cur" : ""}" data-rail="${t.uid}" title="${esc(label(t))}">${ch >= 10 ? [5, 4, 3, 2, 1].map(n => `<i class="${t.priority >= n ? "h" : ""}"></i>`).join("") : `<i class="${t.priority >= 4 ? "h" : ""}"></i>`}</div>`).join("");
   $("#foot").innerHTML = `<span>${msg}</span><span class="sp"></span><span class="keys"><span class="cap">J</span><span class="cap">K</span>Move<span class="cap">X</span>Done<span class="cap">1–5</span>Priority<span class="cap">S</span>Star<span class="cap">R</span>Reply<span class="cap">H</span>Snooze<span class="cap">V</span>Select<span class="cap">/</span>Search<span class="cap">A</span>Add<span class="cap">Z</span>Undo<span class="cap">?</span>Keys</span>`;
@@ -235,7 +267,22 @@ function toggleStar(t) {
   before.forEach(([u]) => { const x = find(u); if (x) x.star = v; call("set_star", { uid: u, star: v }) });
   undoStack.push(() => before.forEach(([u, was]) => { const x = find(u); if (x) x.star = was; call("set_star", { uid: u, star: was }) })); render();
 }
-function move(d) { const l = listFor(); let i = l.findIndex(t => t.uid === cur); i = Math.max(0, Math.min(l.length - 1, i + d)); cur = l[i]?.uid ?? null; render(); document.querySelector(".row.cur")?.scrollIntoView({ block: "nearest" }) }
+function move(d) {
+  const l = lastList || listFor(); if (!l.length) return;
+  let i = l.findIndex(t => t.uid === cur); i = Math.max(0, Math.min(l.length - 1, i + d));
+  const next = l[i]?.uid ?? null;
+  if (next === cur) { document.querySelector(".row.cur")?.scrollIntoView({ block: "nearest" }); return } // at the first or last row: bring the cursor back into view
+  cur = next; curIdx = i;
+  const now = next == null ? null : document.querySelector(`.row[data-uid="${next}"]`);
+  if (!now) { drawMore(i); render() } // not drawn yet: draw more
+  else {
+    // a row that has the keyboard focus (reached with Tab) would pull the cursor back to itself on the next key: let go of it
+    if (document.activeElement && document.activeElement.closest && document.activeElement.closest(".row")) document.activeElement.blur();
+    document.querySelector(".row.cur")?.classList.remove("cur"); now.classList.add("cur");
+    document.querySelector("#rail .rc.cur")?.classList.remove("cur"); document.querySelector(`#rail [data-rail="${next}"]`)?.classList.add("cur");
+  }
+  document.querySelector(".row.cur")?.scrollIntoView({ block: "nearest" });
+}
 
 document.addEventListener("click", e => {
   if ($("#veil").classList.contains("show")) return;
@@ -245,6 +292,8 @@ document.addEventListener("click", e => {
   if (a === "settings") return openSettings();
   if (a === "addtask") return openAdd();
   if (a === "selectmode") { selMode ? exitSelect() : enterSelect(); return }
+  if (a === "olderdone") { doneWanted = Math.max(doneWanted, S.tasks.filter(t => t.status === "done").length) + DONE_PAGE; lastSnap = ""; load(); return }
+  if (a === "more" || a === "moreall") { const part = e.target.closest("[data-part]")?.dataset.part; if (part in lim) { lim[part] = a === "more" ? lim[part] + ROW_PAGE : 1e9; render() } return }
   if (a === "autofold") { autoOpen = !autoOpen; render(); return }
   if (a === "gonefold") { goneOpen = !goneOpen; render(); return }
   if (a === "copy-update" && S.update) { copyText(S.update.url); return }
@@ -286,8 +335,8 @@ $("#undoBtn").onclick = () => { undoStack.pop()?.(); $("#undo").style.display = 
 async function load() {
   if (busy) return;
   try {
-    const d = await rpc("state"), snap = JSON.stringify([d.tasks, d.log, d.status, d.pending, d.settings, d.update, d.accounts]);
-    if (snap === lastSnap) return; lastSnap = snap; S = d;
+    const d = await rpc("state", { done: view === "done" ? doneWanted : 200 }), snap = JSON.stringify([d.tasks, d.log, d.status, d.pending, d.settings, d.update, d.accounts, d.done_total]);
+    if (snap === lastSnap) return; lastSnap = snap; S = d; S._doneAtLoad = d.tasks.filter(t => t.status === "done").length;
     if (flt.acct && !(d.accounts || []).some(a => String(a.id) === flt.acct)) flt.acct = ""; // that mailbox is gone
     const v = $("#veil");
     if (!d.settings.onboarded && !isHub) { if (!v.classList.contains("show")) openWizard() }
