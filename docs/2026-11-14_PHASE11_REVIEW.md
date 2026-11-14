@@ -62,11 +62,12 @@ Budget used: 1 of 3 rounds. The skill names OpenAI's GPT Sol; at the owner's ins
 | 9 | `f01f503` (after four fixes) | green on Windows, Linux and macOS (engine tests; the window's tests on Linux) |
 | 10 | `98e2456` (window tests on all three) | **failed on Ubuntu**, in the window's tests; the annotation said only "exit code 1" (a test that times out matches none of the names the annotation step looked for); Windows and macOS passed |
 | 11 | `35f11e0` (annotations carry the last lines of the log) | green on all three, window tests included |
+| 12 | `05c6613` (this phase) | green on all three, window tests included, and the `audit` job |
 
 **The cause of run 10's failure was not found.** The same code passed in run 11, so it is either a flake or a race, probably in the
 window's tests on a small runner (two browsers at once). It is recorded in the testing strategy, the test plan and the decision record
-instead of being called fixed. If it comes back, the annotation now names the last lines of the log. This phase's own CI run is
-recorded in `docs/VERSION_HISTORY.md` when it exists.
+instead of being called fixed. If it comes back, the annotation now names the last lines of the log. Two green runs in a row (11 and
+12) are not proof that it is gone.
 
 ## What these gates could not cover
 
