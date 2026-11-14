@@ -231,7 +231,7 @@ async function pickBackup(input) {
   veil.dataset.kind = "restore"; await previewRestore();
   if (RS !== rs) return; // closed while the file was being read
   drawRestore();
-  setTimeout(() => veil.querySelector("[data-q=go]:not([disabled]), [data-q=cancel]")?.focus(), 30);
+  setTimeout(() => veil.querySelector("[data-q=cancel]")?.focus(), 30); // Cancel, so that Enter pressed by reflex restores nothing
 }
 async function previewRestore() {
   const rs = RS, asked = rs.withOptions; rs.error = ""; rs.preview = null;

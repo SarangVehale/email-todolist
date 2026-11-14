@@ -41,7 +41,7 @@ and alerts you only when something is important.
 
 | Path | What it is |
 | --- | --- |
-| `app/` | Tauri 2 desktop app. UI in `app/ui` (plain HTML, CSS and JS, no build step); shell in `app/src-tauri` |
+| `app/` | Tauri 2 desktop app. UI in `app/ui` (plain HTML, CSS and JS, no build step); its tests in `app/test`; shell in `app/src-tauri` |
 | `engine/` | Rust engine: IMAP watcher, signals, triage, SQLite, mailbox write-back, phone hub |
 | `SECURITY.md` | Security review, fixes, residual risks |
 | `RELEASING.md` | How to cut a release: signing secrets, tagging, CI, verification, rollback |
@@ -55,12 +55,17 @@ and alerts you only when something is important.
 ```bash
 cd engine && cargo test                       # unit, security and hub tests
 cd engine && cargo clippy --all-targets -- -D warnings
+cd app && npm test                             # the window's own tests, in a real browser (Node 22 or later; nothing to install)
 cd app && npm ci && npx tauri build            # Windows installer; needs Rust, Node, MSVC Build Tools
 ```
 
 Preview the UI with demo data and no engine: serve `app/ui` over HTTP and open `/demo.html?demo=1`.
 `demo.html` loads the invented-mail backend and accepts any password, so the phone hub refuses to serve it; it is for
 development only.
+
+`npm test` in `app` runs the window's own tests: they open the real `app/ui` files in a browser that is already on the machine
+(Edge or Chrome on Windows, Chrome, Edge or Chromium on macOS and Linux, found automatically; set `INBOX_AGENT_BROWSER` to the path of another Chromium-based browser) and drive them with real key presses and
+clicks against the demo backend. They need no install. Without a browser they are skipped, unless `INBOX_AGENT_UI_TESTS=require`.
 
 Read-only check against a real mailbox, without the app:
 
@@ -70,7 +75,7 @@ IMAP_HOST=imap.example.com IMAP_USER=you@example.com IMAP_PASS=... cargo run --e
 
 ## Status
 
-Built and tested: engine (459 tests, including protocol tests against a scripted mock IMAP server and a dedicated edge-case suite), UI in a browser, phone hub, installer build.
+Built and tested: engine (459 tests, including protocol tests against a scripted mock IMAP server and a dedicated edge-case suite), the window (49 tests in a real browser), UI in a browser, phone hub, installer build.
 The IMAP sync and write-back are tested against a scripted mock server, which proves what the client sends and how it parses
 standard responses, but a real Gmail or other server may differ. Not yet exercised against a live mailbox, and releases are unsigned.
 See [SECURITY.md](SECURITY.md) for the full list of limits.

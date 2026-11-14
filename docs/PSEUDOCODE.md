@@ -440,7 +440,7 @@ the window:
 Edge cases: more than 200 finished, more than 150 open, a cursor beyond the drawn rows or in a fold, a filter or tab change with the
 cursor deep in the list, an open row, a row with the keyboard focus, select mode, undo of a bulk finish after a poll, the Log tab, a
 window that is hidden, the phone, a finished conversation straddling the limit — `phase8.rs` for the engine's part; the window's part
-is driven in the browser and by `scripts/scale_check` (`docs/designs/phase8.md`).
+is driven in the browser, by `scripts/scale_check` (`docs/designs/phase8.md`) and by the window's own tests in `app/test` (`docs/designs/phase9.md`).
 
 ## 6. Changing the real mailbox (`writeback.rs`) — only when the user turned it on
 

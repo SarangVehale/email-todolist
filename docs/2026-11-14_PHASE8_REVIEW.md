@@ -51,8 +51,8 @@ they were verified by driving each path in the browser, which is the gap named n
 
 ## What these gates could not cover
 
-The window has no automated test. A JavaScript test harness for `app/ui` (for example the whole list, cursor and undo logic run under
-Node with a small DOM) would have caught the undo and focus defects before review; it is the next thing worth building. Nothing was
+At the time of this review the window had no automated test. A JavaScript test harness for `app/ui` (for example the whole list, cursor and undo logic run under
+Node with a small DOM) would have caught the undo and focus defects before review; it is the next thing worth building (done in Phase 9: `docs/designs/phase9.md`, which runs the real window in a real browser instead of under Node with a small DOM). Nothing was
 run on macOS, Linux or a real phone, and whether `document.hidden` becomes true in the packaged window when it is minimised or sent to
 the tray is checked by `docs/TESTCASES.manual.md` MT-135, not by a test.
 

@@ -342,6 +342,21 @@ the one that mattered was about the user's data.
 | The documents promised a search of finished tasks that does not exist, and counts that were not true on the Done tab | Reworded; the promises now say what the code does |
 | The new scale check could have deleted a real app data folder | It refuses to run if the folder exists; it only removes a folder it created |
 
+## Review 10 (Phase 9: tests for the window; council, drift passes and an Opus review loop, 2026-11-14)
+
+No new input, no new command and no change in what the app does (one line in the restore dialog was reworded to say what it already did).
+The new thing is the test harness in `app/test`, which opens a local web server and a browser's debugging port while tests run, so that
+was what the reviewers looked at. A two-seat council (Opus: do not ship until two things were fixed; Sonnet: ship with caveats), a Sonnet
+pass and a Haiku pass over the documents, and an Opus reviewer in two rounds (round 2: approve) are recorded in
+`docs/2026-11-14_PHASE9_REVIEW.md`.
+
+| Finding | Fix |
+| --- | --- |
+| What the harness opens: the server serves only files under `app/ui` and listens on 127.0.0.1 only (a `..` or absolute path gets a 404, a malformed `%` in an address got an unhandled exception and now gets a 400); the browser's debugging port listens on 127.0.0.1 and exists only while tests run, so a local program could drive an empty-profile browser during a run | Accepted: same trust as any local development server; the browser starts with an empty temporary profile |
+| What the harness ends: it ends processes. The first version ended the one process it started (not the browser, on Windows, and `taskkill` was not found from some shells), a later one searched for processes by the run's own temporary profile folder without a time limit, and a number the browser had reported could be reused by another process before it was killed | It asks the browser for its own process number and ends that process, and its helpers, at the moment it reports it; it calls the system tools by full path; the search by profile folder (the run's own random folder name, never anything else) is used only if the browser does not stop answering, with a time limit; folders are deleted by a process that only ever deletes folders it created |
+| A start that failed part-way left a server listening and a browser running, so a test run never ended and the browser stayed | A failed start ends what it began; every wait has a time limit |
+| No dependency was added (a request to install a DOM library was refused by the permission system and not retried), nothing is downloaded, nothing can send mail, and `app/test` is outside what the installer bundles | |
+
 ## Reporting a vulnerability
 
 Please report privately to the maintainer rather than opening a public issue. Add a contact address
