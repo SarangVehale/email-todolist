@@ -78,6 +78,33 @@ suite("the Add a mailbox dialog", it => {
     assert.match(await page.run(() => document.querySelector("#mtestres .bad").textContent), /already in the app/);
     assert.equal(await page.run(() => S.accounts.length), 2);
   });
+
+  // "Other IMAP server" shows a Port box. An empty one reads as 0, which the engine refuses with a plain sentence instead of
+  // trying to connect; the dialog shows that sentence as it is and keeps Add off.
+  it("an empty Port box says the port isn't valid and a real port connects", async page => {
+    await addDialog(page);
+    await page.run(() => { const s = document.querySelector("#m-provider"); s.value = "other"; s.dispatchEvent(new Event("change", { bubbles: true })) });
+    await page.waitFor(() => document.querySelector("#m-port"));
+    await page.fill("#m-host", "mail.example.org"); await page.fill("#m-user", "new@example.org"); await page.fill("#m-pw", "secret");
+    await page.fill("#m-port", "");
+    await page.click("#m-test");
+    await page.waitFor(() => document.querySelector("#mtestres .bad"));
+    assert.equal(await page.run(() => document.querySelector("#mtestres .bad").textContent), "That mail server port isn't valid");
+    assert.equal(await page.run(() => document.querySelector("#m-add").disabled), true, "Add stays off until a test passes");
+    await page.fill("#m-port", "993");
+    await page.click("#m-test"); await page.waitFor(() => document.querySelector("#mtestres .ok"));
+    assert.equal(await page.run(() => document.querySelector("#m-add").disabled), false, "a real port passes and Add turns on");
+  });
+
+  it("a server name with a space in it is refused by the test, in the engine's words", async page => {
+    await addDialog(page);
+    await page.run(() => { const s = document.querySelector("#m-provider"); s.value = "other"; s.dispatchEvent(new Event("change", { bubbles: true })) });
+    await page.waitFor(() => document.querySelector("#m-host"));
+    await page.fill("#m-host", "mail example.org"); await page.fill("#m-user", "new@example.org"); await page.fill("#m-pw", "secret");
+    await page.click("#m-test");
+    await page.waitFor(() => document.querySelector("#mtestres .bad"));
+    assert.equal(await page.run(() => document.querySelector("#mtestres .bad").textContent), "That mail server name isn't valid");
+  });
 });
 
 suite("the mailboxes in Settings and on the list", it => {

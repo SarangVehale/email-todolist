@@ -43,7 +43,9 @@ Object.assign(M.tasks.find(t => t.uid === 7), { event: { summary: "Appointment a
 const BODIES = { 12: "Sending three options. The boiler flight is the cheapest one, tell me which works.", 15: "Statement attached. Your direct debit for the boiler service plan is due." };
 for (const x of M.tasks) x.mailbox = x.uid >= 2000000000 ? (x.kind === "followup" ? 0 : null) : 0;
 for (const u of [15, 18]) { const x = M.tasks.find(y => y.uid === u); x.uid += 400000000; x.mailbox = 1; if (BODIES[u]) { BODIES[u + 400000000] = BODIES[u]; delete BODIES[u] } }
-const syncAccounts = () => { M.accounts = [M.settings.account, ...M.settings.more_accounts].filter(m => m.host).map(m => ({ id: m.id, user: m.user, host: m.host, gmail: /(^|\.)gmail\.com$/.test(m.host), status: "idle" })) };
+// A mail server port that is given must be a whole number from 1 to 65535 (the engine refuses anything else; none means 993).
+const portBad = a => a.port !== undefined && a.port !== null && !(Number.isInteger(a.port) && a.port >= 1 && a.port <= 65535);
+const syncAccounts = () => { M.accounts =[M.settings.account, ...M.settings.more_accounts].filter(m => m.host).map(m => ({ id: m.id, user: m.user, host: m.host, gmail: /(^|\.)gmail\.com$/.test(m.host), status: "idle" })) };
 syncAccounts();
 M.settings.drafts = { auto: false, tone: "friendly", signature: "Best,\nSam", min_priority: 3, daily_cap: 25 };
 Object.assign(M.settings.alerts, { quiet_start: "", quiet_end: "", digest_time: "", categories: [] });
@@ -107,8 +109,19 @@ function mock(cmd, a) {
     case "export_markdown": return Promise.resolve("# To-do\n" + M.tasks.filter(x => x.status === "open" && !(x.snooze_until > Date.now() / 1000)).map(x => `\n- [ ] **P${x.priority}** ${x.action || x.subject} — ${x.sender} (${x.category})`).join("") + "\n");
     case "set_star": t().star = a.star; return Promise.resolve(true);
     case "set_priority": log(`P${t().priority}→P${a.priority} saved as a correction`); t().priority = a.priority; return Promise.resolve(true);
-    case "test_account": return new Promise((res, rej) => setTimeout(() => /@/.test(a.user) && a.password ? res({ ok: true, sent: "[Gmail]/Sent Mail" }) : rej("login failed: enter an address and app password"), 900));
+    case "test_account": {
+      // the same checks, in the same order, as the engine: nothing connects until they pass
+      if (portBad(a)) return Promise.reject("That mail server port isn't valid");
+      if (!a.host || !a.user) return Promise.reject("Enter the mail server and the email address");
+      if (!/^[A-Za-z0-9.-]{1,253}$/.test(a.host)) return Promise.reject("That mail server name isn't valid");
+      if (/[\u0000-\u001f\u007f-\u009f]/.test(a.user) || a.user.length > 320) return Promise.reject("That email address isn't valid");
+      if (!String(a.password || "").replace(/ /g, "")) return Promise.reject("Enter the app password");
+      return new Promise((res, rej) => setTimeout(() => /@/.test(a.user) ? res({ ok: true, sent: "[Gmail]/Sent Mail" }) : rej("login failed: enter an address and app password"), 900));
+    }
     case "save_account": {
+      if (!String(a.password || "").replace(/ /g, "")) return Promise.reject("Enter the app password for this mailbox");
+      if (portBad(a)) return Promise.reject("That mail server port isn't valid");
+      if (!a.host || !a.user) return Promise.reject("Enter the mail server and the email address");
       const id = a.id || 0;
       if (id === 0) M.settings.account = { id: 0, host: a.host, port: a.port, user: a.user };
       else { const m = M.settings.more_accounts.find(x => x.id === id); if (!m) return Promise.reject("There is no such mailbox"); Object.assign(m, { host: a.host, port: a.port, user: a.user }) }
@@ -118,7 +131,8 @@ function mock(cmd, a) {
       if (!M.settings.onboarded || !M.accounts.length) return Promise.reject("Set up your first mailbox before adding another");
       if (!String(a.password || "").replace(/ /g, "")) return Promise.reject("Enter the app password for this mailbox");
       if (M.accounts.length >= 5) return Promise.reject("You can read at most five mailboxes at once");
-      if (!/@/.test(a.user || "") || !a.host) return Promise.reject("Enter a server and an email address");
+      if (portBad(a)) return Promise.reject("That mail server port isn't valid");
+      if (!/@/.test(a.user || "") || !a.host) return Promise.reject("Enter the mail server and the email address of this mailbox");
       if (M.accounts.some(m => m.host.toLowerCase() === String(a.host).toLowerCase() && m.user.toLowerCase() === String(a.user).toLowerCase())) return Promise.reject("That mailbox is already in the app");
       const used = new Set(M.accounts.map(m => m.id)); let id = 0; while (used.has(id)) id++;
       if (id === 0) M.settings.account = { id, host: a.host, port: a.port || 993, user: a.user }; else M.settings.more_accounts.push({ id, host: a.host, port: a.port || 993, user: a.user }); syncAccounts(); return Promise.resolve(id);
@@ -165,7 +179,7 @@ function mock(cmd, a) {
     case "detect_ollama": return Promise.resolve(["llama3.2:3b", "qwen2.5:7b"]);
     case "test_ai": { const ai = M.settings.ai || {}; if (ai.mode === "ollama" && !String(ai.ollama_model || "").trim()) return Promise.reject("No model is chosen"); if (ai.mode === "anthropic" && !M.hasKey) return Promise.reject("No API key is saved"); } return new Promise(r => setTimeout(() => r({ priority: 5, category: "work", action: "Sign the contract", why: "deadline today" }), 700));
     case "rotate_hub_token": return Promise.resolve(true);
-    case "finish_setup": M.settings.onboarded = true; return Promise.resolve(true);
+    case "finish_setup": if (!M.settings.account.host || !M.settings.account.user) return Promise.reject("Add your first mailbox before finishing setup"); M.settings.onboarded = true; return Promise.resolve(true);
     case "sign_out": M.settings.onboarded = false; M.settings.account = { id: 0, host: "", user: "", port: 993 }; M.settings.more_accounts = []; syncAccounts(); return Promise.resolve(true);
     case "hub_info": { let c = ""; for (let y = 0; y < 21; y++) for (let x = 0; x < 21; x++) if ((x * 7 + y * 13 + x * y) % 3 === 0) c += `<rect x="${x}" y="${y}" width="1" height="1"/>`; return Promise.resolve({ url: "http://192.168.1.20:8787/?token=demo", enabled: true, svg: `<svg viewBox="0 0 21 21" shape-rendering="crispEdges"><rect width="21" height="21" fill="#fff"/>${c}</svg>` }) }
   }
