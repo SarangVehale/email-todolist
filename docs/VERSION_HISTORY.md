@@ -35,7 +35,7 @@ different questions:
 | Phase 5 | 2026-11-13 | `c451c59` | 366 | Reminders and repeats, search inside messages, calendar invitations to `.ics` | `SECURITY.md` Review 6, `docs/2026-11-13_PHASE5_REVIEW.md` |
 | Phase 6 | 2026-11-13 | `4a525eb` | 412 | Several mailboxes in one list (up to five) | `SECURITY.md` Review 7, `docs/2026-11-13_PHASE6_REVIEW.md` |
 | Phase 7 | 2026-11-14 | `e0fb142` | 453 | Backup and restore, and these history documents | `SECURITY.md` Review 8, `docs/2026-11-14_PHASE7_REVIEW.md` |
-| Phase 8 | 2026-11-14 | _(set when it is committed)_ | 459 | A big mailbox stays fast (the window is sent the newest finished tasks, draws 150 rows at a time and moves the cursor without redrawing) | `docs/designs/phase8.md`, `docs/2026-11-14_PHASE8_REVIEW.md` (to come) |
+| Phase 8 | 2026-11-14 | `d262695` | 459 | A big mailbox stays fast (the window is sent the newest finished tasks, draws 150 rows at a time and moves the cursor without redrawing) | `docs/designs/phase8.md`, `docs/2026-11-14_PHASE8_REVIEW.md` |
 
 ## What has not happened yet
 
