@@ -130,7 +130,7 @@ the live cases are still owed (see [the test plan](../testing/test-plan.md)).
 | NFR-07 | The phone hub needs an access code, locks out guessers, serves only private networks and allows only a safe set of commands | built; plain HTTP is a documented residual risk | US-29 |
 | NFR-08 | Keyboard and screen-reader support: roles, labels, focus handling, announcements, reduced motion | partly: attributes in place; no screen-reader test has been run | US-12 |
 | NFR-09 | Behaviour verified against real mail servers, calendars and clean machines | not built: the manual cases are owed | the test plan |
-| NFR-10 | Automated tests: the engine against a scripted server, the window in a real browser | built: 470 engine tests, 58 window tests | all |
+| NFR-10 | Automated tests: the engine against a scripted server, the window in a real browser | built: 470 engine tests, 61 window tests | all |
 | NFR-11 | A pure black window with greys, white and one red accent, in the same files on desktop and phone | built | US-12 |
 
 ## Measurable targets

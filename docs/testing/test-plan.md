@@ -29,7 +29,7 @@ flowchart LR
 | Environment | What runs there | Status |
 | --- | --- | --- |
 | Windows (the development machine), Edge, Node 24 | Engine tests, window tests, the packaged build, the scale check, the install and uninstall cycle | verified by the author; not on a clean machine |
-| Windows, Ubuntu 22.04 and macOS in CI | Format, lint, engine tests, documentation checks; the window tests | passes (run 11, 2026-11-14); one earlier Linux run of the window tests failed and the next passed, cause not found |
+| Windows, Ubuntu 22.04 and macOS in CI | Format, lint, engine tests, documentation checks; the window tests | passes (run 11, 2026-11-14); three Linux runs of the window tests failed the first day (a browser slow to start: fixed in Phase 12) |
 | Node 22 (the version CI uses) | Window tests | passes in CI |
 | Linux and macOS, on a real machine | The installer and the manual cases | **not yet run** |
 | A real mailbox: Gmail with an app password, and one other provider | Manual cases A to D | **not yet run** |
@@ -111,8 +111,9 @@ keep the text of the Log tab (never a password).
 ## Risks and what is not covered
 
 * The scripted IMAP server does not speak TLS and is not Gmail. Everything about real servers rests on sections A to D.
-* `ci.yml` passes, but one Linux run of the window tests failed and the next passed, and the cause was not found. `release.yml` has
-  never run.
+* `ci.yml` passes. Three Linux runs of the window tests failed the first day because the browser was slow to start; the harness now waits
+  longer and tries twice, and has not been run enough times since to call that gone. `release.yml` has run twice on throwaway tags and not to
+  the end.
 * What a screen reader says, the focus order and the phone's layout have no test, manual or automatic; a machine checks only names, dialog labels,
   contrast and the size of what is clicked (`app/test/a11y.test.mjs`).
 * macOS asks you to open an unsigned app with right-click and Open; Windows shows SmartScreen. Say so in the release notes.

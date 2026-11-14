@@ -178,13 +178,22 @@ export class Harness {
       try { if (Date.now() - fs.statSync(dir).mtimeMs > 3600e3) fs.rmSync(dir, { recursive: true, force: true }) } catch { /* in use */ }
     } // only those more than an hour old: a run that is going on now has newer ones
   }
-  static async start() {
+  /** Starts a browser, and starts it once more if the first start took too long. On a busy hosted runner (two browsers starting at once,
+   *  straight after the engine's tests) about one start in fifty took longer than the old fixed wait of 15 seconds, and every test of that file was
+   *  cancelled: CI runs 10 and 22 and a release rehearsal. `exe`, `lead` (arguments put before the browser's), `waitMs` and
+   *  `attempts` are for the harness's own test. */
+  static async start({ exe, lead = [], waitMs = 40000, attempts = 2 } = {}) {
+    for (let n = 1; ; n++) {
+      try { return await Harness.startOnce(exe, waitMs, lead) } catch (e) { if (n >= attempts || !e.retry) throw e; await sleep(1000) }
+    }
+  }
+  static async startOnce(given, waitMs, lead = []) {
     if (typeof WebSocket === "undefined") {
       if (required) throw new Error("these tests need Node 22 or later (the built-in WebSocket)");
       return null;
     }
     Harness.sweep();
-    const exe = findBrowser();
+    const exe = given || findBrowser();
     if (!exe) {
       if (required) throw new Error("no Chromium-based browser found, and INBOX_AGENT_UI_TESTS=require (set INBOX_AGENT_BROWSER to its path)");
       return null;
@@ -195,16 +204,17 @@ export class Harness {
     h.profile = fs.mkdtempSync(path.join(os.tmpdir(), "inbox-agent-ui-")); live.add(h.profile);
     const args = ["--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check", "--disable-extensions", "--disable-background-networking", `--user-data-dir=${h.profile}`, "--remote-debugging-port=0", "--window-size=1200,900"];
     if (process.platform === "linux") args.push("--no-sandbox"); // hosted CI runners start it as a user without the kernel features the sandbox needs
-    h.proc = spawn(exe, [...args, "about:blank"], { stdio: "ignore" });
+    h.proc = spawn(exe, [...lead, ...args, "about:blank"], { stdio: "ignore" });
     h.proc.on("error", e => { h.spawnError = e }); h.proc.unref();
     const portFile = path.join(h.profile, "DevToolsActivePort");
     let port = 0; // the file can be there but locked, or there but not yet written: read it until it holds a number
-    for (let i = 0; i < 300 && !port; i++) {
+    const until = Date.now() + waitMs; // (the process we started may have ended: Edge on Windows hands over to another one, so that is not a failure)
+    while (!port && Date.now() < until) {
       if (h.spawnError) throw new Error("the browser could not be started: " + h.spawnError.message);
       try { const first = fs.readFileSync(portFile, "utf8").split("\n")[0].trim(); if (/^\d+$/.test(first)) port = +first } catch { /* not there yet, or in use */ }
       if (!port) await sleep(50);
     }
-    if (!port) throw new Error("the browser did not start");
+    if (!port) throw Object.assign(new Error(`the browser did not start within ${Math.round(waitMs / 1000)} seconds`), { retry: true });
     h.browserUrl = `http://127.0.0.1:${port}`;
     return h;
     } catch (e) { await h.stop(); throw e }
@@ -320,7 +330,7 @@ export function suite(name, define) {
   const skip = typeof WebSocket === "undefined" && !required ? "needs Node 22 or later (the built-in WebSocket)" : !findBrowser() && !required ? (given ? `INBOX_AGENT_BROWSER is set to ${given}, which is not there` : "no Chromium-based browser found (set INBOX_AGENT_BROWSER)") : false;
   describe(name, { skip }, () => {
     let h;
-    before(async () => { h = await sharedHarness() }, { timeout: 60000 });
+    before(async () => { h = await sharedHarness() }, { timeout: 150000 }); // two starts of up to 40 seconds each, and a pause
     define((title, fn, opts = {}) => nodeIt(title, { timeout: 120000 }, async () => {
       const page = await h.page();
       try {

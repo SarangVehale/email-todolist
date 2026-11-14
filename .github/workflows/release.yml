@@ -61,7 +61,17 @@ jobs:
         shell: bash
         env:
           INBOX_AGENT_UI_TESTS: require
-        run: cd app && npm test
+        run: |
+          set -o pipefail
+          cd app && npm test 2>&1 | tee "$RUNNER_TEMP/window-tests.log"
+      - name: Say which window tests failed (a job log needs a sign-in to read; an annotation does not)
+        if: failure() && runner.os == 'Linux'
+        shell: bash
+        run: |
+          f="$RUNNER_TEMP/window-tests.log"
+          [ -f "$f" ] || exit 0
+          msg=$( { grep -E -A6 "^\s*✖|AssertionError|Error:" "$f" | head -60; echo "--- the last lines ---"; tail -30 "$f"; } | tr -d '\r' | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}' || true)
+          echo "::error title=Window tests failed::$msg"
 
   build:
     needs: test

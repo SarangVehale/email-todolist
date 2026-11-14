@@ -11,7 +11,7 @@ through. The plan for one release, with its sign-off, is [the test plan](test-pl
 | Layer | What it proves | Where | Count | Run it with |
 | --- | --- | --- | --- | --- |
 | Engine tests | What the engine does: parsing, ranking, the store, the commands, the phone hub, and the IMAP client against a scripted server | `engine/tests/*.rs` | 470 in 21 files | `cd engine && cargo test` |
-| Window tests | What the real window does with the demo backend's answers, driven by real key presses and clicks in a headless browser | `app/test/*.test.mjs` | 58 in 5 files | `cd app && npm test` |
+| Window tests | What the real window does with the demo backend's answers, driven by real key presses and clicks in a headless browser | `app/test/*.test.mjs` | 61 in 6 files | `cd app && npm test` |
 | Scripts | The version fields agree, the release check works, the catalogue and the documents are current | `scripts/` | the checks, and tests of two of them (`test_bump_version.py` has 9) | see below |
 | Packaged app | The built program as a user and a hostile neighbour meet it, its installer, and a heavy mailbox (Windows only) | `scripts/packaged_check/`, `scripts/scale_check/` | 114 checks, an install cycle, one measurement | `python scripts/packaged_check/check_app.py` |
 | Manual cases | Behaviour that needs a real mailbox, a real calendar, a real phone or a clean machine | `docs/TESTCASES.manual.md` | 129 cases, MT-01 to MT-138 | by hand |
@@ -23,7 +23,7 @@ are slow, few and need a person or a machine set aside.
 
 ```mermaid
 flowchart BT
-    E["Engine tests: 470, no network, a scripted IMAP server on localhost"] --> W["Window tests: 58, the real files in a real headless browser"]
+    E["Engine tests: 470, no network, a scripted IMAP server on localhost"] --> W["Window tests: 61, the real files in a real headless browser"]
     W --> P["Packaged app: 114 checks, the install cycle, the scale check, Windows only"]
     P --> M["Manual cases: 129, a live mailbox and clean machines"]
 ```
@@ -141,8 +141,10 @@ the same code, passed). `release.yml` has never run, so what is said of it is wh
 | `audit` | Linux | `cargo audit` (engine), `cargo audit -f app/src-tauri/Cargo.lock`, `npm audit` in `app` | a vulnerable dependency |
 
 `fail-fast` is off, so a failure on one system does not hide the others. The window tests use the browser each runner already has
-(the harness picks a Chromium-based one). One run on Linux failed in them and the next, on the
-same code, passed; the cause was not found, and a failure now puts the last lines of the log into the annotation.
+(the harness picks a Chromium-based one). Three runs on Linux failed in them in the first day
+because the browser did not open its debugging port within the harness's fixed 15 seconds on a busy runner; the harness now waits up to
+40 seconds and starts the browser once more (`harness.test.mjs` tests that with a fake browser). A failure puts the last lines of the log
+into the annotation, which is how the cause was read.
 
 The release workflow runs on a tag like `v0.1.0`: it **verifies** that the tag, every version field, a dated changelog entry and a
 row in `docs/RELEASE_HISTORY.md` agree, **tests** (clippy, `cargo test` and the documentation checks on all three systems, and the
@@ -223,8 +225,8 @@ A test that fails once in a hundred runs is a defect in the test or in the code,
 * **Appearance, the phone's layout, and what a screen reader says.** `a11y.test.mjs` checks what a machine can: every control has a name,
   every dialog has a role and a name of its own, text is readable on black (4.5 to 1, 3 to 1 for large text) and nothing that is clicked is
   under 24 by 24 pixels. It does not hear a screen reader, check focus order or what is announced, or look at the phone's layout. The Tab
-  trap in dialogs and selecting a range by key have no window test. One run of the window tests on Linux failed once and the cause was not
-  found; 54 later runs on Ubuntu (36 of the window tests alone, 18 straight after the engine tests) all passed.
+  trap in dialogs and selecting a range by key have no window test. Three runs of the window tests on Linux failed (a browser that was slow to
+  start; fixed in Phase 12). No run has been repeated since the fix long enough to call it gone.
 * **A published release.** Nothing has been released; the signed-installer, checksum and update paths have never been exercised.
 
 ## Related

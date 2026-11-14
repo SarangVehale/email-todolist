@@ -69,6 +69,12 @@ window's tests on a small runner (two browsers at once). It is recorded in the t
 instead of being called fixed. If it comes back, the annotation now names the last lines of the log. Two green runs in a row (11 and
 12) are not proof that it is gone.
 
+*Added 2026-11-15:* it came back twice (CI run 22 on a documentation-only commit, and a release rehearsal), and the annotation this phase added
+showed the cause: `the browser did not start`, thrown by the harness after a fixed wait of 15 seconds for the browser to open its debugging
+port, on a busy runner with two browsers starting at once. The harness now waits up to 40 seconds and starts the browser once more
+(Phase 12). The 54 repeated runs on Ubuntu did not reproduce it; all but the first run of each job started a browser that the system had already cached, which
+CI and the rehearsal do not (a likely reason, not a proven one).
+
 ## What these gates could not cover
 
 * The demo backend (`app/ui/mock.js`) does not refuse everything the engine now refuses (for example a port in quotes), so a window

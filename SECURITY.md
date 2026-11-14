@@ -385,8 +385,9 @@ Haiku pass over the guides checked about 210 claims; an Opus reviewer approved i
 | "Test connection", "Detect", saving a mailbox and finishing setup took whatever they were given: an empty password was saved, setup could finish with no mailbox | They check the server name, address, password and web address first; each guard was put back once (23 mutants) and a test failed |
 | Two writes took the database's write lock late, so a sync committing in between made them fail with "database is locked" (seen on Linux) | The write lock is taken at once (`BEGIN IMMEDIATE`) |
 
-Not closed: one run of the window's tests failed on Linux in CI and the next passed on the same code, cause not found (recorded; a
-failure now puts the last lines of the log in an annotation).
+Not closed at the time: one run of the window's tests failed on Linux in CI and the next passed on the same code, cause not found (a failure
+now puts the last lines of the log in an annotation). Two more failures followed, and the annotation showed the cause: a browser that was slow
+to start on a busy runner (fixed in Phase 12).
 
 ## Reporting a vulnerability
 

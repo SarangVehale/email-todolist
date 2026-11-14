@@ -24,8 +24,9 @@ against its own demo backend (`mock.js`).
   the packaged-app run cover that.
 * The harness has to clean up browsers and profile folders itself, which was hard on Windows (Phase 9 records 43 browsers left
   behind by the first version).
-* CI runs them on Linux, Windows and macOS (the release workflow, on Linux only). They ran on Linux only until Phase 11. One Linux
-  run failed and the next, on the same code, passed; the cause was not found.
+* CI runs them on Linux, Windows and macOS (the release workflow, on Linux only). They ran on Linux only until Phase 11. Three Linux
+  runs failed in the first day (CI runs 10 and 22 and a release rehearsal) for one reason: the browser did not open its debugging port
+  within a fixed 15 seconds on a busy runner. The harness now waits up to 40 seconds and starts the browser once more (Phase 12).
 
 ## Alternatives considered
 
