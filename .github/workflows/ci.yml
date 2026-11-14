@@ -71,15 +71,36 @@ jobs:
         run: cargo doc --no-deps --locked
       - name: Engine tests (unit, security, edge cases, mock IMAP server, phone hub)
         working-directory: engine
-        run: cargo test --locked
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --locked 2>&1 | tee "$RUNNER_TEMP/engine-tests.log"
+      - name: Say which engine tests failed (a job log needs a sign-in to read; an annotation does not)
+        if: failure()
+        shell: bash
+        run: |
+          f="$RUNNER_TEMP/engine-tests.log"
+          [ -f "$f" ] || exit 0
+          msg=$(grep -E -A4 "panicked at|^test .* FAILED$|^---- .* stdout ----$" "$f" | head -80 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+          echo "::error title=Engine tests failed::$msg"
       - name: The window's own tests (the real window in a real browser)
         # Needs no install: Node's own test runner and the browser the runner already has. A missing browser is a failure here.
-        # After the engine's tests, so that a problem here cannot hide their result.
-        if: runner.os == 'Linux'
+        # After the engine's tests, and run even when they failed, so that one problem does not hide the other.
+        if: runner.os == 'Linux' && (success() || failure())
         shell: bash
         env:
           INBOX_AGENT_UI_TESTS: require
-        run: cd app && npm test
+        run: |
+          set -o pipefail
+          cd app && npm test 2>&1 | tee "$RUNNER_TEMP/window-tests.log"
+      - name: Say which window tests failed
+        if: failure() && runner.os == 'Linux'
+        shell: bash
+        run: |
+          f="$RUNNER_TEMP/window-tests.log"
+          [ -f "$f" ] || exit 0
+          msg=$(grep -E -A6 "^\s*✖|AssertionError|Error:" "$f" | head -80 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+          echo "::error title=Window tests failed::$msg"
 
   audit:
     runs-on: ubuntu-22.04
