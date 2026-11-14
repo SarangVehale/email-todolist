@@ -86,7 +86,7 @@ jobs:
       - name: The window's own tests (the real window in a real browser)
         # Needs no install: Node's own test runner and the browser the runner already has. A missing browser is a failure here.
         # After the engine's tests, and run even when they failed, so that one problem does not hide the other.
-        if: runner.os == 'Linux' && (success() || failure())
+        if: success() || failure()
         shell: bash
         env:
           INBOX_AGENT_UI_TESTS: require
@@ -94,7 +94,7 @@ jobs:
           set -o pipefail
           cd app && npm test 2>&1 | tee "$RUNNER_TEMP/window-tests.log"
       - name: Say which window tests failed
-        if: failure() && runner.os == 'Linux'
+        if: failure()
         shell: bash
         run: |
           f="$RUNNER_TEMP/window-tests.log"
