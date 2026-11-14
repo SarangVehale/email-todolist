@@ -57,7 +57,11 @@ impl Drop for Hub {
 }
 
 fn raw(port: u16, request: &[u8]) -> String {
-    let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    // a refused connection (the hub restarts whenever settings are saved, and a slow machine takes a moment to bind again) is an
+    // empty answer, so a test that waits for the hub can try again
+    let Ok(mut s) = TcpStream::connect(("127.0.0.1", port)) else {
+        return String::new();
+    };
     s.set_read_timeout(Some(Duration::from_secs(8))).unwrap();
     let _ = s.write_all(request);
     let mut out = Vec::new();
