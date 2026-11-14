@@ -4,6 +4,15 @@ updates:
     directory: /engine
     schedule: { interval: weekly }
     open-pull-requests-limit: 5
+    # Looked at on 2026-11-14 and deliberately not taken (CHANGELOG, "Dependencies"). Security updates are not affected by `ignore`.
+    ignore:
+      # ureq 3 is a rewrite of the HTTP client: every call site changes, the dependency tree grows by 18 crates, and the defaults for
+      # timeouts, redirects and body limits differ. It wants a migration of its own, with tests of the outbound requests.
+      - dependency-name: ureq
+        update-types: ["version-update:semver-major"]
+      # base64 0.23 turns on an unsafe SIMD engine by default, and nothing here uses it.
+      - dependency-name: base64
+        versions: [">=0.23"]
   - package-ecosystem: cargo
     directory: /app/src-tauri
     schedule: { interval: weekly }
