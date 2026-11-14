@@ -112,7 +112,8 @@ keep the text of the Log tab (never a password).
 * The scripted IMAP server does not speak TLS and is not Gmail. Everything about real servers rests on sections A to D.
 * `ci.yml` passes, but one Linux run of the window tests failed and the next passed, and the cause was not found. `release.yml` has
   never run.
-* Appearance, the phone's layout and screen readers have no test, manual or automatic.
+* What a screen reader says, the focus order and the phone's layout have no test, manual or automatic; a machine checks only names, dialog labels,
+  contrast and the size of what is clicked (`app/test/a11y.test.mjs`).
 * macOS asks you to open an unsigned app with right-click and Open; Windows shows SmartScreen. Say so in the release notes.
 
 ## Sign-off

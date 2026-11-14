@@ -17,6 +17,20 @@ function closeVeil() {
 }
 const rand = n => Array.from(crypto.getRandomValues(new Uint8Array(n)), b => "abcdefghjkmnpqrstuvwxyz23456789"[b % 31]).join("");
 const panel = inner => `<div class="panel" role="dialog" aria-modal="true" aria-label="Inbox Agent">${inner}</div>`;
+/** Draws a dialog's panel under its name (a redraw, such as the next wizard step, must keep it: a screen reader announces the name). */
+function showPanel(name, inner) { veil.innerHTML = panel(inner); veil.querySelector(".panel").setAttribute("aria-label", name); labelControls(veil) }
+/** A control is read out by its label, not by the text drawn near it: a label with no `for` names the control after it (the next sibling, or the first
+ *  control inside it). Without this the fields and menus of Settings that are drawn as label-then-control are just "edit" and "combo box" to a screen reader. */
+function labelControls(root) {
+  let n = 0;
+  for (const l of root.querySelectorAll("label:not([for])")) {
+    if (l.querySelector("input, select, textarea")) continue; // a label that wraps its control names it already
+    const next = l.nextElementSibling, c = next?.matches("input, select, textarea") ? next : next?.querySelector("input, select, textarea");
+    if (!c) continue;
+    if (!c.id) c.id = "lc" + (++n);
+    l.htmlFor = c.id;
+  }
+}
 
 function openWizard() { veil.dataset.kind = "wizard"; veil.classList.add("show"); drawWizard(); dialogOpened("Set up Inbox Agent") }
 function drawWizard() {
@@ -54,7 +68,7 @@ function drawWizard() {
       <label class="sw"><input type="checkbox" data-c="hub" ${W.hub ? "checked" : ""}><div><b>Use on phone or tablet</b><span>Shows a QR code in Settings. Works on your home Wi-Fi (not encrypted) or over a private VPN such as Tailscale.</span></div></label>`;
     next = `<button class="btn pri" data-w="finish">Finish</button>`;
   }
-  veil.innerHTML = panel(h + `<div class="foot">${back}<span class="sp"></span>${next}</div>`);
+  showPanel("Set up Inbox Agent", h + `<div class="foot">${back}<span class="sp"></span>${next}</div>`);
 }
 veil.addEventListener("input", e => {
   const f = e.target.dataset.f; if (!f || veil.dataset.kind !== "wizard") return;
@@ -185,7 +199,7 @@ function openAddMailbox() {
 function mailboxBack() { MB = null; veil.dataset.kind = "settings"; drawSettings().then(() => veil.querySelector("[data-s=addacct]")?.focus()) }
 function drawMailbox() {
   const p = PROVIDERS[MB.provider], n = (S.accounts || []).length, focused = veil.contains(document.activeElement) ? document.activeElement.id : "";
-  veil.innerHTML = panel(`<h2>Add a mailbox</h2><p>Its mail joins the same list. A small tag on each task says which mailbox it came to. ${n} of 5 in use.</p>
+  showPanel("Add a mailbox", `<h2>Add a mailbox</h2><p>Its mail joins the same list. A small tag on each task says which mailbox it came to. ${n} of 5 in use.</p>
     <label class="f" for="m-provider">Provider</label><select id="m-provider" data-f="provider">${Object.entries(PROVIDERS).map(([k, v]) => `<option value="${k}" ${MB.provider === k ? "selected" : ""}>${v.name}</option>`).join("")}</select>
     <div class="help"><b>Getting an app password</b><ol>${p.help.map(x => `<li>${esc(x)}</li>`).join("")}</ol></div>
     ${MB.provider === "other" ? `<div class="row2"><div><label class="f" for="m-host">IMAP server</label><input id="m-host" type="text" data-f="host" value="${esc(MB.host)}" placeholder="imap.example.com"></div><div><label class="f" for="m-port">Port</label><input id="m-port" type="number" data-f="port" value="${MB.port}"></div></div>` : ""}
@@ -267,7 +281,7 @@ function drawRestore() {
   else if (!p) body = "<p>Reading the file…</p>";
   else { const { l, extra } = previewLines(p); body = (l ? `<p>Restoring this file will:</p><ul class="plist">${l}</ul>` : "<p>Nothing in this file is new to this computer.</p>") + extra }
   const can = !!p && !rs.error && !rs.busy && !!previewLines(p).l;
-  veil.innerHTML = panel(`<h2>Restore from a backup</h2><p>${esc(rs.name)}</p>${body}
+  showPanel("Restore from a backup", `<h2>Restore from a backup</h2><p>${esc(rs.name)}</p>${body}
     <label class="sw"><input type="checkbox" data-q="options" ${rs.withOptions ? "checked" : ""} ${rs.busy ? "disabled" : ""}><div><b>Also restore options and mailboxes</b><span>Ranking mode (rules or a local model, never the paid cloud choice), alerts, reply-draft options, follow-up days and the list of mailboxes. They replace your current values. Never a password, the phone code or write-back.</span></div></label>
     <p>Restoring adds what is missing and never removes anything you have. A later snooze, and the options if you tick the box, replace yours; choosing a sender important or muted changes that sender's open mail, as choosing it yourself does.</p>
     <div class="foot"><span class="sp"></span><button class="btn" data-q="cancel" ${rs.busy ? "disabled" : ""}>Cancel</button><button class="btn pri" data-q="go" ${can ? "" : "disabled"}>${rs.busy ? "Restoring…" : "Restore"}</button></div>`);
@@ -305,13 +319,13 @@ veil.addEventListener("change", e => {
 async function drawSettings() {
   const s = S.settings, a = s.alerts || {}, ai = s.ai || {}, dr = s.drafts || { auto: false, tone: "friendly", signature: "", min_priority: 3, daily_cap: 25 };
   let hub = null; if (s.hub?.enabled) hub = await rpc("hub_info").catch(() => null);
-  veil.innerHTML = panel(`<h2>Settings</h2>
+  showPanel("Settings", `<h2>Settings</h2>
     <div class="sect">Mail</div>
     ${mailboxesHTML(s)}
     <p>Providers cancel app passwords whenever you change your account password. Pasting a new one here keeps your list, notes and tasks.</p>
     <div class="foot" style="margin-top:12px"><button class="btn sm" data-s="addacct" ${(S.accounts || []).length >= 5 ? "disabled" : ""}>Add another mailbox</button><span class="sp"></span><button class="btn sm" data-s="signout">Sign out and reset</button></div>
     <div class="sect">Ranking</div>
-    <select data-s="aimode"><option value="rules" ${ai.mode === "rules" ? "selected" : ""}>Rules only</option><option value="ollama" ${ai.mode === "ollama" ? "selected" : ""}>Local AI (Ollama)</option><option value="anthropic" ${ai.mode === "anthropic" ? "selected" : ""}>Claude (own API key)</option></select>
+    <select data-s="aimode" aria-label="Ranking mode"><option value="rules" ${ai.mode === "rules" ? "selected" : ""}>Rules only</option><option value="ollama" ${ai.mode === "ollama" ? "selected" : ""}>Local AI (Ollama)</option><option value="anthropic" ${ai.mode === "anthropic" ? "selected" : ""}>Claude (own API key)</option></select>
     ${ai.mode === "ollama" ? `<label class="f">Ollama model</label><input type="text" data-s="ollama_model" value="${esc(ai.ollama_model)}" placeholder="llama3.2">` : ""}
     ${ai.mode === "anthropic" ? `<label class="f">API key ${S.has_anthropic_key ? "(saved — enter a new one to replace)" : ""}</label><input type="password" data-s="key" placeholder="sk-ant-…" autocomplete="off">` : ""}
     <div class="foot" style="margin-top:14px"><button class="btn sm" data-s="aitest">Test</button><span id="aitres"></span></div>

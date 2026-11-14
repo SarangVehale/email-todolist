@@ -11,7 +11,7 @@ through. The plan for one release, with its sign-off, is [the test plan](test-pl
 | Layer | What it proves | Where | Count | Run it with |
 | --- | --- | --- | --- | --- |
 | Engine tests | What the engine does: parsing, ranking, the store, the commands, the phone hub, and the IMAP client against a scripted server | `engine/tests/*.rs` | 470 in 21 files | `cd engine && cargo test` |
-| Window tests | What the real window does with the demo backend's answers, driven by real key presses and clicks in a headless browser | `app/test/*.test.mjs` | 51 in 4 files | `cd app && npm test` |
+| Window tests | What the real window does with the demo backend's answers, driven by real key presses and clicks in a headless browser | `app/test/*.test.mjs` | 58 in 5 files | `cd app && npm test` |
 | Scripts | The version fields agree, the release check works, the catalogue and the documents are current | `scripts/` | the checks, and tests of two of them (`test_bump_version.py` has 9) | see below |
 | Packaged app | The installed program under load (Windows only) | `scripts/scale_check/` | one measurement | `python scripts/scale_check/scale.py 3000 5000` |
 | Manual cases | Behaviour that needs a real mailbox, a real calendar, a real phone or a clean machine | `docs/TESTCASES.manual.md` | 129 cases, MT-01 to MT-138 | by hand |
@@ -23,7 +23,7 @@ are slow, few and need a person or a machine set aside.
 
 ```mermaid
 flowchart BT
-    E["Engine tests: 470, no network, a scripted IMAP server on localhost"] --> W["Window tests: 51, the real files in a real headless browser"]
+    E["Engine tests: 470, no network, a scripted IMAP server on localhost"] --> W["Window tests: 58, the real files in a real headless browser"]
     W --> P["Packaged app: the scale check, Windows only"]
     P --> M["Manual cases: 129, a live mailbox and clean machines"]
 ```
@@ -213,8 +213,11 @@ A test that fails once in a hundred runs is a defect in the test or in the code,
   either, and neither installer has been built. The window tests need Node 22 or later, which CI installs.
 * **The Tauri shell** (`app/src-tauri/src`, two small files) has no test of its own; the packaged-app measurement and the manual cases
   exercise it.
-* **Appearance, the phone's layout and screen readers.** No test covers them. The Tab trap in dialogs and selecting a range by key
-  have no window test.
+* **Appearance, the phone's layout, and what a screen reader says.** `a11y.test.mjs` checks what a machine can: every control has a name,
+  every dialog has a role and a name of its own, text is readable on black (4.5 to 1, 3 to 1 for large text) and nothing that is clicked is
+  under 24 by 24 pixels. It does not hear a screen reader, check focus order or what is announced, or look at the phone's layout. The Tab
+  trap in dialogs and selecting a range by key have no window test. One run of the window tests on Linux failed once and the cause was not
+  found; 54 later runs on Ubuntu (36 of the window tests alone, 18 straight after the engine tests) all passed.
 * **A published release.** Nothing has been released; the signed-installer, checksum and update paths have never been exercised.
 
 ## Related

@@ -30,7 +30,7 @@ button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:poin
 #bar nav button.on{color:var(--ink);border-bottom-color:var(--ink)}
 #bar nav i{font-style:normal;color:var(--mute);margin-left:6px;letter-spacing:0}
 #bar .sp{flex:1}
-#bar .gear{color:var(--mute);font-size:11px;letter-spacing:.16em;text-transform:uppercase}#bar .gear:hover{color:var(--ink)}
+#bar .gear{padding:5px 0;color:var(--mute);font-size:11px;letter-spacing:.16em;text-transform:uppercase}#bar .gear:hover{color:var(--ink)}
 /* list */
 main{overflow-y:auto;padding:8px 28px 40px}
 #view{max-width:760px;margin:0 auto}
@@ -58,7 +58,7 @@ h1 em{color:var(--mute);font-style:italic}
 .t{font-size:18px;font-weight:500;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .s{font-size:13px;color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
 .s b{color:var(--red);font-weight:500;letter-spacing:.1em;text-transform:uppercase;font-size:11px}
-.star{font-size:15px;color:var(--dim);opacity:0;transition:.15s;line-height:1}
+.star{font-size:15px;color:var(--mute);opacity:0;transition:.15s;line-height:1;min-width:24px;min-height:24px}
 .row:hover .star,.row.cur .star{opacity:1}.star.on{opacity:1;color:var(--ink)}
 /* priority: five quiet dots; red from 4 up */
 .pri{display:flex;gap:0}
@@ -177,6 +177,9 @@ input:focus-visible,select:focus-visible{outline:none}
 
 input[type=time]{width:100%;padding:11px 0;background:none;color:var(--ink);border:0;border-bottom:1px solid var(--line2);font:inherit;outline:none;border-radius:0;color-scheme:dark}
 input[type=time]:focus{border-bottom-color:var(--ink)}
+/* the date box of the Add a task dialog looks like the other boxes of a dialog (and is as tall as them; the browser's own was 21 pixels) */
+.panel input[type=date]{width:100%;padding:11px 0;background:none;color:var(--ink);border:0;border-bottom:1px solid var(--line2);font:inherit;outline:none;border-radius:0;color-scheme:dark}
+.panel input[type=date]:focus{border-bottom-color:var(--ink)}
 
 /* footer: shortcut keys wrap instead of overflowing on wide or narrow windows */
 #foot{flex-wrap:wrap;row-gap:8px;white-space:normal}
@@ -193,7 +196,7 @@ input[type=time]:focus{border-bottom-color:var(--ink)}
 button.opt{width:100%;text-align:left;background:none;color:inherit;font:inherit}
 .fold{display:flex;gap:8px;align-items:center;padding:16px 0;border-bottom:1px solid var(--line)}
 input::placeholder,textarea::placeholder{color:var(--mute)}
-.pri button{padding:10px 6px}
+.pri button{padding:9px}
 .mid[role=button]{cursor:pointer}
 .mid:focus-visible,.mini:focus-visible,.chip:focus-visible,.chk:focus-visible,.pri button:focus-visible,.star:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
 @media (prefers-reduced-motion:reduce){*,*:before,*:after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
@@ -226,3 +229,5 @@ input::placeholder,textarea::placeholder{color:var(--mute)}
 .rrow select{width:auto;flex:1;min-width:120px}
 .rrow input[type=text]{flex:2;min-width:150px}
 .rrow .lbl{min-width:0}
+/* a finger needs more than a pointer: this comes last so that it wins over the rule above (the earlier coarse-pointer rule never applied) */
+@media(pointer:coarse){.pri button{padding:14px 9px}}
