@@ -8,7 +8,7 @@ license = "MIT"
 anyhow = "1"
 imap = "2.4"
 native-tls = "0.2"
-mailparse = "0.15"
+mailparse = "0.18"
 rusqlite = { version = "0.42", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] } # a time written to a backup reads back as the same time
