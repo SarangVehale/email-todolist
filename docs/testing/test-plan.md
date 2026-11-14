@@ -73,6 +73,7 @@ Run them in order from the repository root and stop at the first red one. CI run
 | 11 | Dependency scans | `cd engine && cargo audit`, `cargo audit -f app/src-tauri/Cargo.lock`, `cd app && npm audit` | No vulnerability; any notice is already explained in [SECURITY.md](../../SECURITY.md) | |
 | 12 | Installers build | the release workflow on tag `v0.1.0`, or `cd app && npm ci && npx tauri build` on Windows | An installer for each platform; the unsigned warning, if any, is expected | |
 | 13 | The scale check (Windows) | `python scripts/scale_check/scale.py 3000 5000` | Every target of [phase 8](../designs/phase8.md) holds, except that the poll answer may reach 250 ms and 3 MB | |
+| 13b | The packaged-app checks (Windows) | `python scripts/packaged_check/check_app.py`, then `powershell -File scripts/packaged_check/install_check.ps1` | 114 of 114 checks pass; the installer installs for one user without administrator rights, the program starts, and the uninstaller leaves nothing behind | |
 | 14 | Checksums | `sha256sum -c SHA256SUMS.txt` (Windows: `Get-FileHash <file>`) | Every file reports `OK`; optionally `gh attestation verify <file> --repo <owner>/<repo>` passes | |
 | 15 | Review gates of the final change | [the review gates](strategy.md#review-gates) | The council, both drift passes and the loop are recorded, and every must-fix is fixed | |
 

@@ -67,6 +67,8 @@ jobs:
     needs: test
     strategy:
       fail-fast: false
+      # One at a time: each build finds or creates the draft release for the tag, and two doing that at the same moment may make two drafts.
+      max-parallel: 1
       matrix:
         include:
           - os: windows-latest
@@ -128,16 +130,33 @@ jobs:
           if [ "${{ runner.os }}" = "Windows" ] && [ "$HAS_WIN_CERT" != "true" ]; then echo "::warning::Windows installer is UNSIGNED (no WINDOWS_CERTIFICATE secret). SmartScreen will warn users."; fi
           if [ "${{ runner.os }}" = "macOS" ] && [ "$HAS_APPLE_CERT" != "true" ]; then echo "::warning::macOS app is UNSIGNED and NOT notarized (no APPLE_CERTIFICATE secret). Gatekeeper will block it."; fi
 
-      - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
+      # An unset secret reaches a step as an EMPTY string, and an empty APPLE_CERTIFICATE is not "no certificate": Tauri tries to import it and the
+      # macOS build fails ("failed to import the signing certificate"; the first rehearsal of this workflow, 2026-11-14). So the variables are
+      # passed only by the step that runs when the secrets exist, and the unsigned step carries none of them. Keep the two steps' `with` the same.
+      - name: Build and attach the installer (signed and notarized where the secrets exist)
+        if: env.HAS_APPLE_CERT == 'true'
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # macOS signing and notarization (used only when the secrets exist)
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        with:
+          projectPath: app
+          tagName: ${{ github.ref_name }}
+          releaseName: "Inbox Agent ${{ github.ref_name }}"
+          releaseBody: "See CHANGELOG.md. Verify downloads against SHA256SUMS.txt."
+          releaseDraft: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          args: ${{ matrix.args }}
+      - name: Build and attach the installer (unsigned)
+        if: env.HAS_APPLE_CERT != 'true'
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: app
           tagName: ${{ github.ref_name }}
@@ -163,6 +182,8 @@ jobs:
           mkdir dist && cd dist
           gh release download "${{ github.ref_name }}" --repo "${{ github.repository }}" --pattern '*'
           ls -l
+          files=$(ls | tr '\n' ' ')
+          echo "::notice title=Files on the draft release::$files"
       - name: Write SHA256SUMS.txt
         working-directory: dist
         run: |

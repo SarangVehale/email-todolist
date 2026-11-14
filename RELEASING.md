@@ -51,22 +51,25 @@ The workflow then runs: **verify** (tag = every version field = a dated changelo
 macOS (a red test stops the release) → **build** the installers in parallel → **checksums** (`SHA256SUMS.txt` plus a
 build-provenance attestation). Tags containing a dash (`v0.2.0-beta.1`) become pre-releases.
 
-## The first run: this workflow has never run
+## What a rehearsal found, and what is still unproven
 
-`ci.yml` has run on every push since 2026-11-14, but `release.yml` has not run once, and a tag is the only thing that starts it. Reading
-it turned up three things that only a run can settle. None has been seen to happen; they are what to look at first:
+`release.yml` was rehearsed once, on 2026-11-14, with a throwaway tag (`v0.1.0-rc.1` on a branch that was never merged). `verify`, the
+three `test` jobs and the Windows and Linux builds passed. **The macOS build failed**, and the cause was found by building the same
+thing on a branch that reported its own output: the workflow passed `APPLE_CERTIFICATE` and the other signing variables from secrets
+that did not exist, and an unset secret reaches a step as an *empty string*, not as nothing. Tauri takes an empty `APPLE_CERTIFICATE`
+for a certificate, tries to import it and stops ("failed to import the signing certificate"). Now the variables are passed only by the
+step that runs when the secrets exist; the unsigned step carries none. The `build` jobs also run one at a time now, because each finds or
+creates the draft release for the tag and two doing that together may make two drafts.
 
-* **Two draft releases.** The three build jobs start together and each asks the Tauri action to find or create the draft release for the
-  tag. If two reach it at the same moment, the Releases page may show two drafts for one tag. Keep the one that holds the installers,
-  delete the other, and if files are split, re-run the failed job. If it happens, add `max-parallel: 1` to the `build` job's strategy.
-* **Downloading from a draft.** The `checksums` job runs `gh release download <tag>` and `gh release upload <tag>` on a release that is
-  still a draft. If `gh` answers "release not found", the job needs to find the draft by listing releases (`gh api repos/<repo>/releases`)
-  and use its id.
-* **The attestation step** is a composite action that pulls in other actions at versions this repository does not pin.
+Still unproven until the fixed workflow has run to the end: the `checksums` job, which runs `gh release download <tag>` and
+`gh release upload <tag>` on a release that is still a draft (if `gh` answers "release not found", find the draft by listing releases
+with `gh api repos/<repo>/releases` and use its id), and the attestation step, a composite action that pulls in other actions at
+versions this repository does not pin. The `checksums` job writes the files it found into an annotation ("Files on the draft release"),
+which can be read without signing in.
 
-To find out before a real release, rehearse with a throwaway version: `python scripts/bump_version.py 0.1.0-rc.1` on a branch, a dated
-`## [0.1.0-rc.1]` changelog heading and a row in `docs/RELEASE_HISTORY.md`, then tag `v0.1.0-rc.1`. It becomes a pre-release draft.
-Delete the draft, the tag and the branch afterwards. A rehearsal builds three installers, so it takes the better part of an hour.
+To rehearse again: `python scripts/bump_version.py 0.1.0-rc.2` on a branch, a dated `## [0.1.0-rc.2]` changelog heading and a row in
+`docs/RELEASE_HISTORY.md`, then tag `v0.1.0-rc.2`. It becomes a pre-release draft. Afterwards delete the draft (on the Releases page: it
+needs a sign-in), the tag and the branch. A rehearsal builds three installers one after the other, so it takes about an hour.
 
 ## Before you publish the draft
 

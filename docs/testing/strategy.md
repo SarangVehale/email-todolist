@@ -13,7 +13,7 @@ through. The plan for one release, with its sign-off, is [the test plan](test-pl
 | Engine tests | What the engine does: parsing, ranking, the store, the commands, the phone hub, and the IMAP client against a scripted server | `engine/tests/*.rs` | 470 in 21 files | `cd engine && cargo test` |
 | Window tests | What the real window does with the demo backend's answers, driven by real key presses and clicks in a headless browser | `app/test/*.test.mjs` | 58 in 5 files | `cd app && npm test` |
 | Scripts | The version fields agree, the release check works, the catalogue and the documents are current | `scripts/` | the checks, and tests of two of them (`test_bump_version.py` has 9) | see below |
-| Packaged app | The installed program under load (Windows only) | `scripts/scale_check/` | one measurement | `python scripts/scale_check/scale.py 3000 5000` |
+| Packaged app | The built program as a user and a hostile neighbour meet it, its installer, and a heavy mailbox (Windows only) | `scripts/packaged_check/`, `scripts/scale_check/` | 114 checks, an install cycle, one measurement | `python scripts/packaged_check/check_app.py` |
 | Manual cases | Behaviour that needs a real mailbox, a real calendar, a real phone or a clean machine | `docs/TESTCASES.manual.md` | 129 cases, MT-01 to MT-138 | by hand |
 
 ## What is tested where
@@ -24,7 +24,7 @@ are slow, few and need a person or a machine set aside.
 ```mermaid
 flowchart BT
     E["Engine tests: 470, no network, a scripted IMAP server on localhost"] --> W["Window tests: 58, the real files in a real headless browser"]
-    W --> P["Packaged app: the scale check, Windows only"]
+    W --> P["Packaged app: 114 checks, the install cycle, the scale check, Windows only"]
     P --> M["Manual cases: 129, a live mailbox and clean machines"]
 ```
 
@@ -36,9 +36,13 @@ flowchart BT
   `mock.js`, the demo backend. They prove what the window does with the answers it is given and what it asks for. They do not
   prove the engine's answers are right. Design: [phase 9](../designs/phase9.md); record:
   [the Phase 9 review](../2026-11-14_PHASE9_REVIEW.md).
-* **The packaged app** is checked by a measurement, not a suite: `scripts/scale_check/scale.py` starts the release build with a
-  heavy database and checks the targets in [phase 8](../designs/phase8.md). The review records also mention a larger packaged-app
-  suite used in earlier runs; it is not kept in the repository, so it cannot be run from these documents.
+* **The packaged app** has three checks, all Windows only and all needing a release build (`cd app && npm run tauri build`).
+  `scripts/packaged_check/check_app.py` starts the built program with a data folder of its own and runs 114 checks: through the phone
+  hub's HTTP interface (what the hub serves, refuses and hides; hostile input) and, through the real window's own IPC
+  (`desktop_checks.mjs`, the browser protocol on port 9222), the desktop-only commands: rules, follow-ups, search, calendar, mailboxes,
+  backup and restore, and the setup rule that a first mailbox needs its password. `scripts/packaged_check/install_check.ps1` installs
+  the installer into a temporary folder without administrator rights, starts it, uninstalls it and says what each step left behind.
+  `scripts/scale_check/scale.py` starts the build with a heavy database and checks the targets in [phase 8](../designs/phase8.md).
 * **The manual cases** are the only ones that talk to a real mail server, a real calendar or a real phone. None has a recorded
   result yet. See [the test plan](test-plan.md).
 
@@ -100,12 +104,15 @@ Get-ChildItem app\ui\*.js | ForEach-Object { node --check $_.FullName }
 ```
 
 ```bash
-cd app && npm ci && npx tauri build                    # the Windows installer (needs Rust, Node and the MSVC Build Tools)
-python scripts/scale_check/scale.py 3000 5000          # then measure the packaged app (Windows)
+cd app && npm ci && npm run tauri build                # the Windows installer (needs Rust, Node and the MSVC Build Tools)
+python scripts/packaged_check/check_app.py             # then check the packaged app (Windows)
+powershell -File scripts/packaged_check/install_check.ps1   # install, start and uninstall it
+python scripts/scale_check/scale.py 3000 5000          # and measure it with a heavy mailbox
 ```
 
-`scale.py` refuses to run if the app already has a data folder (`%LOCALAPPDATA%\app.inboxagent.desktop`), because it would have to
-delete it afterwards and that may hold your real mail. Move the folder away first and move it back afterwards.
+`scale.py` and `check_app.py` refuse to run if the app already has a data folder (`%LOCALAPPDATA%\app.inboxagent.desktop`), because
+they would have to delete it afterwards and that may hold your real mail. Move the folder away first and move it back afterwards.
+`check_app.py` also saves one fake password under the app's name in the system keychain and removes it again when it ends.
 
 A read-only check of one real mailbox, without the app, is an example program of the engine:
 
