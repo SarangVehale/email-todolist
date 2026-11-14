@@ -371,6 +371,23 @@ against the code; an Opus reviewer approved in the second round. Full ledger: `d
 | The documentation checker itself: what it can and cannot catch is written in the review record (it checks structure, the command list, limits and counts, not whether a sentence is true) | Hardened against the weaknesses the reviewers found; 38 tests of its own |
 | A new runbook for a leaked password, key, access code or topic | Revoke at the source first, then give the app the new one; every button named is real |
 
+## Review 12 (Phase 11: gaps the documentation and the first CI run found; three-seat council, two drift passes and an Opus review loop, 2026-11-14)
+
+Opus, Sonnet and Fable seats each read the change blind: no seat found a bypass or a regression for a real user (Opus: ship; Sonnet and
+Fable: ship with fixes, all test gaps and one wrong sentence in the command reference). A Sonnet pass over the technical documents and a
+Haiku pass over the guides checked about 210 claims; an Opus reviewer approved in the first round. Full ledger:
+`docs/2026-11-14_PHASE11_REVIEW.md`.
+
+| Finding | Fix |
+| --- | --- |
+| A task number, a priority and a mail server port were cut to 32, 8 and 16 bits, so a request for task 2^32 + n acted on task n and port 66529 meant 993 | `try_from`: a number that does not fit names no task, no priority and no port; ports outside 1 to 65535 are refused |
+| A settings request could set the phone hub's access code to any string (such as "a") and the ranking mode to any word | The access code can only be made by the app (switching the hub on, or Rotate access code); the mode must be rules, ollama or anthropic (a saved file with another mode reads as rules) |
+| "Test connection", "Detect", saving a mailbox and finishing setup took whatever they were given: an empty password was saved, setup could finish with no mailbox | They check the server name, address, password and web address first; each guard was put back once (23 mutants) and a test failed |
+| Two writes took the database's write lock late, so a sync committing in between made them fail with "database is locked" (seen on Linux) | The write lock is taken at once (`BEGIN IMMEDIATE`) |
+
+Not closed: one run of the window's tests failed on Linux in CI and the next passed on the same code, cause not found (recorded; a
+failure now puts the last lines of the log in an annotation).
+
 ## Reporting a vulnerability
 
 Please report privately to the maintainer rather than opening a public issue. Add a contact address

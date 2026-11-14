@@ -51,7 +51,9 @@ flowchart TD
    password. On Gmail, 2-Step Verification must be on and IMAP must be on in Gmail settings. Then open **Settings**, find the mailbox
    under **Mail**, paste it into **New app password** and press **Save password**. The app checks it ("Checking…"), saves it, and says
    "Saved. Your list is untouched." Every mailbox reconnects at once.
-2. **Server and port.** For **Other IMAP server**, check **IMAP server** (letters, digits, dots and hyphens only) and **Port**. The app
+2. **Server and port.** For **Other IMAP server**, check **IMAP server** (letters, digits, dots and hyphens only: "That mail server name
+   isn't valid" means something else is in it) and **Port** (a whole number from 1 to 65535: "That mail server port isn't valid" means it
+   is empty, 0 or too big, and the app does not shorten it to fit). The app
    connects with TLS from the first byte, usually port 993. A server that offers only STARTTLS (port 143) or a plain connection cannot
    be used. To change the server or address of a mailbox, add it again as a new mailbox and then remove the old one (with only one mailbox, add the
    new one first: **Remove** is not offered for the last one).

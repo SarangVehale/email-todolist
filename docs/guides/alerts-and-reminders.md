@@ -95,7 +95,8 @@ time)" and the notification still appears on the computer (and on ntfy).
 ## Snooze
 
 Open a task and use **Snooze**: **3 hours**, **Tomorrow** (09:00), **Next week** (the next Monday, 09:00), or **or until** a date (09:00
-that day, from tomorrow to a year ahead: "Pick a day from tomorrow to a year ahead"). **Bring back** ends it. New mail in a snoozed
+that day, up to a year ahead; the date box starts at tomorrow, and the engine also takes today while it is before 09:00. A day outside that
+range gives "Pick a day from today (only before 09:00) to a year ahead"). **Bring back** ends it. New mail in a snoozed
 conversation wakes it. When a snooze ends you get **Back from snooze**.
 
 ## Check that it worked

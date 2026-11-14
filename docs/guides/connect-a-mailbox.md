@@ -80,8 +80,9 @@ arrives in the list within seconds of reaching your provider.
 
 | It does | It does not |
 | --- | --- |
-| Finds the server by name (the name lookup has no time limit of its own) and connects, giving up after 15 seconds on the connection | Read, move or change any mail |
-| Opens a TLS connection and checks the server's certificate against the name you typed | Save the password (that happens at **Finish** or **Add mailbox**) |
+| Checks first that you gave a server, an address and a password, that the server name uses only letters, digits, dots and hyphens, and that the port is a whole number from 1 to 65535. Nothing connects until they pass | Read, move or change any mail |
+| Finds the server by name (the name lookup has no time limit of its own) and connects, giving up after 15 seconds on the connection | Save the server or the address |
+| Opens a TLS connection and checks the server's certificate against the name you typed | Save the password (that happens at **Finish** or **Add mailbox**, and neither saves an empty one) |
 | Signs in with your address and password | Check that the Inbox, Archive or Drafts folders exist |
 | Looks for your Sent folder: the one the server flags as Sent, else one named `[Gmail]/Sent Mail`, `Sent`, `Sent Items`, `Sent Messages` or `INBOX.Sent` | Prove the mailbox will keep working: providers can cancel an app password later |
 | Signs out | |
@@ -122,7 +123,12 @@ in details; see [Security](../../SECURITY.md#residual-risks-and-limits).
 | `no Sent folder found among N folders` | The provider's Sent folder has no Sent flag and none of the common names above | The window cannot add this mailbox, because **Continue** and **Add mailbox** need a passed test. Report it with the folder names |
 | `That mailbox is already in the app` | The same server and address (ignoring letter case; `googlemail.com` counts as `gmail.com`) is already added | Nothing to do |
 | `You can read at most five mailboxes at once` | Five are in use | Remove one first |
-| `Enter the app password for this mailbox` | The password box was empty when you pressed **Add mailbox** | Paste the password and test again |
+| `Enter the mail server and the email address` | The server or the address was empty when you pressed **Test connection** | Fill in both and test again |
+| `That mail server name isn't valid` | The server name has a space or a character other than letters, digits, `.` and `-` (for example a pasted web address) | Type the name only, such as `imap.example.com` |
+| `That mail server port isn't valid` | The **Port** box is empty, 0, above 65535 or not a whole number. The app refuses it and does not shorten it to fit | Type the port your provider names for IMAP over TLS (usually 993) |
+| `Enter the app password` (**Test connection**), or "Setup failed: Enter the app password for this mailbox" (**Finish**) | The password box was empty. Nothing was saved | Paste the password and test again |
+| `Paste the new password first` | **Save password** in Settings with the box empty. Nothing was sent | Paste the new app password and press **Save password** |
+| "Setup failed: Enter the mail server and the email address" | **Finish** saves the first mailbox first, and its server or address was empty | Go back to **Connect your mail**, fill it in, test, and press **Finish** again |
 
 More in [mailbox will not connect](../runbooks/mailbox-wont-connect.md) and the [troubleshooting page](../troubleshooting.md).
 

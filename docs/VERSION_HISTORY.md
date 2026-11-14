@@ -16,7 +16,7 @@ different questions:
 * [Semantic Versioning](https://semver.org). Before 1.0, a minor version (`0.2.0`) may change behaviour and a patch (`0.1.1`)
   only fixes.
 * **Nothing has been published yet.** Everything below is development towards `0.1.0`, the first public build, so every row is
-  "0.1.0 in development". The milestone names (Phase 1 to Phase 10) are the order the work was done in, not release numbers.
+  "0.1.0 in development". The milestone names (Phase 1 to Phase 11) are the order the work was done in, not release numbers.
 * After `0.1.0` is published, new work goes under `## [Unreleased]` in the changelog, and the release that carries it chooses the
   next number: a minor for new features, a patch for fixes only.
 * A milestone is one commit. Each was reviewed before it was committed (a two-model council, three-seat with Fable from Phase 10 on, a documentation drift pass and a
@@ -38,10 +38,11 @@ different questions:
 | Phase 8 | 2026-11-14 | `d262695` | 459 | A big mailbox stays fast (the window is sent the newest finished tasks, draws 150 rows at a time and moves the cursor without redrawing) | `docs/designs/phase8.md`, `docs/2026-11-14_PHASE8_REVIEW.md` |
 | Phase 9 | 2026-11-14 | `e6be8ee` | 459 + 49 window | Tests for the window: the real files in a real browser, with nothing to install (`cd app && npm test`) | `docs/designs/phase9.md`, `docs/2026-11-14_PHASE9_REVIEW.md` |
 | Phase 10 | 2026-11-14 | `e9a88f8` | 461 + 49 window + 38 documentation-check | Documentation as code: a documentation map, architecture with diagrams, 14 decision records, API and reference documents, guides, runbooks, product requirements, standards, a testing strategy and templates, with a checker run by CI; a fix for the ranking Test button | `docs/designs/phase10.md`, `docs/2026-11-14_PHASE10_REVIEW.md` |
+| Phase 11 | 2026-11-14 | _pending_ | 470 + 49 window + 39 documentation-check | Gaps closed that writing the documentation and the first CI run found: task number, priority and port no longer wrapped to 32, 8 and 16 bits; the phone hub's access code and the ranking mode cannot be set to anything; "Test connection", "Detect" and saving a mailbox check what they are given; write transactions take the lock at once (a "database is locked" seen on Linux); the window's tests run on all three systems in CI | `SECURITY.md` Review 12, `docs/designs/phase11.md`, `docs/2026-11-14_PHASE11_REVIEW.md` |
 
 ## What has not happened yet
 
-The roadmap was finished with Phase 7; Phase 8 came from measuring a heavy mailbox Phase 9 from the window having no tests, and Phase 10 from the owner's list of the documents a project should have. What stands between this and a first release is not code: a GitHub repository (a remote is set and reachable, and empty: nothing has been pushed, so CI has never run),
+The roadmap was finished with Phase 7; Phase 8 came from measuring a heavy mailbox, Phase 9 from the window having no tests, Phase 10 from the owner's list of the documents a project should have, and Phase 11 from what writing them and the first CI run found. What stands between this and a first release is not code: `UPDATE_REPO` (the code is on GitHub and CI passes on Windows, Linux and macOS),
 code-signing, a security contact, and running the live-mailbox and real-calendar manual tests
 (`docs/TESTCASES.manual.md`) on clean machines. `RELEASING.md` lists them in order. When the first release is published, its row
 goes in [`RELEASE_HISTORY.md`](RELEASE_HISTORY.md) and `[0.1.0]` in the changelog gets its date. Both are made when the release is

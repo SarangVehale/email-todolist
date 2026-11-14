@@ -13,7 +13,15 @@ work goes under `[0.1.0] - Unreleased`; after it, new work goes under `## [Unrel
 First public build.
 
 ### Added
-- The first push to GitHub showed that CI had never been able to run: `.github/workflows/ci.yml` was not valid YAML (a step name held a colon and a space), so GitHub refused it without starting a job. The name is quoted, every pinned action was checked to exist, and `scripts/check_docs.py` now catches the mistake in a workflow or the OpenAPI file before a push. The first real CI results are still to come.
+- Gaps closed (Phase 11), found by writing the documentation and by the first CI run. A task number, a priority and a mail server port
+  were cut to 32, 8 and 16 bits: task 2^32 + n acted on task n, priority 261 was read as 5, port 66529 as 993; they are now
+  refused. A request can no longer set the phone hub's access code to a string of its choosing or the ranking mode to a word that is
+  none of rules, ollama and anthropic. "Test connection", "Detect" and saving a mailbox check what they are given (a server name, an
+  address, a password, an http(s) address) before they do anything, setup cannot be finished with no mailbox, and the snooze error
+  says what is accepted (today, before 09:00, up to a year ahead). The diagnostics report no longer names a "Google sign-in" option
+  that never existed. A write that reads first now takes the database's write lock at once: a sync committing in between made it fail
+  with "database is locked", seen when adding a mailbox. A saved ranking mode that is none of the three reads as "rules", so one hand-edited value cannot block every later save. Nine new engine tests, each guard put back once to see a test notice.
+- The first push to GitHub showed that CI had never been able to run: `.github/workflows/ci.yml` was not valid YAML (a step name held a colon and a space), so GitHub refused it without starting a job. The name is quoted, every pinned action was checked to exist, and `scripts/check_docs.py` now catches the mistake in a workflow or the OpenAPI file before a push. After four more fixes (the Phase 11 entry above and `docs/designs/phase11.md`) CI passes on Windows, Linux and macOS, and the window's 49 tests pass on all three.
 - Documentation as code. A [documentation map](docs/README.md) and about 80 documents in the repository, with 54 diagrams (Mermaid, so they are
   reviewed like code): the architecture (the system, the life of a message, the data model, the threads and the poll loop, the trust
   boundaries), fourteen architecture decision records, a reference for every one of the engine's 36 commands, the phone hub's HTTP
@@ -118,7 +126,7 @@ First public build.
 - Third review (Opus, 2026-11-13): one bad unsubscribe link could blank the list; a crashing message could crash the app on every start; hostile HTML could stall the watcher; sign-out left mail text in the database files; the hub answered public networks; mail data sat in Roaming AppData. All fixed with tests; see SECURITY.md.
 - A damaged database is set aside and rebuilt, newer data is refused, and a `crash.log` records internal errors (no telemetry).
 - Two independent security reviews; all confirmed findings fixed with regression tests. See SECURITY.md.
-- 461 automated tests of the engine, including protocol tests against a scripted mock IMAP server and a dedicated edge-case suite, and 49 tests of the window itself (`cd app && npm test`): they run the real window in a headless browser that is already on the computer (Edge or Chrome; Node 22 or later), with real key presses and mouse clicks and nothing else to install. Nearly every defect that review found in the window in the last three runs now has a test that fails when the old behaviour is put back (`docs/2026-11-14_PHASE9_REVIEW.md` names the few that do not). Writing them showed that the restore dialog's code said it would put the keyboard on Restore but always put it on Cancel, because Cancel comes first in the dialog; the code now says Cancel outright, so that Enter pressed by reflex restores nothing. Nothing visible changed.
+- 470 automated tests of the engine, including protocol tests against a scripted mock IMAP server and a dedicated edge-case suite, and 49 tests of the window itself (`cd app && npm test`): they run the real window in a headless browser that is already on the computer (Edge or Chrome; Node 22 or later), with real key presses and mouse clicks and nothing else to install. Nearly every defect that review found in the window in the last three runs now has a test that fails when the old behaviour is put back (`docs/2026-11-14_PHASE9_REVIEW.md` names the few that do not). Writing them showed that the restore dialog's code said it would put the keyboard on Restore but always put it on Cancel, because Cancel comes first in the dialog; the code now says Cancel outright, so that Enter pressed by reflex restores nothing. Nothing visible changed.
 
 ### Known limitations
 - Microsoft (Outlook, Microsoft 365) accounts are not supported: Microsoft turned off password sign-in for IMAP.

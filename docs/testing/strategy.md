@@ -10,7 +10,7 @@ through. The plan for one release, with its sign-off, is [the test plan](test-pl
 
 | Layer | What it proves | Where | Count | Run it with |
 | --- | --- | --- | --- | --- |
-| Engine tests | What the engine does: parsing, ranking, the store, the commands, the phone hub, and the IMAP client against a scripted server | `engine/tests/*.rs` | 461 in 20 files | `cd engine && cargo test` |
+| Engine tests | What the engine does: parsing, ranking, the store, the commands, the phone hub, and the IMAP client against a scripted server | `engine/tests/*.rs` | 470 in 21 files | `cd engine && cargo test` |
 | Window tests | What the real window does with the demo backend's answers, driven by real key presses and clicks in a headless browser | `app/test/*.test.mjs` | 49 in 4 files | `cd app && npm test` |
 | Scripts | The version fields agree, the release check works, the catalogue and the documents are current | `scripts/` | the checks, and tests of two of them (`test_bump_version.py` has 9) | see below |
 | Packaged app | The installed program under load (Windows only) | `scripts/scale_check/` | one measurement | `python scripts/scale_check/scale.py 3000 5000` |
@@ -23,7 +23,7 @@ are slow, few and need a person or a machine set aside.
 
 ```mermaid
 flowchart BT
-    E["Engine tests: 461, no network, a scripted IMAP server on localhost"] --> W["Window tests: 49, the real files in a real headless browser"]
+    E["Engine tests: 470, no network, a scripted IMAP server on localhost"] --> W["Window tests: 49, the real files in a real headless browser"]
     W --> P["Packaged app: the scale check, Windows only"]
     P --> M["Manual cases: 129, a live mailbox and clean machines"]
 ```
@@ -31,7 +31,7 @@ flowchart BT
 * **The engine tests** use only the engine's public API, a temporary folder and an in-memory keychain. The IMAP client is tested
   against a scripted server on `127.0.0.1` (`engine/tests/imap_flows.rs`, 61 tests, which use `connect_plain`, so the TLS
   handshake itself is not covered). The phone hub is tested over real sockets (`hub.rs`, `hub_edge.rs`, 14 tests). The files
-  `phase1.rs` to `phase8.rs` (280 tests) pin each run's behaviour; the security files hold the hostile-input cases.
+  `phase1.rs` to `phase8.rs` (280 tests) and `phase11.rs` (9 tests) pin each run's behaviour; the security files hold the hostile-input cases.
 * **The window tests** run the real `app/ui` files from a small server of Node's own in a browser already on the machine, against
   `mock.js`, the demo backend. They prove what the window does with the answers it is given and what it asks for. They do not
   prove the engine's answers are right. Design: [phase 9](../designs/phase9.md); record:
@@ -67,7 +67,7 @@ cd engine && RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --locked
 ```
 
 ```bash
-cd app && npm test                                     # node --test --test-concurrency=2 test/*.test.mjs
+cd app && npm test                                     # node --test --test-reporter=spec --test-concurrency=2 test/*.test.mjs
 cd app && node --test test/list.test.mjs               # one file
 cd app && INBOX_AGENT_BROWSER=/path/to/chromium npm test   # a browser the tests do not find themselves
 ```
@@ -115,9 +115,9 @@ cd engine && IMAP_HOST=imap.example.com IMAP_USER=you@example.com IMAP_PASS=your
 
 ## What CI runs
 
-The workflows are `.github/workflows/ci.yml` (on every push to `main` and every pull request) and `release.yml` (on a tag). No run
-of either is recorded in the project (creating the GitHub repository is an open item), so this table says what the files do, not what
-a run showed.
+The workflows are `.github/workflows/ci.yml` (on every push to `main` and every pull request) and `release.yml` (on a tag). `ci.yml`
+has run on every push since 2026-11-14 and passes on all three systems (one run of the window tests on Linux failed and the next, on
+the same code, passed). `release.yml` has never run, so what is said of it is what the file does, not what a run showed.
 
 | Job and step | Systems | Command | Stops the build when |
 | --- | --- | --- | --- |
@@ -130,11 +130,12 @@ a run showed.
 | `test`: lint | all three | `cargo clippy --locked --all-targets -- -D warnings` | a warning |
 | `test`: Rust documentation | all three | `cargo doc --no-deps --locked` with `RUSTDOCFLAGS: -D warnings` | a rustdoc warning |
 | `test`: engine tests | all three | `cargo test --locked` | a test fails |
-| `test`: window tests | **Linux only** | `cd app && npm test` with `INBOX_AGENT_UI_TESTS=require` | a test fails, or no browser is found |
+| `test`: window tests | all three | `cd app && npm test` with `INBOX_AGENT_UI_TESTS=require` | a test fails, or no browser is found |
 | `audit` | Linux | `cargo audit` (engine), `cargo audit -f app/src-tauri/Cargo.lock`, `npm audit` in `app` | a vulnerable dependency |
 
-`fail-fast` is off, so a failure on one system does not hide the others. The window tests run on Linux only because the runner's
-browser and the way it is started are known there; the harness finds a browser on all three systems.
+`fail-fast` is off, so a failure on one system does not hide the others. The window tests use the browser each runner already has
+(the harness picks a Chromium-based one). One run on Linux failed in them and the next, on the
+same code, passed; the cause was not found, and a failure now puts the last lines of the log into the annotation.
 
 The release workflow runs on a tag like `v0.1.0`: it **verifies** that the tag, every version field, a dated changelog entry and a
 row in `docs/RELEASE_HISTORY.md` agree, **tests** (clippy, `cargo test` and the documentation checks on all three systems, and the
@@ -208,8 +209,8 @@ A test that fails once in a hundred runs is a defect in the test or in the code,
 
 * **Real mail servers.** The scripted server proves what the client sends and how it reads standard replies, not what Gmail, iCloud
   or another provider does, and not TLS. The manual cases MT-01 to MT-39 are the answer, and none has been run.
-* **Linux and macOS.** Nothing has been run on either, neither the engine tests, the window tests nor the installer. The window
-  tests have not run under Node 22 (the author's machine has a newer Node).
+* **Linux and macOS by hand.** CI runs the engine tests and the window tests on both at every push, but no one has used the app on
+  either, and neither installer has been built. The window tests need Node 22 or later, which CI installs.
 * **The Tauri shell** (`app/src-tauri/src`, two small files) has no test of its own; the packaged-app measurement and the manual cases
   exercise it.
 * **Appearance, the phone's layout and screen readers.** No test covers them. The Tab trap in dialogs and selecting a range by key

@@ -134,13 +134,20 @@ mailbox's tasks, drafts, outbox items and counters but keeps its corrections, un
 Most writes are single statements in autocommit mode; each thread has its own connection (WAL, 5-second busy timeout), so
 there is no shared lock in the engine. These run in one transaction:
 
-| Operation | Why |
-| --- | --- |
-| `tasks_for_window` | One read: a sync saving mail between its three queries cannot make a task appear twice or not at all. |
-| `set_rules` | The rule list is replaced whole or not at all. |
-| `add_followup` | The task and its record are written together. |
-| `delete_mail_rows` (a changed `UIDVALIDITY`, and the first half of `clear_mailbox`) | A mailbox's tasks, drafts, queued changes and counters go together. |
-| `restore_apply` | A restore is applied whole or not at all. It takes the write lock at once (`IMMEDIATE`); a preview is the same code, rolled back. |
+| Operation | Why | Write lock |
+| --- | --- | --- |
+| `tasks_for_window` | One read: a sync saving mail between its three queries cannot make a task appear twice or not at all. | None: it only reads (a plain `unchecked_transaction`), so it never has to be upgraded |
+| `set_rules` | The rule list is replaced whole or not at all. | At once (`IMMEDIATE`) |
+| `add_followup` | The task and its record are written together. | At once (`IMMEDIATE`) |
+| `delete_mail_rows` (a changed `UIDVALIDITY`, and the first half of `clear_mailbox`) | A mailbox's tasks, drafts, queued changes and counters go together. | At once (`IMMEDIATE`) |
+| `clear_mailbox` (its second half) | The corrections, follow-ups and restored state of the mailbox go together. | At once (`IMMEDIATE`) |
+| `restore_apply` | A restore is applied whole or not at all; a preview is the same code, rolled back. | At once (`IMMEDIATE`) |
+
+**Why `IMMEDIATE`.** A transaction that begins deferred takes its view of the database at its first read. If a sync commits a write
+before the transaction's own first write, SQLite cannot move that view forward, and the write fails at once with `database is
+locked` (code 517, `SQLITE_BUSY_SNAPSHOT`): the 5-second busy timeout does not apply to it. The first CI run on Linux hit this.
+`BEGIN IMMEDIATE` takes the write lock before anything is read and waits for it, up to the busy timeout. The rule for new code is in
+[the coding standards](../standards/coding-standards.md).
 
 `clear_mailbox`, and so `remove_mailbox` and the clearing of a number before a new mailbox takes it, is two transactions in a row,
 not one unit: first the mail rows and counters (`delete_mail_rows`), then the corrections, follow-ups and restored state. A crash

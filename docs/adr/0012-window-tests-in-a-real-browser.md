@@ -19,12 +19,13 @@ against its own demo backend (`mock.js`).
 ## Consequences
 
 * `cd app && npm test` needs nothing installed beyond Node 22 and a browser. Real key and mouse events give real focus and layout.
-* Without a browser the tests are skipped, unless `INBOX_AGENT_UI_TESTS=require`, which CI sets on Linux.
+* Without a browser the tests are skipped, unless `INBOX_AGENT_UI_TESTS=require`, which CI sets on all three systems.
 * The tests prove what the window does with the answers it gets, not that the engine's answers are right; the engine's tests and
   the packaged-app run cover that.
 * The harness has to clean up browsers and profile folders itself, which was hard on Windows (Phase 9 records 43 browsers left
   behind by the first version).
-* CI runs them on Linux only. Revisit if a defect appears that only Windows or macOS webviews show.
+* CI runs them on Linux, Windows and macOS (the release workflow, on Linux only). They ran on Linux only until Phase 11. One Linux
+  run failed and the next, on the same code, passed; the cause was not found.
 
 ## Alternatives considered
 

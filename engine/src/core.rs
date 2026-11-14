@@ -35,6 +35,19 @@ fn s_arg(a: &Value, k: &str) -> String {
     a[k].as_str().unwrap_or("").trim().to_string()
 }
 
+/// The mail server port in a request: 993 when none is given, else a whole number from 1 to 65535. A number outside that is
+/// refused; it used to be cut to 16 bits, so 66529 was read as 993.
+fn port_arg(a: &Value) -> Result<u16> {
+    match a.get("port") {
+        None | Some(Value::Null) => Ok(993),
+        Some(v) => v
+            .as_u64()
+            .and_then(|p| u16::try_from(p).ok())
+            .filter(|p| *p != 0)
+            .ok_or_else(|| anyhow!("That mail server port isn't valid")),
+    }
+}
+
 fn ascii(s: &str) -> String {
     s.chars()
         .map(|c| {
@@ -407,10 +420,23 @@ impl Core {
             "test_account" => {
                 let acct = Account {
                     host: s_arg(a, "host"),
-                    port: a["port"].as_u64().unwrap_or(993) as u16,
+                    port: port_arg(a)?,
                     user: s_arg(a, "user"),
                     password: s_arg(a, "password").replace(' ', ""),
                 };
+                // the same checks as for saving a mailbox, before anything connects
+                if acct.host.is_empty() || acct.user.is_empty() {
+                    return Err(anyhow!("Enter the mail server and the email address"));
+                }
+                if !crate::settings::valid_host(&acct.host) {
+                    return Err(anyhow!("That mail server name isn't valid"));
+                }
+                if !crate::settings::is_printable(&acct.user, 320) {
+                    return Err(anyhow!("That email address isn't valid"));
+                }
+                if acct.password.is_empty() {
+                    return Err(anyhow!("Enter the app password"));
+                }
                 let mut sess = watcher::connect(&acct)?;
                 let sent = watcher::find_sent_folder(&mut sess)?;
                 let _ = sess.logout();
@@ -419,6 +445,9 @@ impl Core {
             "save_account" => {
                 // the first mailbox, or the one named by `id`: a new password, or a new server or address
                 let s = self.settings();
+                if s_arg(a, "password").replace(' ', "").is_empty() {
+                    return Err(anyhow!("Enter the app password for this mailbox"));
+                }
                 let id = match a.get("id") {
                     None | Some(Value::Null) => 0,
                     Some(v) => u32::try_from(v.as_u64().unwrap_or(u64::MAX)).unwrap_or(u32::MAX),
@@ -426,9 +455,12 @@ impl Core {
                 let new = AccountCfg {
                     id,
                     host: s_arg(a, "host"),
-                    port: a["port"].as_u64().unwrap_or(993) as u16,
+                    port: port_arg(a)?,
                     user: s_arg(a, "user"),
                 };
+                if new.host.is_empty() || new.user.is_empty() {
+                    return Err(anyhow!("Enter the mail server and the email address"));
+                }
                 let old = s.mailboxes().into_iter().find(|m| m.id == id);
                 let mut candidate = s.clone();
                 if id == 0 {
@@ -487,7 +519,7 @@ impl Core {
                 let new = AccountCfg {
                     id,
                     host: s_arg(a, "host"),
-                    port: a["port"].as_u64().unwrap_or(993) as u16,
+                    port: port_arg(a)?,
                     user: s_arg(a, "user"),
                 };
                 if new.host.trim().is_empty() || new.user.trim().is_empty() {
@@ -574,6 +606,12 @@ impl Core {
                         "The account is changed with save_account, not with settings"
                     ));
                 }
+                // the phone hub's access code is made by the app (or by `rotate_hub_token`), never chosen by a request
+                if s.hub.token != now.hub.token {
+                    return Err(anyhow!(
+                        "The access code is made by the app: use Rotate access code"
+                    ));
+                }
                 s.validate()?;
                 if !s.hub.enabled {
                     s.hub.token.clear(); // a fresh access code every time the hub is switched on
@@ -609,6 +647,9 @@ impl Core {
                 } else {
                     s_arg(a, "url")
                 };
+                if !crate::settings::valid_http_url(&url) {
+                    return Err(anyhow!("Ollama address must be an http(s) address"));
+                }
                 Ok(json!(ai::ollama_models(&url)))
             }
             "test_ai" => {
@@ -634,6 +675,13 @@ impl Core {
             }
             "finish_setup" => {
                 let mut s = self.settings();
+                // setup is finished when the first mailbox is there, with its password
+                if s.account.host.is_empty()
+                    || s.account.user.is_empty()
+                    || secrets::lookup(&secrets::imap_key(0))?.is_none()
+                {
+                    return Err(anyhow!("Add your first mailbox before finishing setup"));
+                }
                 s.onboarded = true;
                 s.save(&self.dir)?;
                 self.start();

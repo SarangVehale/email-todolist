@@ -8,7 +8,9 @@ spreading, and the order of start-up and shutdown. Each claim names the function
 ## Threads and processes
 
 The app is one process. There is no second process and no child process; the phone talks to it over the network. Every
-background thread opens its own SQLite connection (`Store::open`), so threads share no database lock in the engine.
+background thread opens its own SQLite connection (`Store::open`), so threads share no database lock in the engine. SQLite still lets
+one connection write at a time: a write transaction that may read first takes the write lock at once and waits for it, up to the
+5-second busy timeout ([the transactions](data-model.md#transactions)).
 
 ```mermaid
 flowchart TB

@@ -21,6 +21,7 @@ timeline
         2026-11-14 : Phase 8 : A big mailbox stays fast
                    : Phase 9 : Tests for the window
                    : Phase 10 : Documentation as code
+                   : Phase 11 : The gaps the first CI run found
 ```
 
 | Phase | Design | What it set out to do |
@@ -34,3 +35,4 @@ timeline
 | 8 | [phase8.md](phase8.md) | A big mailbox stays fast |
 | 9 | [phase9.md](phase9.md) | Tests for the window |
 | 10 | [phase10.md](phase10.md) | Documentation as code |
+| 11 | [phase11.md](phase11.md) | Close the gaps the documentation and the first CI run found |

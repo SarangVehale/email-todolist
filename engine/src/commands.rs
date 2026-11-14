@@ -205,7 +205,8 @@ pub fn run(core: &Arc<Core>, cmd: &str, a: &Value) -> Option<Result<Value>> {
     if !PUBLIC.contains(&cmd) && !DESKTOP_ONLY.contains(&cmd) {
         return None;
     }
-    let uid = a["uid"].as_u64().unwrap_or(0) as u32;
+    // a number too big for u32 names no task (it used to be cut to 32 bits and act on another task)
+    let uid = u32::try_from(a["uid"].as_u64().unwrap_or(0)).unwrap_or(0);
     let res = (|| -> Result<Value> {
         let store = core.store()?;
         match cmd {
@@ -215,14 +216,16 @@ pub fn run(core: &Arc<Core>, cmd: &str, a: &Value) -> Option<Result<Value>> {
             "set_star" => Ok(json!(
                 store.set_star(uid, a["star"].as_bool().unwrap_or(true))?
             )),
-            "set_priority" => Ok(json!(
-                store.set_priority(uid, a["priority"].as_u64().unwrap_or(0) as u8)?
-            )),
+            "set_priority" => Ok(json!(store.set_priority(
+                uid,
+                u8::try_from(a["priority"].as_u64().unwrap_or(0)).unwrap_or(0)
+            )?)),
             "set_snooze" => {
                 let now = chrono::Local::now();
                 let until = match a["date"].as_str() {
-                    Some(d) => snooze_on(d, now)
-                        .ok_or_else(|| anyhow!("Pick a day from tomorrow to a year ahead"))?,
+                    Some(d) => snooze_on(d, now).ok_or_else(|| {
+                        anyhow!("Pick a day from today (only before 09:00) to a year ahead")
+                    })?,
                     None => snooze_until(a["preset"].as_str().unwrap_or(""), now)
                         .ok_or_else(|| anyhow!("unknown snooze option"))?,
                 };
@@ -280,7 +283,7 @@ pub fn run(core: &Arc<Core>, cmd: &str, a: &Value) -> Option<Result<Value>> {
                 let uid = store
                     .add_local_task(
                         a["title"].as_str().unwrap_or(""),
-                        a["priority"].as_u64().unwrap_or(3).min(255) as u8,
+                        u8::try_from(a["priority"].as_u64().unwrap_or(3)).unwrap_or(0),
                         a["due"].as_str().unwrap_or(""),
                     )?
                     .ok_or_else(|| anyhow!("Give the task a title (up to 200 characters), a priority from 1 to 5, and a date like 2026-11-20 if you set one"))?;
@@ -358,7 +361,6 @@ pub fn run(core: &Arc<Core>, cmd: &str, a: &Value) -> Option<Result<Value>> {
                     writeback: s.writeback,
                     hub: s.hub.enabled,
                     quiet_hours: !s.alerts.quiet_start.is_empty(),
-                    google: false,
                     host: s.mailboxes().first().map_or("", |m| m.host.as_str()),
                     log: &log,
                     crash: &crash,

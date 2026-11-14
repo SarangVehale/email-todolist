@@ -124,7 +124,7 @@ paths:
                   - { $ref: "#/components/schemas/BareError" }
               examples:
                 refused: { value: { ok: false, error: not available from the hub } }
-                failed: { value: { ok: false, error: Pick a day from tomorrow to a year ahead } }
+                failed: { value: { ok: false, error: "Pick a day from today (only before 09:00) to a year ahead" } }
                 malformed: { value: { ok: false } }
         "401":
           description: Missing or wrong access code (or the hub has none). Counted towards the lock-out.

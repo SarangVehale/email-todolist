@@ -29,8 +29,8 @@ flowchart LR
 | Environment | What runs there | Status |
 | --- | --- | --- |
 | Windows (the development machine), Edge, Node 24 | Engine tests, window tests, the packaged build, the scale check, the install and uninstall cycle | verified by the author; not on a clean machine |
-| Windows, Ubuntu 22.04 and macOS in CI | Format, lint, engine tests, documentation checks; the window tests on Ubuntu only | **not yet run**: no CI run is recorded |
-| Node 22 (the version CI uses) | Window tests | **not yet run** |
+| Windows, Ubuntu 22.04 and macOS in CI | Format, lint, engine tests, documentation checks; the window tests | passes (run 11, 2026-11-14); one earlier Linux run of the window tests failed and the next passed, cause not found |
+| Node 22 (the version CI uses) | Window tests | passes in CI |
 | Linux and macOS, on a real machine | The installer and the manual cases | **not yet run** |
 | A real mailbox: Gmail with an app password, and one other provider | Manual cases A to D | **not yet run** |
 | A phone or tablet on the same Wi-Fi | MT-50 to MT-55 | **not yet run** |
@@ -110,7 +110,8 @@ keep the text of the Log tab (never a password).
 ## Risks and what is not covered
 
 * The scripted IMAP server does not speak TLS and is not Gmail. Everything about real servers rests on sections A to D.
-* No CI run is recorded: the workflows, the pinned actions and the Linux window-test step have not been seen to pass.
+* `ci.yml` passes, but one Linux run of the window tests failed and the next passed, and the cause was not found. `release.yml` has
+  never run.
 * Appearance, the phone's layout and screen readers have no test, manual or automatic.
 * macOS asks you to open an unsigned app with right-click and Open; Windows shows SmartScreen. Say so in the release notes.
 

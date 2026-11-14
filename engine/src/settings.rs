@@ -192,12 +192,17 @@ impl Settings {
         all
     }
 
-    /// The settings saved in `dir`. A missing or unreadable file gives the defaults; this never fails.
+    /// The settings saved in `dir`. A missing or unreadable file gives the defaults; this never fails. A ranking mode that is
+    /// not one of the three (a hand-edited file) reads as "rules": `validate` refuses it, and would then refuse every later save.
     pub fn load(dir: &Path) -> Self {
-        std::fs::read_to_string(dir.join("settings.json"))
+        let mut s: Self = std::fs::read_to_string(dir.join("settings.json"))
             .ok()
             .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        if !valid_mode(&s.ai.mode) {
+            s.ai.mode = "rules".into();
+        }
+        s
     }
 
     /// Writes the settings to `dir`, through a temporary file and a rename so a crash cannot leave half a file.
@@ -238,17 +243,23 @@ pub fn is_gmail(host: &str) -> bool {
         .any(|d| h == *d || h.ends_with(&format!(".{d}")))
 }
 
-fn is_printable(s: &str, max: usize) -> bool {
+/// Is `s` at most `max` bytes with no control character? (A mailbox's address, a topic: what is shown or sent as one line.)
+pub(crate) fn is_printable(s: &str, max: usize) -> bool {
     s.len() <= max && !s.chars().any(|c| c.is_control())
 }
 
-fn valid_host(h: &str) -> bool {
+/// The ranking modes there are: the built-in rules, a local Ollama, or Anthropic's API.
+fn valid_mode(m: &str) -> bool {
+    matches!(m, "rules" | "ollama" | "anthropic")
+}
+
+pub(crate) fn valid_host(h: &str) -> bool {
     h.len() <= 253
         && h.chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')
 }
 
-fn valid_http_url(u: &str) -> bool {
+pub(crate) fn valid_http_url(u: &str) -> bool {
     (u.starts_with("http://") || u.starts_with("https://"))
         && u.len() <= 200
         && !u.chars().any(|c| c.is_control() || c.is_whitespace())
@@ -344,6 +355,9 @@ impl Settings {
         }
         if !valid_http_url(&self.alerts.ntfy_server) {
             bail!("Alert server must be an http(s) address");
+        }
+        if !valid_mode(&self.ai.mode) {
+            bail!("Ranking mode must be rules, ollama or anthropic");
         }
         if !valid_http_url(&self.ai.ollama_url) {
             bail!("Ollama address must be an http(s) address");

@@ -313,6 +313,14 @@ server or address changed, or the mailbox removed:
     a follow-up task with no record at all, left by the old clean-up, counts as the first mailbox's)
 keep, always: the other mailboxes, your own tasks, rules, sender choices, the log, the update-check date
 
+port, in every command that takes one: missing or null = 993; else a whole number 1..65535, or refused   # 66529 is not 993
+a task number (uid) over 32 bits = no task;  a priority over 8 bits = no priority            # never cut to fit, never wrapped
+
+test_account(host, port, user, password):                      # stores nothing
+    refuse a bad port;  refuse an empty server or address;  refuse a server name with anything but letters, digits, "." and "-";
+    refuse an empty password                                   # all before anything connects
+    connect (TLS from the first byte), sign in, find the Sent folder, sign out
+
 add_account(host, port, user, password):
     refuse unless setup is done and a first mailbox exists; refuse an empty password
     id = lowest unused number in 0..4 (0 = the first mailbox's place, empty after it was removed), else "at most five mailboxes"
@@ -326,11 +334,15 @@ remove_account(id):
     save settings;  start()
 
 save_account(id?, host, port, user, password):                 # a new password, or another server or address
+    refuse an empty password (spaces removed) before anything else, so nothing is saved
     candidate settings with this mailbox replaced; validate
     if server or address changed: raise the stop flag first (a sync mid-batch must not write the old mail back), then
                                   reset that mailbox         # only that one
     store the password at its keychain entry;  save
     if setup is done (and something was stopped or the save worked): start()    # so the syncs use the new password
+
+finish_setup():
+    refuse unless the first mailbox has a server, an address and a saved password;  onboarded = true;  save;  start()
 
 status shown = first of: any "error..."; "no password"; "connecting"; "syncing"; anything not "idle"; else "idle"
                (no mailbox has reported yet: "starting"; setup not finished: "setup")
@@ -531,13 +543,19 @@ earliest valid local time is used) — `snooze_presets_across_month_year_and_lea
 ```text
 save_settings(patch):
     merged = current + patch (unknown fields ignored; wrong types -> error)
+    refuse a patch that changes the account, the other mailboxes or onboarded (save_account and finish_setup do that)
+    refuse a patch that changes the hub's access code (only the app makes it)
     validate: server host = letters digits . - only; ports 1..65535, hub port >= 1024;
               ntfy topic = letters digits _ - only; ntfy and Ollama URLs must be http(s) without whitespace;
+              ranking mode = rules, ollama or anthropic;
               times "HH:MM"; quiet hours need both ends; draft tone, signature length, limits in range;
               alert categories only from the eight known names (empty = all; urgent mail always alerts);
               follow-up wait 0 (off), 2, 3, 5 or 7 days
     hub disabled -> clear its access code;  hub enabled with no code -> make a new random one
     write atomically (temp file then rename)
+
+detect_ollama(url?):  url = the one given, else the saved one;  refuse one that is not http(s) (the same rule as above); then ask it
+                      for its models: [] when nothing answers within 2 seconds
 ```
 Edge cases: corrupt or older settings files fall back safely — `corrupt_or_old_settings_files…`,
 `bad_settings_patches_are_errors_not_crashes`.

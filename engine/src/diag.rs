@@ -219,7 +219,6 @@ pub struct ReportInput<'a> {
     pub writeback: bool,
     pub hub: bool,
     pub quiet_hours: bool,
-    pub google: bool,
     pub host: &'a str,
     pub log: &'a [String],
     pub crash: &'a [String],
@@ -237,7 +236,7 @@ pub fn report(i: &ReportInput) -> String {
         }
     };
     format!(
-        "Inbox Agent diagnostics\nVersion: {}\nSystem: {}\nStatus: {}\nTasks: {} open, {} done, {} left the inbox\nOptions: ranking {} · write-back {} · phone hub {} · quiet hours {} · Google sign-in {}\nMail server: {}\n\nRecent activity (newest first, private text removed):\n{}\nCrash log (last lines, private text removed):\n{}",
+        "Inbox Agent diagnostics\nVersion: {}\nSystem: {}\nStatus: {}\nTasks: {} open, {} done, {} left the inbox\nOptions: ranking {} · write-back {} · phone hub {} · quiet hours {}\nMail server: {}\n\nRecent activity (newest first, private text removed):\n{}\nCrash log (last lines, private text removed):\n{}",
         redact(i.version),
         redact(i.os),
         redact(i.status),
@@ -248,7 +247,6 @@ pub fn report(i: &ReportInput) -> String {
         on(i.writeback),
         on(i.hub),
         on(i.quiet_hours),
-        on(i.google),
         server_name(i.host),
         lines(i.log, &redact),
         lines(i.crash, &redact_crash)

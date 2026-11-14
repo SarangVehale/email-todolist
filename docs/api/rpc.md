@@ -23,15 +23,23 @@ through `rpc(cmd, args)` (see [the overview](README.md)); the code is `Core::rpc
 ## Conventions
 
 * **Arguments** are one JSON object. A missing or wrongly typed argument is read as its default (an empty string, `0`,
-  `false`, or the default named below); it is never an error by itself. Strings for accounts (`host`, `user`, `password`,
-  `url`, `name`, `value`) are trimmed; a password also loses its spaces (app passwords are often shown in groups of four).
-* **`uid`** is a task id (an unsigned integer). A mail task's id is `mailbox × 400,000,000 + IMAP UID`; a task you added, or a
-  follow-up, is 2,000,000,000 or above (`store::LOCAL_UID_BASE`). A missing `uid` is 0, which is no task.
+  `false`, or the default named below); it is never an error by itself, with a few exceptions: a mail server `port` that is
+  given but is not a whole number from 1 to 65535 is refused (see [`test_account`](#test_account)); the `patch` of `save_settings` must
+  be an object; the `rules` of `rules_save` must be a list the engine can read. Strings for accounts
+  (`host`, `user`, `password`, `url`, `name`, `value`) are trimmed; a password also loses its spaces (app passwords are
+  often shown in groups of four).
+* **A number is never cut to fit.** A number too big for the type the engine keeps it in is refused; it is not wrapped round.
+  A `uid` over 4,294,967,295 is read as 0 (no task) by every task command, so task 4,294,967,297 never acts on task 1; the
+  `priority` of `set_priority` over 255 is read as 0 (outside 1 to 5); a `port` over 65535 is refused with a message.
+* **`uid`** is a task id (an unsigned integer that fits 32 bits). A mail task's id is `mailbox × 400,000,000 + IMAP UID`; a task
+  you added, or a follow-up, is 2,000,000,000 or above (`store::LOCAL_UID_BASE`). A missing `uid` is 0, which is no task, and
+  so is one too big for 32 bits.
 * **Answers.** Many task commands answer `true`, or `false` when the task does not exist or the value was refused (no error
   text). The window treats `false` as success, so it relies on the next `state` poll to show the real value.
 * **Errors** are plain strings. Over Tauri the promise rejects with the text; over the hub the answer is
   `{"ok": false, "error": "..."}` with status 400. Any command can also fail with a database error (for example when the
-  database is locked or damaged); those texts come from SQLite and are not listed.
+  database is damaged, or another connection keeps the write lock for longer than the 5-second wait); those texts come from
+  SQLite and are not listed.
 * **Write-back.** Some commands queue a change for the mailbox (archive, flag, label, save a draft). The queue is filled
   whether or not "Let Inbox Agent file mail" (`writeback`) is on; it is sent to the mail server only while it is on, by
   the write-back thread of the task's mailbox. Tasks you added never queue anything. `state.pending` counts the queue.
@@ -124,7 +132,8 @@ Changes a task's priority; this is a correction the ranker learns from.
 
 * **Arguments:** `uid` (integer, required); `priority` (integer 1 to 5, required).
 * **Answer:** `true` (also when the priority is already that value, which changes nothing); `false` when there is no such
-  task or the priority is outside 1 to 5. The value is cut to a byte before the check, so 260 is read as 4.
+  task (a `uid` too big for 32 bits is no task) or the priority is outside 1 to 5. A priority too big for a byte is read as 0,
+  so 261 is refused and is not read as 5.
 * **Side effects:** sets the priority. Records one correction per task, keyed by the sender's address: moving it again
   updates that correction, moving it back to where it started deletes it, and mail that failed its sender check or has no
   address records none. Queues a label `AI/P<n>`, writes a log line, and stars the task at 4 or 5 if it was not starred
@@ -140,8 +149,8 @@ Hides a task until a time, or brings it back.
   * `preset` (string): `3h` (three hours from now), `tomorrow` (09:00 tomorrow), `nextweek` (09:00 next Monday),
     `clear` (not snoozed).
 * **Answer:** `true`; `false` when there is no such task.
-* **Errors:** `Pick a day from tomorrow to a year ahead` (not a real date between 2000 and 2100, more than 366 days ahead,
-  or 09:00 that day has passed; a date of today before 09:00 is accepted); `unknown snooze option`.
+* **Errors:** `Pick a day from today (only before 09:00) to a year ahead` (not a real date between 2000 and 2100, more than 366
+  days ahead, or 09:00 that day has passed; a date of today before 09:00 is accepted); `unknown snooze option`.
 * **Side effects:** sets `snooze_until`, writes a log line. Nothing reaches the mailbox. The scheduler wakes the task and
   sends a "Back from snooze" notice.
 * **Hub:** yes.
@@ -356,41 +365,51 @@ Runs the saved rules over the open mail already in the list.
 
 Signs in to an IMAP server to check the details. Stores nothing.
 
-* **Arguments:** `host` (string); `port` (integer, default 993); `user` (string); `password` (string).
+* **Arguments:** `host` (string); `port` (integer 1 to 65535, default 993 when missing or `null`); `user` (string); `password`
+  (string).
 * **Answer:** `{"ok": true, "sent": "[Gmail]/Sent Mail", "gmail": true}`: the Sent folder found and whether the host is Gmail.
-* **Errors:** the operating system's own lookup error for a name that does not resolve (a mistyped host);
+* **Errors:** the input is checked first, in this order, and nothing connects until it passes: `That mail server port isn't valid`
+  (a port that is given but is not a whole number from 1 to 65535; 66529 is refused and is not read as 993);
+  `Enter the mail server and the email address` (either is empty); `That mail server name isn't valid` (anything but letters,
+  digits, `.` and `-`, or over 253 characters); `That email address isn't valid` (a control character in it, or over 320
+  bytes, as saving a mailbox refuses); `Enter the app password` (empty once spaces are removed). Then the operating
+  system's own lookup error for a name that does not resolve (a mistyped host);
   `could not find the server <host>` (only when the lookup succeeds but returns no address); `secure connection failed: <reason>`;
   `sign-in refused: <server text>`; `no Sent folder found among <n> folders`; network errors (15-second connect timeout; the
   name lookup before it has no limit of its own).
-* **Side effects:** one TLS connection to `host:port`, sign-in, folder list, sign-out. The host is not checked against the
-  settings rules before connecting.
+* **Side effects:** one TLS connection to `host:port`, sign-in, folder list, sign-out, only for a host that passes the same
+  name rule as the settings.
 * **Hub:** no.
 
 ### `save_account`
 
 Saves a new app password, server or address for a mailbox that exists (or for the first mailbox during setup).
 
-* **Arguments:** `id` (integer, optional; missing or `null` is 0, the first mailbox); `host`; `port` (default 993); `user`;
-  `password`.
+* **Arguments:** `id` (integer, optional; missing or `null` is 0, the first mailbox); `host`; `port` (integer 1 to 65535,
+  default 993 when missing or `null`); `user`; `password` (required).
 * **Answer:** `true`.
-* **Errors:** `There is no such mailbox` (an `id` from 1 to 4 that is not set up); any [settings validation](../reference/settings.md#validation)
+* **Errors:** `Enter the app password for this mailbox` (the password is empty once spaces are removed; checked first, so
+  nothing is saved); `That mail server port isn't valid` (a port that is given but is not a whole number from 1 to 65535, which includes a number in quotes);
+  `Enter the mail server and the email address` (either is empty, for any mailbox);
+  `There is no such mailbox` (an `id` from 1 to 4 that is not set up); any [settings validation](../reference/settings.md#validation)
   message, such as `That mail server name isn't valid` or `That mailbox is already in the app`.
 * **Side effects:** when the server or address of an existing mailbox changes, the background threads stop (the stop flag is
   shared, so every mailbox's threads stop and reconnect, not only this one's) and that mailbox's tasks,
-  drafts, queued changes, corrections and follow-ups are deleted first. Stores the password in the system keychain (an empty
-  one reads as "no password"), saves the settings, and restarts the background threads if setup is finished. It does not
-  test the password: the window calls `test_account` first.
+  drafts, queued changes, corrections and follow-ups are deleted first. Stores the password in the system keychain, saves the
+  settings, and restarts the background threads if setup is finished. It does not test the password: the window calls
+  `test_account` first.
 * **Hub:** no.
 
 ### `add_account`
 
 Adds another mailbox (up to five in all).
 
-* **Arguments:** `host`; `port` (default 993); `user`; `password` (required).
+* **Arguments:** `host`; `port` (integer 1 to 65535, default 993 when missing or `null`); `user`; `password` (required).
 * **Answer:** the new mailbox's number, 0 to 4 (the lowest free one).
 * **Errors:** `Set up your first mailbox before adding another`; `Enter the app password for this mailbox`;
-  `You can read at most five mailboxes at once`; `Enter the mail server and the email address of this mailbox`; settings
-  validation messages, such as `That mailbox is already in the app`.
+  `You can read at most five mailboxes at once`; `That mail server port isn't valid` (a port that is given but is not a whole
+  number from 1 to 65535; 66529 is refused and is not read as 993); `Enter the mail server and the email address of this mailbox`;
+  settings validation messages, such as `That mailbox is already in the app`.
 * **Side effects:** clears anything left under that number, stores the password in the keychain, saves the settings and
   restarts the background threads, so the new mailbox starts reading. No connection test (the window tests first).
 * **Hub:** no.
@@ -409,8 +428,10 @@ Adds another mailbox (up to five in all).
 
 * **Arguments:** none.
 * **Answer:** `true`.
-* **Side effects:** sets `onboarded` to `true`, saves, restarts the background threads. It checks nothing: the wizard calls
-  it after `save_account`.
+* **Errors:** `Add your first mailbox before finishing setup`: the first mailbox has no server, no address or no saved
+  password. Nothing is changed. If the keychain itself cannot be read, its own error comes back instead.
+* **Side effects:** sets `onboarded` to `true`, saves, restarts the background threads. The wizard calls it after
+  `save_account`, which is what supplies the first mailbox and its password.
 * **Hub:** no.
 
 ### `sign_out`
@@ -437,11 +458,14 @@ Changes options by merging a patch into the current settings.
 * **Answer:** the whole settings object after the change (the same shape as `state.settings`).
 * **Errors:** `A settings change must be an object`;
   `The account is changed with save_account, not with settings` (the patch would change `account`, `more_accounts` or
-  `onboarded`; a patch that leaves their values as saved is accepted); a type error from reading the result (for example a string where a number belongs); any
-  [validation message](../reference/settings.md#validation).
+  `onboarded`; a patch that leaves their values as saved is accepted);
+  `The access code is made by the app: use Rotate access code` (the patch would change `hub.token`; a patch that leaves it as
+  saved is accepted, and so is one that does not mention it); a type error from reading the result (for example a string where
+  a number belongs); any [validation message](../reference/settings.md#validation), including
+  `Ranking mode must be rules, ollama or anthropic` for any other `ai.mode`.
 * **Side effects:** saves `settings.json`. A save with the hub off clears its access code; a save with the hub on and no code
-  makes a new 32-character one. Restarts the background threads (sync, write-back, scheduler, hub), which also reconnects every
-  mailbox.
+  makes a new 32-character one (the app makes the code: a request cannot choose it). Restarts the background threads (sync,
+  write-back, scheduler, hub), which also reconnects every mailbox.
 * **Hub:** no.
 
 ### `set_secret`
@@ -457,7 +481,9 @@ Changes options by merging a patch into the current settings.
 
 * **Arguments:** `url` (string, optional; default the saved `ai.ollama_url`).
 * **Answer:** an array of model names from `<url>/api/tags`, or `[]` when nothing answers within 2 seconds.
-* **Side effects:** one HTTP request to that address. The `url` argument is not validated.
+* **Errors:** `Ollama address must be an http(s) address` (the address does not start with `http://` or `https://`, is over 200
+  bytes, or has a space or control character). It is checked before any request is made.
+* **Side effects:** one HTTP request to that address, only once it has passed the same rule as `ai.ollama_url`.
 * **Hub:** no.
 
 ### `test_ai`
@@ -543,7 +569,8 @@ Checks a backup file and previews or performs a restore. A restore only adds; it
 ### `diagnostics`
 
 * **Arguments:** none.
-* **Answer:** a plain-text support report: version, system, status, task counts, option names, the first mailbox's server
+* **Answer:** a plain-text support report: version, system, status, task counts, option names (the `Options:` line reads
+  `ranking · write-back · phone hub · quiet hours`, each with its value; there is no sign-in option), the first mailbox's server
   (named only for one of 11 well-known providers; any other reads `custom server`, and an empty one `not set`), and the last 30
   log lines and last 20 crash-log lines with names, subjects and addresses removed
   (`diag::report` in [`engine/src/diag.rs`](../../engine/src/diag.rs)).

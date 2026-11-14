@@ -14,7 +14,8 @@ are in the system keychain (`engine/src/secrets.rs`). A file that cannot be read
 
 The window changes settings only through [`save_settings`](../api/rpc.md#save_settings), which merges a patch, validates the
 result and restarts the background threads. Mailboxes change only through `save_account`, `add_account` and
-`remove_account`, and `onboarded` only through `finish_setup` and `sign_out`; a patch that would change them is refused.
+`remove_account`, and `onboarded` only through `finish_setup` and `sign_out`; a patch that would change them is refused. So is a
+patch that would change the phone hub's access code (`hub.token`), which only the app makes.
 
 This shows how the Settings dialog is grouped, top to bottom, and which settings each group holds.
 
@@ -51,7 +52,7 @@ password". "Sign out and reset" clears the mailboxes.
 
 | Path | Type | Default | Allowed values | In the window |
 | --- | --- | --- | --- | --- |
-| `ai.mode` | string | `rules` | `rules`, `ollama`, `anthropic` (not validated: any other value ranks with rules) | "Ranking" drop-down; wizard step 3 |
+| `ai.mode` | string | `rules` | `rules`, `ollama`, `anthropic` (a save with any other value is refused; a file already saved with one reads as `rules`) | "Ranking" drop-down; wizard step 3 |
 | `ai.ollama_model` | string | `""` | at most 100 bytes, no spaces or control characters | "Ollama model" text box; wizard drop-down filled by `detect_ollama`. Empty means Ollama mode ranks with rules |
 | `ai.ollama_url` | string | `http://127.0.0.1:11434` | `http://` or `https://`, at most 200, no spaces | none |
 | `ai.anthropic_model` | string | `claude-haiku-5-5` | as `ollama_model` | none |
@@ -111,7 +112,7 @@ Urgent mail alerts whatever the quiet hours and categories; your reminders are a
 | --- | --- | --- | --- | --- |
 | `hub.enabled` | boolean | `false` | | "Phone hub"; wizard step 5 "Use on phone or tablet" |
 | `hub.port` | integer | `8787` | 1024 to 65535 | none |
-| `hub.token` | string | `""` | made by the engine: 32 letters and digits | the QR code and "Rotate access code". `save_settings` clears it when it saves with the hub off and makes one when it saves with the hub on and none; `rotate_hub_token` makes a new one whether or not the hub is on |
+| `hub.token` | string | `""` | made by the engine: 32 letters and digits. A patch cannot change it | the QR code and "Rotate access code". `save_settings` clears it when it saves with the hub off and makes one when it saves with the hub on and none, and refuses a patch that sets it to another value; `rotate_hub_token` makes a new one whether or not the hub is on |
 
 ### Not shown in the window
 
@@ -127,11 +128,12 @@ Urgent mail alerts whatever the quiet hours and categories; your reminders are a
 | Message | Rule |
 | --- | --- |
 | `That mail server name isn't valid` | a server name with anything but letters, digits, `.` and `-`, or longer than 253; an extra mailbox with no server |
-| `That mail server port isn't valid` | port 0 |
+| `That mail server port isn't valid` | port 0. The mailbox commands (`test_account`, `save_account`, `add_account`) refuse a port above 65535, or one that is not a whole number, with the same message before it reaches this rule |
 | `That email address isn't valid` | a login over 320 bytes or with control characters; an extra mailbox with an empty login |
 | `Alert topic can only use letters, digits, - and _` | `alerts.ntfy_topic` |
 | `Alert server must be an http(s) address` | `alerts.ntfy_server` |
-| `Ollama address must be an http(s) address` | `ai.ollama_url` |
+| `Ranking mode must be rules, ollama or anthropic` | `ai.mode` |
+| `Ollama address must be an http(s) address` | `ai.ollama_url`; the address given to `detect_ollama` is held to the same rule |
 | `Model name isn't valid` | `ai.ollama_model` or `ai.anthropic_model` |
 | `At most five mailboxes can be read at once` | more than 4 in `more_accounts` |
 | `Every extra mailbox needs its own number from 1 to 4` | an id outside 1 to 4, or used twice |
@@ -146,7 +148,10 @@ Urgent mail alerts whatever the quiet hours and categories; your reminders are a
 | `First-run limit must be between 1 and 1000` | `first_run_limit` |
 
 A value of the wrong JSON type (for example a string for `drafts.daily_cap`) fails before validation with the reader's own
-message. Not validated: `ai.mode` (any other value ranks with rules) and `hub.token` (a patch can set any string).
+message. Three refusals come from `save_settings` itself, before validation: `A settings change must be an object` (the patch is not an
+object), `The account is changed with save_account, not
+with settings` (a patch that changes `account`, `more_accounts` or `onboarded`) and `The access code is made by the app: use
+Rotate access code` (a patch that changes `hub.token`; a patch that leaves it as saved is accepted).
 
 ## What a backup restores
 

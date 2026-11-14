@@ -12,7 +12,8 @@ fails. `audit` runs once, on Linux. The release workflow has its own checks: see
 
 ## Before you start
 
-* Open the failed run on GitHub, choose the failed job and system, and find the first red step. Everything after it was skipped.
+* Open the failed run on GitHub, choose the failed job and system, and find the first red step. The steps after it were skipped, except the "Say which … failed" steps and the window's tests, which run
+  after a failure so that one problem does not hide another.
 * With the GitHub command line: `gh run list --branch main --limit 5`, then `gh run view <id> --log-failed`.
 * On Linux you need the system libraries the workflow installs (`libwebkit2gtk-4.1-dev`, `libayatana-appindicator3-dev`,
   `librsvg2-dev`, `libdbus-1-dev`, `libssl-dev`, `pkg-config`) to build the engine. Windows and macOS need nothing extra.
@@ -48,7 +49,7 @@ Each step of the `test` job, in order. Run the command from the repository root.
 | Lint (warnings are errors) | Clippy warns somewhere in the engine, its tests or examples | `cd engine && cargo clippy --locked --all-targets -- -D warnings` | Fix the warning |
 | Rust documentation builds (warnings are errors) | `cargo doc` found a broken link or another warning in a doc comment | `cd engine && RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --locked` | Fix the doc comment |
 | Engine tests | A test fails on that system, or `--locked` found `Cargo.lock` out of date | `cd engine && cargo test --locked` | Fix the code or test; commit the lock file if the dependencies changed |
-| The window's own tests (Linux only) | A test of the window fails, or the runner has no browser (a missing browser is a failure in CI) | `cd app && npm test`; set `INBOX_AGENT_UI_TESTS=require` to make a missing browser fail as CI does | Fix the window or its test; set `INBOX_AGENT_BROWSER` to a Chromium-based browser if none is found |
+| The window's own tests | A test of the window fails, or the runner has no browser (a missing browser is a failure in CI) | `cd app && npm test`; set `INBOX_AGENT_UI_TESTS=require` to make a missing browser fail as CI does | Fix the window or its test; set `INBOX_AGENT_BROWSER` to a Chromium-based browser if none is found |
 
 The commands are written for Git Bash or Linux. In PowerShell there is no `&&` before PowerShell 7, so run `cd engine; cargo test`;
 set a variable on its own first (`$env:RUSTDOCFLAGS = "-D warnings"; cargo doc --no-deps --locked`, or

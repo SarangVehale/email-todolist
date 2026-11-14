@@ -13,7 +13,6 @@ fn input<'a>(log: &'a [String], crash: &'a [String]) -> ReportInput<'a> {
         writeback: false,
         hub: true,
         quiet_hours: true,
-        google: false,
         host: "imap.gmail.com",
         log,
         crash,

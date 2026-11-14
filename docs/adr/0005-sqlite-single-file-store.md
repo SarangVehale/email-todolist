@@ -21,6 +21,8 @@ creates and upgrades the schema in place, and `user_version` records its format 
 * Upgrades only add tables and columns; a copy (`agent.db.bak`) is taken first. A database from a newer version is refused, never
   repaired. A damaged one is set aside and rebuilt ([data model](../architecture/data-model.md#schema-versions-and-a-damaged-database)).
 * Connections opened at the same moment raced while setting the database up; opening now takes turns ([Phase 6](../designs/phase6.md)).
+* A write transaction that may read first takes the write lock at once (`IMMEDIATE`), because a deferred one fails outright with
+  `database is locked` when another connection commits between its first read and its first write ([Phase 11](../designs/phase11.md)).
 * The file is not encrypted at rest; full-disk encryption is the advice ([SECURITY.md](../../SECURITY.md)).
 * Revisit if encryption at rest becomes a requirement, or if data must sync between computers (out of scope in [Phase 7](../designs/phase7.md)).
 

@@ -15,8 +15,8 @@ tool checks says so: a reviewer is expected to look for it. Documents have their
 | **Script** | A script in `scripts/` fails or regenerates a file |
 | **Review** | No tool checks it; the three review gates and the author do. Where a command finds the cases, it is given |
 
-No run of the workflows is recorded anywhere in the project (creating the GitHub repository is still an open item), so the CI marks
-describe what the workflow files do, not a run that was seen. See [the testing strategy](../testing/strategy.md).
+`ci.yml` has run on every push since 2026-11-14 and passes on Windows, Linux and macOS; `release.yml` has never run, so the marks that
+name it describe what the file does, not a run that was seen. See [the testing strategy](../testing/strategy.md).
 
 ## Rust (the engine and the shell)
 
@@ -29,13 +29,15 @@ toolchain (CI installs `stable` with `rustfmt` and `clippy`).
 | Format with `cargo fmt` and its defaults (there is no `rustfmt.toml`) | Diffs show changes, not layout | **CI** `cargo fmt --check` |
 | Clippy runs on everything, tests and examples included, and warnings are errors: `cargo clippy --locked --all-targets -- -D warnings` | A warning ignored once is ignored for ever | **CI**, and the release workflow |
 | No `unsafe` and no `#[allow(...)]` in `engine/src` (none exists today). A future one needs a comment saying why | Both switch off a check the compiler or clippy makes for you | **Review**: `grep -rn "unsafe \|allow(" engine/src` |
-| Functions that can fail return `anyhow::Result`. A message the window will show is a whole sentence that says what to do next ("Pick a day from tomorrow to a year ahead") | The window shows the engine's text as it is | **Review**; many refusal tests check the text |
+| Functions that can fail return `anyhow::Result`. A message the window will show is a whole sentence that says what to do next ("Pick a day from today (only before 09:00) to a year ahead") | The window shows the engine's text as it is | **Review**; many refusal tests check the text |
 | No panic on anything that comes from mail, a server, a file, a model or the person: no `unwrap`, `expect`, `panic!` or unchecked index on such data. Today `engine/src` has two guarded `unwrap`/`expect` calls (`ai.rs` after an `is_some` match arm, `triage.rs` on the rules triager that cannot fail) | One hostile message must not stop the app. The watcher also catches a panic per message (`catch_unwind`) as a net, not as permission | **Review**: `grep -rn "\.unwrap()\|\.expect(" engine/src`. **Test**: `missing_or_strange_headers_never_panic`, `garbage_never_panics_the_parser`, `a_message_that_panics_is_skipped_and_the_rest_of_the_sync_continues` |
 | Take a lock with `lock().unwrap_or_else(\|e\| e.into_inner())`, never `unwrap()` | A thread that panicked must not poison the lock for everyone else | **Review** |
 | SQL text is a constant. Values reach it only as parameters (`?1` with `params![]`). `format!` into SQL splices a constant only: a table name from a fixed list, the shared `SELECT`, a column definition | A value in the SQL text is an injection | **Review**: read every `format!` in `engine/src/store.rs`. **Test**: `hostile_and_unicode_text_is_stored_verbatim_and_safely` |
 | What you type into search never becomes search syntax: `fts_query` keeps at most 8 alphanumeric words, each quoted | `OR`, `NEAR`, a quote or `*` must be plain text | **Test**: `what_you_type_is_never_search_syntax` |
 | Change the schema by adding to `ADDED_COLUMNS` (added in place, a copy is kept as `agent.db.bak` first). Raise `SCHEMA_VERSION` only for a change older code cannot read; a database from a newer version is refused and left alone | An upgrade must never lose a person's list | **Test**: `an_old_database_is_upgraded_in_place`, `upgrading_an_older_database_keeps_a_backup`, `data_from_a_newer_version_is_refused_and_left_untouched` |
 | Secrets (an app password, an API key) go through `secrets::set`, `get` and `delete` only: never in `settings.json`, a log line, an error text, a backup, diagnostics, or the phone's answer | The keychain is the only place a secret is allowed to rest | **Test**: `a_backup_holds_what_you_did_and_nothing_secret`, `public_state_leaks_neither_account_nor_alert_secrets`, `the_phone_never_sees_the_login_of_a_mailbox_not_even_in_the_log` |
+| A write transaction that may read before it writes starts with `TransactionBehavior::Immediate` (`Transaction::new_unchecked(&self.db, rusqlite::TransactionBehavior::Immediate)`), never a plain `transaction()` or `unchecked_transaction()`. A transaction that only reads may stay deferred (`tasks_for_window`) | A deferred transaction takes its view at its first read. If a sync commits before its first write, SQLite fails it at once with `database is locked` (code 517) and the busy timeout does not help. The first CI run found this on Linux, and four transactions had it | **Review**: read each `new_unchecked` and `unchecked_transaction` in `engine/src/store.rs` and `engine/src/store/transfer.rs`. The Phase 6 tests exercise it, and CI runs them on Linux |
+| A number that comes from a request is never narrowed with `as` to a smaller type (`as u32`, `as u16`, `as u8`). Use `u32::try_from(n)` (or `u16`, `u8`) and refuse the request, or read it as "none" (task 0, no priority), when it does not fit. An `as` after `clamp` or `min`, or on a row id the engine made, is fine | `as` keeps only the low bits: task 2^32 + n acted on task n, priority 261 was read as 5 and port 66529 as 993 | **Test**: `a_number_too_big_for_its_type_is_refused_not_wrapped`. **Review**: `grep -rnE "as u(8\|16\|32)" engine/src`; each hit is clamped first or is a row id |
 | Tests never touch the real keychain. `secrets::in_memory()` is true inside any cargo test binary | A test that signs out must not delete the password of the person running it | **Test**: `the_keychain_is_never_the_real_one_when_the_tests_run` |
 | Everything that comes from outside is hostile: bound its size, allow-list its shape, check it before use (a Message-ID, a calendar part, a backup file, a model's reply, a settings patch) | Mail is written by strangers | **Test**: `message_id_accepts_only_a_plain_angle_addr`, `nonsense_in_an_invitation_never_becomes_an_event`, `a_file_over_a_limit_is_refused_whole`, `bad_settings_patches_are_errors_not_crashes` |
 | Every outbound HTTP request goes through `ai::http_agent(secs)`: a hard timeout and no redirects. A new destination is named in `PRIVACY.md` before it ships | A redirect could aim a request elsewhere, and a person is told where data goes | **Review**: `grep -rn "ureq::" engine/src` finds one place |
@@ -95,7 +97,7 @@ Window:
 - what changed, one line each
 
 Docs: design (docs/designs/phaseN.md), CHANGELOG, README, review record, version history.
-461 engine tests, 49 window tests.
+470 engine tests, 49 window tests.
 
 Co-Authored-By: Name <address>
 ```

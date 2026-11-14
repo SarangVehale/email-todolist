@@ -42,9 +42,16 @@ personas (Mira, Tomas, Dana) are described there.
 * Given a wrong password, then a clear error shows and Continue stays disabled.
 * Given an app password pasted with spaces, then the spaces are removed.
 * Given a refused password, then the app waits five minutes before trying again, and tells it apart from a server that is down.
+* Given an empty server, address or password, a server name with a space in it, or a port that is not a whole number from 1 to 65535
+  (66529 is not read as 993), then "Test connection" says what is wrong and does not connect.
+* Given no first mailbox with its password, then Finish refuses: it saves the mailbox first, and that says what is missing ("Enter
+  the app password for this mailbox", "Enter the mail server and the email address"); the engine's own last check, `finish_setup`
+  ("Add your first mailbox before finishing setup"), holds if it is called alone. An empty password is never saved.
 
 **Verified by:** engine `imap_flows.rs`: `a_wrong_password_is_told_apart_from_a_server_that_is_simply_down`,
-`special_use_folders_are_found_by_their_flags`, `a_mailbox_whose_sent_folder_cannot_be_found_still_loads_all_the_mail`. Manual:
+`special_use_folders_are_found_by_their_flags`, `a_mailbox_whose_sent_folder_cannot_be_found_still_loads_all_the_mail`; `phase11.rs`:
+`test_account_and_detect_ollama_check_what_they_are_given`, `a_mailbox_needs_a_password_and_setup_needs_a_mailbox`,
+`a_number_too_big_for_its_type_is_refused_not_wrapped`. Manual:
 MT-01, MT-02, MT-03, MT-04, MT-07, MT-08. The wizard has no window test.
 
 ### US-02: Read my mail without changing it
@@ -73,7 +80,7 @@ MT-01, MT-02, MT-03, MT-04, MT-07, MT-08. The wizard has no window test.
 
 **Verified by:** engine `phase3.rs`: `the_check_is_off_until_a_repository_is_set`, `a_newer_release_is_reported_with_its_github_page`,
 `up_to_date_drafts_and_prereleases_say_nothing`, `the_page_address_is_built_from_the_checked_tag_never_taken_from_the_response`.
-Not verified against GitHub: no repository exists to ask.
+Not verified against GitHub: the build names no repository (`UPDATE_REPO` is unset) and no release exists to ask.
 
 ### US-37: Install it with one installer
 
@@ -86,7 +93,7 @@ Not verified against GitHub: no repository exists to ask.
 * Given an uninstall, then the program, shortcut and registry entry go and the data folder stays (the documents say so).
 
 **Verified by:** no automated test. Manual: MT-60, MT-61, MT-62, MT-63, MT-64, MT-65. The checks of the version fields
-(`python scripts/bump_version.py --check`) are in CI; the macOS and Linux builds have never run.
+(`python scripts/bump_version.py --check`) are in CI on all three systems; the macOS and Linux installers have never been built.
 
 ## Epic: triage and ranking
 
@@ -116,10 +123,11 @@ MT-14, MT-15.
 * Given rules only (the default), then nothing is sent to any model.
 * Given a model that fails or answers nonsense, then the rules rank the message and no mail is lost.
 * Given mail text that tries to close the prompt's wrapper, then it cannot.
+* Given a ranking mode other than rules, ollama or anthropic, then the change is refused and nothing is saved.
 
 **Verified by:** engine `engine.rs`: `failing_ai_falls_back_to_rules`; `edge_cases.rs`:
 `model_replies_in_many_shapes_are_understood_or_refused_safely`; `security_more.rs`:
-`email_text_cannot_close_the_untrusted_wrapper_in_the_model_prompt`. Manual: MT-31. A real model has not been run in a test.
+`email_text_cannot_close_the_untrusted_wrapper_in_the_model_prompt`; `phase11.rs`: `a_ranking_mode_that_does_not_exist_is_refused`. Manual: MT-31. A real model has not been run in a test.
 
 ### US-05: Not be fooled by what a message says about itself
 
@@ -160,10 +168,12 @@ Manual: MT-18, MT-81.
 * Given two corrections in the same direction, then later mail from that address shifts the same way, never by more than two steps.
 * Given an undo, then the correction is removed, not balanced by an opposite one.
 * Given mail that failed its sender check, then it neither teaches nor learns, and learning never makes anything urgent.
+* Given a priority outside 1 to 5, or a task number too big for 32 bits, then nothing changes and nothing is learned (261 is not read as 5).
 
 **Verified by:** engine `phase2.rs`: `two_corrections_in_the_same_direction_shift_later_mail_from_that_address`,
 `a_shift_is_never_larger_than_two_steps`, `undo_removes_the_correction_instead_of_adding_an_opposite_one`,
-`mail_that_failed_its_sender_check_neither_teaches_nor_learns`, `learning_never_makes_anything_urgent`.
+`mail_that_failed_its_sender_check_neither_teaches_nor_learns`, `learning_never_makes_anything_urgent`; `phase11.rs`:
+`a_number_too_big_for_its_type_is_refused_not_wrapped`.
 
 ### US-08: Mark a sender always important, or mute it
 
@@ -516,12 +526,13 @@ Manual: MT-118, MT-122, MT-124 to MT-126.
 * Given "Rotate access code", then the old code stops working at once. Turning the hub off and on issues a new one.
 * Given a device outside private networks, then the hub refuses it.
 * Given the phone, then it cannot spend AI quota, write to the mailbox, change settings, or make or restore a backup.
+* Given a settings change that sets the access code to a value of its own, then it is refused: only the app makes the code.
 
 **Verified by:** engine `hub.rs`: `guessing_tokens_gets_an_address_locked_out`, `rotating_the_token_kills_the_old_one`,
 `oversized_and_malformed_requests_are_refused`, `the_demo_backend_is_never_served_to_the_network`; `phase1.rs`:
 `the_hub_refuses_peers_outside_private_and_local_networks`; `review_fixes.rs`:
-`a_stolen_phone_code_cannot_spend_ai_quota_or_write_to_the_mailbox`; `phase7.rs`: `the_phone_cannot_make_or_restore_a_backup`. Manual:
-MT-53, MT-54, MT-55.
+`a_stolen_phone_code_cannot_spend_ai_quota_or_write_to_the_mailbox`; `phase7.rs`: `the_phone_cannot_make_or_restore_a_backup`;
+`phase11.rs`: `a_settings_change_cannot_set_the_hub_access_code`. Manual: MT-53, MT-54, MT-55.
 
 ## Epic: privacy and safety
 
@@ -599,7 +610,7 @@ MT-106 (the keychain entry is gone).
 
 **Verified by:** engine `phase3.rs`: `the_report_has_the_facts_a_bug_report_needs_and_nothing_private`,
 `addresses_quotes_and_user_paths_never_survive_redaction`, `diagnostics_is_desktop_only_and_has_nothing_private_end_to_end`,
-`folder_names_and_custom_server_names_are_not_in_the_report`.
+`folder_names_and_custom_server_names_are_not_in_the_report`; `phase11.rs`: `the_diagnostics_report_does_not_mention_google_sign_in`.
 
 ## Epic: performance
 

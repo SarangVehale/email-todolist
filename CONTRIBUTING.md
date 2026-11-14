@@ -7,7 +7,7 @@ Thank you for helping. This page is the short version; the details are linked.
 * The app never sends mail, never needs a paid service, and keeps all setup inside the app. A change that breaks one of these needs an
   [ADR](docs/adr/README.md) first.
 * Documents are code. A change that makes a document untrue is not finished until the document is fixed, in the same pull request.
-* Say what is verified and what is not. The project has not run on Linux or macOS, has not been tried against a live mailbox, and its
+* Say what is verified and what is not. CI runs the tests on Linux and macOS, but the app has not been used by hand there and no installer has been built for them; it has not been tried against a live mailbox, and its
   releases are unsigned; do not write otherwise.
 
 ## Setting up

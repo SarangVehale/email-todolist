@@ -40,8 +40,14 @@ flowchart TD
 | The provider entry "Outlook / Microsoft 365 (not supported yet)" | Microsoft turned off password sign-in for IMAP, and the app has no Microsoft sign-in | Use another mailbox | [Connect a mailbox](guides/connect-a-mailbox.md#what-is-not-supported) |
 | `That mailbox is already in the app` | The same server and address is there already | Nothing to do | [Connect a mailbox](guides/connect-a-mailbox.md) |
 | `You can read at most five mailboxes at once`, or **Add another mailbox** is greyed out | Five mailboxes are in use | Remove one first | [Connect a mailbox](guides/connect-a-mailbox.md) |
-| `Enter the app password for this mailbox` | **Add mailbox** with an empty password | Paste the password and test again | [Connect a mailbox](guides/connect-a-mailbox.md) |
+| Toast: "Setup failed: Enter the app password for this mailbox" | **Finish** saves the first mailbox first, and its password box was empty. Nothing is saved and setup is not finished | Go back to the mailbox step, paste the password, test, finish again | [Connect a mailbox](guides/connect-a-mailbox.md) |
+| `Paste the new password first` | **Save password** in Settings with the box empty. Nothing is sent | Paste the new app password and press **Save password** | [Connect a mailbox](guides/connect-a-mailbox.md) |
+| `Enter the app password` | **Test connection** with an empty password | Paste the app password and test again | [Connect a mailbox](guides/connect-a-mailbox.md) |
+| `Enter the mail server and the email address` | **Test connection** with the server or the address empty | Fill in both, then test again | [Connect a mailbox](guides/connect-a-mailbox.md) |
+| `That mail server name isn't valid` | The server name has a space or a character other than letters, digits, `.` and `-` (for example a pasted web address) | Type the server's name only, such as `imap.example.com` | [Connect a mailbox](guides/connect-a-mailbox.md) |
+| `That mail server port isn't valid` | The **Port** box (under **Other IMAP server**) is empty, 0, above 65535 or not a whole number. The app does not shorten it to fit | Type the port your provider names (usually 993) | [Connect a mailbox](guides/connect-a-mailbox.md) |
 | Toast: "Setup failed: …" at the end of the wizard | The settings or the keychain refused something, for example "That mail server name isn't valid" | Go back, fix the field, test, finish again | [Connect a mailbox](guides/connect-a-mailbox.md) |
+| Toast: "Setup failed: Enter the mail server and the email address" | **Finish** saves the first mailbox first, and its server or address was empty. Setup is not finished | Go back to the mailbox step, fill it in, test, finish again | [Connect a mailbox](guides/connect-a-mailbox.md) |
 | Status bar: "Setup needed" | The wizard is not finished | Finish it on the computer | [Connect a mailbox](guides/connect-a-mailbox.md) |
 
 ## The list
@@ -105,7 +111,7 @@ flowchart TD
 | Toast: "Pick a time that has not passed" | The reminder time is in the past | Choose a later time | [Alerts and reminders](guides/alerts-and-reminders.md) |
 | Toast: "Reminders are for tasks you added yourself. To see a message later, snooze it" | Reminders exist only for your own tasks | Snooze the message | [Alerts and reminders](guides/alerts-and-reminders.md) |
 | Toast: "A repeat needs a reminder time or a due date" | A repeat with neither | Set a reminder or a due date | [Alerts and reminders](guides/alerts-and-reminders.md) |
-| Toast: "Pick a day from tomorrow to a year ahead" | A snooze date outside the range | Pick another day | [Alerts and reminders](guides/alerts-and-reminders.md) |
+| Toast: "Pick a day from today (only before 09:00) to a year ahead" | A snooze date that is not a real day, is more than a year ahead, or is today after 09:00 | Pick another day | [Alerts and reminders](guides/alerts-and-reminders.md) |
 
 ## Backup, rules and invitations
 

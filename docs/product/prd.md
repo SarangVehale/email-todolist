@@ -58,10 +58,10 @@ The work was done in phases, each one a commit with its own review. Dates and co
 
 ```mermaid
 timeline
-    title Inbox Agent from the first build to Phase 10
+    title Inbox Agent from the first build to Phase 11
     2026-11-12 : First build, 109 tests : IMAP watcher, ranking, drafts, phone hub, installer
     2026-11-13 : Phase 1 notes and own tasks : Phase 2 a list that tidies itself : Phase 3 update notice and diagnostics : Phase 4 select many, rules, follow-ups : Phase 5 reminders, search, invitations : Phase 6 several mailboxes
-    2026-11-14 : Phase 7 backup and restore : Phase 8 a big mailbox stays fast : Phase 9 tests for the window : Phase 10 documentation as code, in progress
+    2026-11-14 : Phase 7 backup and restore : Phase 8 a big mailbox stays fast : Phase 9 tests for the window : Phase 10 documentation as code : Phase 11 the gaps the documentation and the first CI run found
 ```
 
 | Phase | Added | Requirements |
@@ -77,6 +77,7 @@ timeline
 | 8 | A big mailbox stays fast ([design](../designs/phase8.md)) | NFR-05 |
 | 9 | Tests for the window ([design](../designs/phase9.md)) | NFR-10 |
 | 10 | Documentation as code ([design](../designs/phase10.md)) | none: a maintenance phase |
+| 11 | The gaps the documentation and the first CI run found ([design](../designs/phase11.md)) | none: a maintenance phase |
 
 ## Functional requirements
 
@@ -129,7 +130,7 @@ the live cases are still owed (see [the test plan](../testing/test-plan.md)).
 | NFR-07 | The phone hub needs an access code, locks out guessers, serves only private networks and allows only a safe set of commands | built; plain HTTP is a documented residual risk | US-29 |
 | NFR-08 | Keyboard and screen-reader support: roles, labels, focus handling, announcements, reduced motion | partly: attributes in place; no screen-reader test has been run | US-12 |
 | NFR-09 | Behaviour verified against real mail servers, calendars and clean machines | not built: the manual cases are owed | the test plan |
-| NFR-10 | Automated tests: the engine against a scripted server, the window in a real browser | built: 461 engine tests, 49 window tests | all |
+| NFR-10 | Automated tests: the engine against a scripted server, the window in a real browser | built: 470 engine tests, 49 window tests | all |
 | NFR-11 | A pure black window with greys, white and one red accent, in the same files on desktop and phone | built | US-12 |
 
 ## Measurable targets
@@ -169,8 +170,8 @@ Limits the code enforces, which a person can rely on:
 | The phone hub is plain HTTP | An access code can be read on a shared network | Private networks only, a rotatable code, a lockout; use a trusted Wi-Fi or a VPN | Accepted ([SECURITY.md](../../SECURITY.md)) |
 | Data and backups are not encrypted | Another person on the computer can read them | Full-disk encryption; the privacy statement says so | Accepted |
 | AI-written drafts can be wrong or persuasive | A person sends a bad reply | Always shown for review, labelled by source, never sent | Accepted |
-| macOS and Linux have never been built or tested | A release that fails there | CI builds all three on a tag; the manual cases on clean machines | Open |
-| CI has never run | A broken workflow is found on release day | Run it on a branch before tagging | Open |
+| The macOS and Linux installers have never been built, and the app has never been run by hand there | A release that fails there | CI runs the tests on all three systems at every push and builds all three installers on a tag; the manual cases on clean machines | Open |
+| The release workflow (`release.yml`) has never run; only `ci.yml` has | A broken release workflow is found on release day | Run it on a pre-release tag before the real one | Open |
 | An IMAP parser dependency has an advisory (`lexical-core`) | A soundness bug in a parser of server replies | Accepted until a stable `imap` 3.x; revisit then | Accepted |
 
 ## Open items the owner holds
@@ -179,7 +180,7 @@ None of these is code. [RELEASING.md](../../RELEASING.md) lists them in order.
 
 | Item | What it needs | Where it is described |
 | --- | --- | --- |
-| A GitHub repository | A remote is set and reachable but empty and nothing is pushed, so CI has never run; push, turn on Actions write permission, Dependabot and branch protection; then set `UPDATE_REPO` to switch on the update notice | RELEASING.md "One-time setup" and "Switching on the update notice" |
+| A GitHub repository | The code is on a public GitHub repository and CI passes on Windows, Linux and macOS; still to do: turn on Actions write permission and branch protection, review the pull requests Dependabot opened, then set `UPDATE_REPO` to switch on the update notice | RELEASING.md "One-time setup" and "Switching on the update notice" |
 | Code signing | A Windows certificate, or the SignPath Foundation's free signing for open-source projects (RELEASING.md says to check its current terms); macOS notarisation needs a paid Apple account, so macOS users open the app with right-click and Open | RELEASING.md "Free code signing" |
 | A security contact | An address in `SECURITY.md`, "Reporting a vulnerability" | [SECURITY.md](../../SECURITY.md) |
 | Live-mailbox and real-calendar manual tests | Run [the manual cases](../TESTCASES.manual.md) on clean machines with real mailboxes; record which passed | [the test plan](../testing/test-plan.md) |

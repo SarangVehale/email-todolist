@@ -34,7 +34,7 @@ command line, and a new dependency was not accepted for this):
   it. Only if the browser does not stop answering are processes searched for by the profile folder (slow on a busy machine, so only
   then, and with a time limit). Folders left by a run that was killed outright are cleared by the next run once they are an hour old.
 * `cd app && npm test` runs them. Without a browser they are skipped with a message, unless `INBOX_AGENT_UI_TESTS=require`, which
-  makes a missing browser a failure (CI sets it, on Linux).
+  makes a missing browser a failure (CI sets it, on all three systems since Phase 11).
 
 What they cover is what went wrong, then the main paths: the long list (150 rows, per-part counts, the cursor and the fast path, a focused
 row, folds, "Show all"); the Done tab; undo of a bulk finish across a poll (for the automated fold and for mail that left the inbox);
@@ -56,8 +56,7 @@ covers the two together). A test waits for a condition where it can; it uses a f
 ## Out of scope
 
 Visual appearance; the phone's layout; the packaged window's file chooser (the packaged-app run covers it; the tests hand the window a
-`File` the way the chooser would); a coverage figure; running them on macOS and Windows in CI (the harness finds Edge, Chrome or
-Chromium on all three, but CI runs them on Linux only, where the runner's browser and the way it is started are known).
+`File` the way the chooser would); a coverage figure. (Running them on macOS and Windows in CI was left out here and added later: they run on all three.)
 
 ## Test plan
 

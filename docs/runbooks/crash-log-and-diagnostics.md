@@ -65,7 +65,7 @@ Version: 0.1.0
 System: windows x86_64
 Status: idle
 Tasks: 41 open, 120 done, 3 left the inbox
-Options: ranking rules · write-back off · phone hub off · quiet hours off · Google sign-in off
+Options: ranking rules · write-back off · phone hub off · quiet hours off
 Mail server: imap.gmail.com
 
 Recent activity (newest first, private text removed):
@@ -80,7 +80,7 @@ Crash log (last lines, private text removed):
 | --- | --- |
 | The version, the operating system and its architecture, and the status | Mail addresses, subjects, message text |
 | How many tasks are open, done, and have left the inbox | Passwords, API keys, the phone hub's access code, the ntfy topic |
-| Option names: the ranking mode, and on or off for write-back, the phone hub and quiet hours. The "Google sign-in" line always reads off: the app has no Google sign-in | Folder or label names, or your folder paths |
+| Option names: the ranking mode, and on or off for write-back, the phone hub and quiet hours (there is no sign-in option: reports from before Phase 11 ended the line with "Google sign-in off", which the app never had) | Folder or label names, or your folder paths |
 | The first mailbox's server, only if it is one of eleven well-known ones (`imap.gmail.com`, `imap.mail.me.com`, `imap.mail.yahoo.com`, `imap.fastmail.com`, `outlook.office365.com`, `imap.zoho.com`, `imappro.zoho.eu`, `imap.aol.com`, `imap.gmx.com`, `imap.mail.com`, `imap.protonmail.ch`); any other server shows as `custom server` | More than the newest 30 log lines and 20 crash lines |
 | The last 30 log lines and the last 20 crash lines, redacted | |
 

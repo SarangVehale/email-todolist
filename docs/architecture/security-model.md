@@ -70,7 +70,7 @@ model has no model name or no key.
 | --- | --- | --- | --- |
 | Ranking a new message | Nothing | To `ai.ollama_url` (default `http://127.0.0.1:11434`): the signals, sender name and address, subject, the 400-character excerpt, and your ten most recent corrections (sender name, subject, old and new priority) | The same, to Anthropic |
 | Writing a reply draft | Nothing (a template) | Up to 3,000 characters of the message, its sender and subject, your tone, signature and instruction | The same, to Anthropic |
-| Other calls | None | `detect_ollama` lists the models at the address you enter, or `ai.ollama_url` | None |
+| Other calls | None | `detect_ollama` lists the models at the address you enter, or `ai.ollama_url`; the address must be `http` or `https` | None |
 
 `ai.ollama_url` accepts any `http` or `https` address (`settings::valid_http_url`), so mail stays on the computer only while
 it points at this computer. A restore never changes it, and never turns on the Anthropic mode.
@@ -89,7 +89,7 @@ redirects (`ai::http_agent`).
 | **Write-back targets** (`writeback.rs`) | A message is acted on only when a Message-ID search returns at most 50 hits and its own header matches exactly, at most 3 messages; labels must be `AI/` plus up to 24 letters or digits. |
 | **A backup file** (`backup.rs`, `store/transfer.rs`) | 8 MB before parsing; this app's format and no newer version; per-list limits (50 rules, 5,000 sender choices, 2,000 corrections, 2,000 own tasks, 5,000 mail entries, 5 mailboxes); every value checked as if typed; one transaction, so one bad value changes nothing. The hub, write-back, ntfy, the Ollama address and the paid ranking are never read from it. A mailbox's server is the one network name it can supply, so the preview lists it. |
 | **The hub's callers** (`hub.rs`) | Answers only loopback, private, link-local, `100.64.0.0/10` and IPv6 local peers; at most 32 connections; one request per connection; a 5-second limit on each read and each write (not on the whole request); 16 KB of headers, 64 KB of body; 10 bad codes in a minute lock an address out; exact routes, files from a compiled-in list only; `PUBLIC` commands only; a reduced `state`; hardening headers and a CSP on every response. It speaks plain HTTP ([ADR-0009](../adr/0009-phone-hub-plain-http-with-token.md)). |
-| **Settings typed in the window** (`settings.rs`) | Validated before every save: host names, ports, URLs, the ntfy topic, model names, clock times. `save_settings` cannot change a mailbox or `onboarded`. |
+| **Settings typed in the window** (`settings.rs`) | Validated before every save: host names, ports, URLs, the ntfy topic, the ranking mode, model names, clock times. `save_settings` cannot change a mailbox, `onboarded` or the hub's access code (`hub.token`). `test_account` checks the host name and the port, and `detect_ollama` the address, before they connect; a number too big for its type is refused, not cut to fit. |
 
 The app has no code that sends mail ([ADR-0003](../adr/0003-imap-only-never-send-mail.md)): a draft reaches only the Drafts
 folder, by an explicit click, with write-back on.
