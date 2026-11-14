@@ -367,7 +367,8 @@ Signs in to an IMAP server to check the details. Stores nothing.
 
 * **Arguments:** `host` (string); `port` (integer 1 to 65535, default 993 when missing or `null`); `user` (string); `password`
   (string).
-* **Answer:** `{"ok": true, "sent": "[Gmail]/Sent Mail", "gmail": true}`: the Sent folder found and whether the host is Gmail.
+* **Answer:** `{"ok": true, "sent": "[Gmail]/Sent Mail", "gmail": true}`: the Sent folder found and whether the host is Gmail. `sent` is `null`
+  when the server has no Sent folder the engine can find (no flag and none of the common names): the mailbox still works, and the window says so.
 * **Errors:** the input is checked first, in this order, and nothing connects until it passes: `That mail server port isn't valid`
   (a port that is given but is not a whole number from 1 to 65535; 66529 is refused and is not read as 993);
   `Enter the mail server and the email address` (either is empty); `That mail server name isn't valid` (anything but letters,
@@ -375,7 +376,7 @@ Signs in to an IMAP server to check the details. Stores nothing.
   bytes, as saving a mailbox refuses); `Enter the app password` (empty once spaces are removed). Then the operating
   system's own lookup error for a name that does not resolve (a mistyped host);
   `could not find the server <host>` (only when the lookup succeeds but returns no address); `secure connection failed: <reason>`;
-  `sign-in refused: <server text>`; `no Sent folder found among <n> folders`; network errors (15-second connect timeout; the
+  `sign-in refused: <server text>`; network errors (15-second connect timeout; the
   name lookup before it has no limit of its own).
 * **Side effects:** one TLS connection to `host:port`, sign-in, folder list, sign-out, only for a host that passes the same
   name rule as the settings.

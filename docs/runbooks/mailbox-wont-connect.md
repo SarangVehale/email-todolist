@@ -32,7 +32,7 @@ flowchart TD
     B -- "secure connection failed" --> D["Step 2: server and port"]
     B -- "a message about looking up the address, or a time-out" --> E["Step 3: network"]
     B -- "your system keychain is not available" --> F["Step 4: unlock the keychain"]
-    B -- "no Sent folder found" --> G["Step 5: Sent folder"]
+    B -- "Connected, but no Sent folder found" --> G["Step 5: Sent folder"]
     B -- "internal error, see crash.log" --> H["crash-log-and-diagnostics"]
     B -- "Microsoft or Outlook account" --> I["Not supported: use another mailbox"]
 ```
@@ -61,9 +61,10 @@ flowchart TD
    to connect and 60 seconds for each answer, and tries again every 30 seconds by itself.
 4. **Keychain.** Unlock the system keychain (Windows Credential Manager, macOS Keychain or the Secret Service on Linux). Then quit the
    app from the tray menu (**Quit**) and open it again.
-5. **Sent folder.** The test needs a folder the server flags as Sent, or one named `[Gmail]/Sent Mail`, `Sent`, `Sent Items`,
-   `Sent Messages` or `INBOX.Sent`. If the error is `no Sent folder found among N folders`, the window cannot add that mailbox.
-   Report it with the output of **Copy diagnostics**.
+5. **Sent folder.** The test looks for a folder the server flags as Sent, or one named `[Gmail]/Sent Mail`, `Sent`, `Sent Items`,
+   `Sent Messages` or `INBOX.Sent`. If it finds none, the test still passes and says "Connected · no Sent folder found"; the mailbox
+   can be added, but replies you send will not close its tasks and it has no follow-up reminders. To have those, report the folder
+   names with the output of **Copy diagnostics**.
 6. **Microsoft accounts.** Outlook and Microsoft 365 are not supported (see [connect a mailbox](../guides/connect-a-mailbox.md#what-is-not-supported)). Use another mailbox.
 
 ## Verify

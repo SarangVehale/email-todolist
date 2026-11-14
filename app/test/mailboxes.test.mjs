@@ -96,6 +96,19 @@ suite("the Add a mailbox dialog", it => {
     assert.equal(await page.run(() => document.querySelector("#m-add").disabled), false, "a real port passes and Add turns on");
   });
 
+  // A server whose Sent folder the engine cannot find (a translated name, no flag) answers the test with `sent: null`. The mailbox still works, so
+  // the dialog says what is lost and lets it be added; it used to be refused.
+  it("a server with no Sent folder we can find is added with a note, not refused", async page => {
+    await addDialog(page);
+    await page.run(wrapMock, [{ cmd: "test_account", result: { ok: true, sent: null } }]);
+    await page.fill("#m-user", "new@example.org"); await page.fill("#m-pw", "secret");
+    await page.click("#m-test");
+    await page.waitFor(() => document.querySelector("#mtestres .ok"));
+    const note = await page.run(() => document.querySelector("#mtestres .ok").textContent);
+    assert.match(note, /no Sent folder found/); assert.doesNotMatch(note, /null|undefined/);
+    assert.equal(await page.run(() => document.querySelector("#m-add").disabled), false, "Add is on: the mailbox works without it");
+  });
+
   it("a server name with a space in it is refused by the test, in the engine's words", async page => {
     await addDialog(page);
     await page.run(() => { const s = document.querySelector("#m-provider"); s.value = "other"; s.dispatchEvent(new Event("change", { bubbles: true })) });

@@ -24,7 +24,7 @@ not read, a race in the database layer, and tests that depended on how fast a ma
 
 ## Out of scope
 
-`test_account` still refuses a mailbox with no Sent folder (the sync itself copes with none); the flaky behaviour of anything that
+`test_account` still refused a mailbox with no Sent folder when this was written (the sync itself copes with none; Phase 12 changed it: the test passes and says so); the flaky behaviour of anything that
 was not seen in CI; macOS and Linux runs of the window's tests beyond what CI shows; changing what the window does with the new
 messages (it shows an engine message as it is).
 

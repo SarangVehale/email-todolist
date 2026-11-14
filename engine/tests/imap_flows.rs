@@ -6,7 +6,7 @@ use engine::store::Store;
 use engine::triage::RulesTriager;
 use engine::watcher::{
     build_sent_index, connect_plain, find_sent_folder, find_special, process_new, reconcile_open,
-    refresh_sent_index, sent_or_empty,
+    refresh_sent_index, sent_or_empty, try_find_sent_folder,
 };
 use engine::writeback::drain_session;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -525,6 +525,10 @@ fn special_use_folders_are_found_by_their_flags() {
         Some("[Gmail]/Drafts")
     );
     assert_eq!(find_sent_folder(&mut s).unwrap(), "[Gmail]/Sent Mail");
+    assert_eq!(
+        try_find_sent_folder(&mut s).unwrap().as_deref(),
+        Some("[Gmail]/Sent Mail")
+    );
 }
 
 #[test]
@@ -1550,6 +1554,8 @@ fn a_mailbox_whose_sent_folder_cannot_be_found_still_loads_all_the_mail() {
         find_sent_folder(&mut s).is_err(),
         "the folder really is unfindable"
     );
+    // "Test connection" asks the other way: no Sent folder is an answer (null), not a refusal of the mailbox
+    assert_eq!(try_find_sent_folder(&mut s).unwrap(), None);
 
     let (folder, idx) = sent_or_empty(&mut s, &store);
     assert!(folder.is_none());

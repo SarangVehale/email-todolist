@@ -108,8 +108,22 @@ pub fn find_special<T: Read + Write>(s: &mut Session<T>, attr: &str) -> Option<S
 /// The name of the Sent folder: the one flagged `\Sent` by the server, else the first of a few common names such as `Sent`, `Sent Items` or `[Gmail]/Sent Mail`.
 /// Fails if neither is found, for instance when the folder has a translated name and no flag.
 pub fn find_sent_folder<T: Read + Write>(s: &mut Session<T>) -> Result<String> {
+    sent_folder_or_count(s)?.map_err(|n| anyhow!("no Sent folder found among {n} folders"))
+}
+
+/// Like `find_sent_folder`, but a server with no Sent folder it can find is `Ok(None)`: only a failure to ask is an error. A mailbox
+/// without one still works (nothing closes by itself when you reply, and there are no follow-up reminders), so "Test connection" says so
+/// instead of refusing the mailbox.
+pub fn try_find_sent_folder<T: Read + Write>(s: &mut Session<T>) -> Result<Option<String>> {
+    Ok(sent_folder_or_count(s)?.ok())
+}
+
+/// The Sent folder, or how many folders were looked through without finding one.
+fn sent_folder_or_count<T: Read + Write>(
+    s: &mut Session<T>,
+) -> Result<std::result::Result<String, usize>> {
     if let Some(f) = find_special(s, "\\Sent") {
-        return Ok(f);
+        return Ok(Ok(f));
     }
     let names = s.list(Some(""), Some("*"))?;
     let all: Vec<String> = names.iter().map(|n| n.name().to_string()).collect();
@@ -121,10 +135,10 @@ pub fn find_sent_folder<T: Read + Write>(s: &mut Session<T>) -> Result<String> {
         "INBOX.Sent",
     ] {
         if all.iter().any(|n| n == guess) {
-            return Ok(guess.to_string());
+            return Ok(Ok(guess.to_string()));
         }
     }
-    Err(anyhow!("no Sent folder found among {} folders", all.len()))
+    Ok(Err(all.len()))
 }
 
 fn uid_set(uids: &[u32]) -> String {

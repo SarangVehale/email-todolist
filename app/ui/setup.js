@@ -17,6 +17,9 @@ function closeVeil() {
 }
 const rand = n => Array.from(crypto.getRandomValues(new Uint8Array(n)), b => "abcdefghjkmnpqrstuvwxyz23456789"[b % 31]).join("");
 const panel = inner => `<div class="panel" role="dialog" aria-modal="true" aria-label="Inbox Agent">${inner}</div>`;
+/** What a passed connection test says. A server with no Sent folder we can find (`sent` is null) is still a mailbox, and the test says what is lost.
+ *  The engine's own words are not used here: it answers `sent: null`, not a sentence. */
+const testedOk = t => `<span class="ok">Connected · ${t.sent ? "Sent folder: " + esc(t.sent) : "no Sent folder found, so a task will not close by itself when you reply"}</span>`;
 /** Draws a dialog's panel under its name (a redraw, such as the next wizard step, must keep it: a screen reader announces the name). */
 function showPanel(name, inner) { veil.innerHTML = panel(inner); veil.querySelector(".panel").setAttribute("aria-label", name); labelControls(veil) }
 /** A control is read out by its label, not by the text drawn near it: a label with no `for` names the control after it (the next sibling, or the first
@@ -44,7 +47,7 @@ function drawWizard() {
       ${W.provider === "other" ? `<div class="row2"><div><label class="f" for="w-host">IMAP server</label><input id="w-host" type="text" data-f="host" value="${esc(W.host)}" placeholder="imap.example.com"></div><div><label class="f" for="w-port">Port</label><input id="w-port" type="number" data-f="port" value="${W.port}"></div></div>` : ""}
       <label class="f" for="w-user">Email address</label><input id="w-user" type="text" data-f="user" value="${esc(W.user)}" autocomplete="off" placeholder="you@example.com">
       <label class="f" for="w-pw">App password</label><input id="w-pw" type="password" data-f="pw" value="${esc(W.pw)}" autocomplete="off">
-      <div class="foot"><button class="btn sm" data-w="test" ${W.testing ? "disabled" : ""}>${W.testing ? "Testing…" : "Test connection"}</button><span id="testres">${W.tested ? (W.tested.ok ? `<span class="ok">Connected · Sent folder: ${esc(W.tested.sent)}</span>` : `<span class="bad">${esc(W.tested.error)}</span>`) : ""}</span></div>`;
+      <div class="foot"><button class="btn sm" data-w="test" ${W.testing ? "disabled" : ""}>${W.testing ? "Testing…" : "Test connection"}</button><span id="testres">${W.tested ? (W.tested.ok ? testedOk(W.tested) : `<span class="bad">${esc(W.tested.error)}</span>`) : ""}</span></div>`;
     next = `<button class="btn pri" data-w="next" ${W.tested?.ok ? "" : "disabled"}>Continue</button>`;
   }
   if (n === 2) {
@@ -205,7 +208,7 @@ function drawMailbox() {
     ${MB.provider === "other" ? `<div class="row2"><div><label class="f" for="m-host">IMAP server</label><input id="m-host" type="text" data-f="host" value="${esc(MB.host)}" placeholder="imap.example.com"></div><div><label class="f" for="m-port">Port</label><input id="m-port" type="number" data-f="port" value="${MB.port}"></div></div>` : ""}
     <label class="f" for="m-user">Email address</label><input id="m-user" type="text" data-f="user" value="${esc(MB.user)}" autocomplete="off" placeholder="you@example.com">
     <label class="f" for="m-pw">App password</label><input id="m-pw" type="password" data-f="pw" value="${esc(MB.pw)}" autocomplete="off">
-    <div class="foot"><button class="btn sm" id="m-test" data-m="test" ${MB.testing ? "disabled" : ""}>${MB.testing ? "Testing…" : "Test connection"}</button><span id="mtestres">${MB.tested ? (MB.tested.ok ? `<span class="ok">Connected · Sent folder: ${esc(MB.tested.sent)}</span>` : `<span class="bad">${esc(MB.tested.error)}</span>`) : ""}</span></div>
+    <div class="foot"><button class="btn sm" id="m-test" data-m="test" ${MB.testing ? "disabled" : ""}>${MB.testing ? "Testing…" : "Test connection"}</button><span id="mtestres">${MB.tested ? (MB.tested.ok ? testedOk(MB.tested) : `<span class="bad">${esc(MB.tested.error)}</span>`) : ""}</span></div>
     <div class="foot"><span class="sp"></span><button class="btn" data-m="cancel">Cancel</button><button class="btn pri" id="m-add" data-m="add" ${MB.tested?.ok && !MB.busy ? "" : "disabled"}>Add mailbox</button></div>`);
   veil.querySelector(".panel")?.setAttribute("aria-label", "Add a mailbox");
   if (focused) veil.querySelector("#" + focused)?.focus(); // a redraw must not drop the keyboard onto the page

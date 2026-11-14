@@ -438,7 +438,8 @@ impl Core {
                     return Err(anyhow!("Enter the app password"));
                 }
                 let mut sess = watcher::connect(&acct)?;
-                let sent = watcher::find_sent_folder(&mut sess)?;
+                // a server with no Sent folder we can find is still a mailbox (replies will not close tasks by themselves): say `null`
+                let sent = watcher::try_find_sent_folder(&mut sess)?;
                 let _ = sess.logout();
                 Ok(json!({"ok": true, "sent": sent, "gmail": is_gmail(&acct.host)}))
             }
