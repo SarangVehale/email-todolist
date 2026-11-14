@@ -10,6 +10,9 @@ $p = Start-Process -FilePath $installer -ArgumentList "/S", "/D=$dir" -PassThru 
 "installer exit code: $($p.ExitCode) in $([math]::Round($sw.Elapsed.TotalSeconds,1))s"
 $files = if (Test-Path $dir) { Get-ChildItem $dir -Recurse -File | Select -ExpandProperty Name } else { @() }
 "installed files: " + ($files -join ", ")
+# the licences travel with the program (MIT and Apache ask for that): the installer carries these three
+$licences = @("LICENSE", "THIRD_PARTY_NOTICES.md", "THIRD_PARTY_LICENSES.txt") | Where-Object { -not (Get-ChildItem $dir -Recurse -File -Filter $_ -ErrorAction SilentlyContinue) }
+"licence files installed: " + (-not $licences) + $(if ($licences) { " (missing: " + ($licences -join ", ") + ")" } else { "" })
 $exe = Get-ChildItem $dir -Filter *.exe -ErrorAction SilentlyContinue | Where-Object { $_.Name -notmatch "uninstall" } | Select -First 1
 "main exe: " + $exe.Name + "  " + [math]::Round($exe.Length/1MB,2) + " MB"
 $reg = Get-ChildItem "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall" -ErrorAction SilentlyContinue | Where-Object { (Get-ItemProperty $_.PSPath).DisplayName -like "*Inbox Agent*" }

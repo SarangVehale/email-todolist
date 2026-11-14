@@ -58,6 +58,13 @@ jobs:
         run: |
           python3 scripts/test_check_docs.py
           python3 scripts/check_docs.py
+          python3 scripts/test_gen_licenses.py
+      - name: Licences are listed, and every one is on the reviewed list
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          cargo fetch --locked --manifest-path app/src-tauri/Cargo.toml
+          python3 scripts/gen_licenses.py --check
       - name: Format
         working-directory: engine
         run: cargo fmt --check

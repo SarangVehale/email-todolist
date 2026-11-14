@@ -134,6 +134,7 @@ throwaway tag after two failures it showed and that were fixed (RELEASING.md); i
 | `test`: the release check works | all three | `python3 scripts/test_bump_version.py` | the check's own tests fail |
 | `test`: catalogue is up to date | all three | `python3 scripts/gen_testcases.py`, then `git diff --exit-code docs/TESTCASES.md` | the catalogue is stale |
 | `test`: documentation checks | all three | `python3 scripts/test_check_docs.py`, `python3 scripts/check_docs.py` | a broken link, bad diagram, missing map entry, undocumented command or public item |
+| `test`: licences | Linux | `cargo fetch --locked` in `app/src-tauri`, then `python3 scripts/gen_licenses.py --check` (and, on all three, `python3 scripts/test_gen_licenses.py`) | `THIRD_PARTY_LICENSES.txt` is out of date, or a crate has a licence that is not on the reviewed list |
 | `test`: format | all three | `cargo fmt --check` | a file is not formatted |
 | `test`: lint | all three | `cargo clippy --locked --all-targets -- -D warnings` | a warning |
 | `test`: Rust documentation | all three | `cargo doc --no-deps --locked` with `RUSTDOCFLAGS: -D warnings` | a rustdoc warning |

@@ -41,6 +41,7 @@ python scripts/test_check_docs.py && python scripts/check_docs.py    # links, di
 python scripts/gen_testcases.py          # keeps docs/TESTCASES.md current
 python scripts/bump_version.py --check 0.1.0      # the release checks too: a dated changelog heading, a release-history row
 python scripts/test_bump_version.py
+python scripts/test_gen_licenses.py && (cd app/src-tauri && cargo fetch --locked) && python scripts/gen_licenses.py --check   # the licence list is current and every licence is reviewed
 
 # 4. Commit, tag, push the tag (the tag triggers the release workflow)
 git add -A && git commit -m "Release 0.1.0"
@@ -72,8 +73,9 @@ Fixed, with a test.
 attestation step ran, and the `checksums` job's annotation ("Files on the draft release") listed what a release carries: the Windows
 installer (`..._x64-setup.exe`), a universal macOS disk image and app archive (`..._universal.dmg`, `..._universal.app.tar.gz`) and Linux
 `.deb` and AppImage packages, all on one draft. That annotation can be read without signing in. Nothing was opened or run on a Mac or a Linux
-machine, and the builds are unsigned. Two Dependabot updates for `tauri-apps/tauri-action` (1.0) and `actions/attest-build-provenance` (4.2)
-change this workflow: rehearse again after taking either.
+machine, and the builds are unsigned. *Rehearsal 4:* the same, with `tauri-apps/tauri-action` 1.0 and `actions/attest-build-provenance` 4.2 (the two Dependabot updates, which
+change this workflow); it passed in 22 minutes, the macOS archive now carries the version in its name, and the attestation step's Node 20 notice
+is gone. Both are taken. Rehearse again after any later change to the workflow.
 
 To rehearse again: `python scripts/bump_version.py 0.1.0-rc.4` on a branch, a dated `## [0.1.0-rc.4]` changelog heading and a row in
 `docs/RELEASE_HISTORY.md`, then tag `v0.1.0-rc.4`. It becomes a pre-release draft. Afterwards delete the draft (on the Releases page: it

@@ -56,6 +56,13 @@ jobs:
         run: |
           python3 scripts/test_check_docs.py
           python3 scripts/check_docs.py
+          python3 scripts/test_gen_licenses.py
+      - name: Licences are listed, and every one is on the reviewed list (the installer carries the list)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          cargo fetch --locked --manifest-path app/src-tauri/Cargo.toml
+          python3 scripts/gen_licenses.py --check
       - name: The window's own tests
         if: runner.os == 'Linux'
         shell: bash
@@ -145,7 +152,7 @@ jobs:
       # passed only by the step that runs when the secrets exist, and the unsigned step carries none of them. Keep the two steps' `with` the same.
       - name: Build and attach the installer (signed and notarized where the secrets exist)
         if: env.HAS_APPLE_CERT == 'true'
-        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
+        uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -164,7 +171,7 @@ jobs:
           args: ${{ matrix.args }}
       - name: Build and attach the installer (unsigned)
         if: env.HAS_APPLE_CERT != 'true'
-        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
+        uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -199,7 +206,7 @@ jobs:
         run: |
           sha256sum $(ls | grep -v '^SHA256SUMS.txt$') > SHA256SUMS.txt
           cat SHA256SUMS.txt
-      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: dist/*
       - name: Attach the checksums to the draft release
