@@ -1,4 +1,5 @@
-//! SQLite store: tasks, reply drafts, user corrections, activity log and the mailbox write-back outbox.
+//! SQLite store: tasks, reply drafts, user corrections and sender choices, your rules, follow-ups, the activity log, the mailbox
+//! write-back outbox, mail not yet read (`restored_state`), settings-like `meta` values and the search index.
 //! Each thread opens its own connection (WAL + busy timeout), so no shared locking is needed.
 use crate::mail::Email;
 use crate::reminders;
@@ -12,7 +13,9 @@ use std::path::Path;
 
 mod transfer;
 
+/// The most characters in a reply draft; longer text is refused when saved.
 pub const MAX_DRAFT_CHARS: usize = 8000;
+/// The most characters in the free-text note on a task.
 pub const MAX_NOTE_CHARS: usize = 2000;
 /// Bumped whenever the database layout changes in a way an older app cannot read.
 pub const SCHEMA_VERSION: i32 = 2;
@@ -50,6 +53,8 @@ const PER_MAILBOX_META: [&str; 5] = [
     "followup_error",
 ];
 
+/// The reply draft kept with a task: its text, where it came from and whether a copy was saved to the mailbox.
+/// A draft is never sent by the app.
 #[derive(Debug, Clone, Serialize)]
 pub struct Draft {
     pub body: String,
@@ -60,6 +65,8 @@ pub struct Draft {
     pub updated: f64,
 }
 
+/// One item of the to-do list: a triaged mail, a follow-up the app made, or a task the user added.
+/// `uid` is the task id; mail tasks carry their mailbox number in it (see `global_uid`), and tasks added by the user sit above `LOCAL_UID_BASE`.
 #[derive(Debug, Clone, Serialize)]
 pub struct Task {
     pub uid: u32,
@@ -128,6 +135,7 @@ pub struct RuleReport {
     pub filed: usize,
 }
 
+/// One change waiting to be copied to the real mailbox (archive, star, label and so on), with how many times it has failed.
 #[derive(Debug, Clone)]
 pub struct OutboxItem {
     pub id: i64,
@@ -137,6 +145,8 @@ pub struct OutboxItem {
     pub tries: i64,
 }
 
+/// One correction the user made to a priority: the sender and subject of the mail and the priority before and after.
+/// Corrections teach the ranking and are shown to the AI as hints.
 #[derive(Debug, Clone)]
 pub struct Override {
     pub sender: String,
@@ -145,6 +155,8 @@ pub struct Override {
     pub new: u8,
 }
 
+/// A connection to the SQLite database holding tasks, drafts, rules, corrections, the activity log and the write-back queue.
+/// Each thread opens its own, so a `Store` is not shared between threads.
 pub struct Store {
     db: Connection,
     /// The mailbox this store works for, or None for the whole app. A plain store (the window, the commands, the phone,
@@ -466,6 +478,8 @@ pub fn remove_leftover_files(dir: &Path) {
 }
 
 impl Store {
+    /// Opens the database at `path`, creating it or upgrading its layout as needed.
+    /// Before an upgrade it keeps one copy of the old file as the name with `.bak` added. It fails with `TooNew` for a database made by a newer app, and with an ordinary error if the file cannot be opened or is damaged; `open_recovering` handles damage.
     pub fn open(path: &Path) -> anyhow::Result<Self> {
         // Every mailbox's sync, its write-back, the scheduler and the window open their own connection, often at the same
         // moment (at start-up, and after every settings save). Getting a database ready (switching it to WAL, creating
@@ -551,6 +565,7 @@ impl Store {
         }
     }
 
+    /// A database held in memory with the same layout as `open`, gone when dropped. Used by tests and examples, never by the app.
     pub fn memory() -> anyhow::Result<Self> {
         let db = Connection::open_in_memory()?;
         db.pragma_update(None, "recursive_triggers", "ON")?;
@@ -605,6 +620,7 @@ impl Store {
         (n * MAILBOX_SPAN, (n + 1) * MAILBOX_SPAN)
     }
 
+    /// Has the message with this IMAP UID in this store's mailbox already been stored as a task? A UID too large to track counts as not seen.
     pub fn seen(&self, uid: u32) -> bool {
         let Ok(id) = self.gid(uid) else {
             return false;
@@ -614,6 +630,7 @@ impl Store {
             .is_ok()
     }
 
+    /// The task with this task id (the `uid` of a `Task`, not an IMAP UID), or `None` if there is none or the read fails.
     pub fn get(&self, uid: u32) -> Option<Task> {
         self.db
             .query_row(&format!("{SELECT} WHERE t.uid=?1"), [uid], row)
@@ -766,6 +783,7 @@ impl Store {
     }
 
     // ---- your rules ----
+    /// The user's rules in the order they are tried. A failed read gives an empty list.
     pub fn rules(&self) -> Vec<Rule> {
         let Ok(mut q) = self
             .db
@@ -898,6 +916,8 @@ impl Store {
         Ok(report)
     }
 
+    /// Every task, finished ones included, highest priority first and oldest first within a priority.
+    /// It reads the whole table, so the window uses `tasks_for_window` instead.
     pub fn all_tasks(&self) -> anyhow::Result<Vec<Task>> {
         let mut st = self.db.prepare(&format!(
             "{SELECT} ORDER BY t.priority DESC, t.received ASC"
@@ -946,6 +966,8 @@ impl Store {
     }
 
     // ---- user actions: update locally, log, queue the mailbox change ----
+    /// Marks a task done or open again, logs it and queues the matching archive or unarchive for the mailbox.
+    /// Returns false when there is no such task. Completing a repeating task of the user's own moves it to its next time instead of closing it.
     pub fn set_done(&self, uid: u32, done: bool) -> anyhow::Result<bool> {
         self.set_done_at(uid, done, reminders::now_local())
     }
@@ -979,6 +1001,7 @@ impl Store {
         Ok(true)
     }
 
+    /// Stars or unstars a task, logs it and queues the change for the mailbox. Returns false when there is no such task.
     pub fn set_star(&self, uid: u32, on: bool) -> anyhow::Result<bool> {
         if self.get(uid).is_none() {
             return Ok(false);
@@ -996,6 +1019,8 @@ impl Store {
         Ok(true)
     }
 
+    /// Sets a task's priority (1 to 5) as the user's own choice. Returns false for an unknown task or a number outside 1 to 5.
+    /// A change is recorded as a correction for the sender unless the mail failed its sender check, and a change to 4 or 5 also stars the task.
     pub fn set_priority(&self, uid: u32, new: u8) -> anyhow::Result<bool> {
         let Some(t) = self.get(uid) else {
             return Ok(false);
@@ -1102,6 +1127,7 @@ impl Store {
     }
 
     // ---- sender preferences ----
+    /// The saved choice for this sender address, "important" or "mute"; `None` when it is normal.
     pub fn pref(&self, addr: &str) -> Option<String> {
         self.db
             .query_row(
@@ -1143,6 +1169,8 @@ impl Store {
     }
 
     // ---- drafts ----
+    /// Saves or replaces the reply draft of a task and logs it. The draft counts as not yet saved to the mailbox's Drafts folder.
+    /// Returns false, changing nothing, for an unknown task, text over `MAX_DRAFT_CHARS`, or a source other than "ai", "template" or "user".
     pub fn set_draft(&self, uid: u32, body: &str, source: &str) -> anyhow::Result<bool> {
         if self.get(uid).is_none()
             || body.chars().count() > MAX_DRAFT_CHARS
@@ -1162,11 +1190,13 @@ impl Store {
         Ok(true)
     }
 
+    /// Removes the task's reply draft from the app only; a copy already in the mailbox's Drafts folder stays. Returns whether there was a draft.
     pub fn delete_draft(&self, uid: u32) -> anyhow::Result<bool> {
         let n = self.db.execute("DELETE FROM drafts WHERE uid=?1", [uid])?;
         Ok(n > 0)
     }
 
+    /// Records that a copy of the task's draft was saved to the mailbox's Drafts folder.
     pub fn mark_draft_saved(&self, uid: u32) -> anyhow::Result<()> {
         self.db
             .execute("UPDATE drafts SET saved=1 WHERE uid=?1", [uid])?;
@@ -1609,6 +1639,7 @@ impl Store {
     }
 
     // ---- outbox ----
+    /// Adds a change (`op`, with its argument `arg`) for the mailbox write-back to apply later. Tasks the user added themselves have no message, so nothing is queued for them.
     pub fn queue(&self, uid: u32, op: &str, arg: &str) -> anyhow::Result<()> {
         if uid >= LOCAL_UID_BASE {
             return Ok(()); // your own tasks have no message in a mailbox to change
@@ -1620,6 +1651,7 @@ impl Store {
         Ok(())
     }
 
+    /// Up to `limit` queued changes, oldest first. A store for one mailbox sees only that mailbox's changes; a read error gives an empty list.
     pub fn pending(&self, limit: i64) -> Vec<OutboxItem> {
         // a store for one mailbox sees only that mailbox's items; the plain store sees them all
         let (lo, hi) = match self.scope {
@@ -1644,11 +1676,13 @@ impl Store {
         .unwrap_or_default()
     }
 
+    /// Removes a queued change once it has been applied, or given up on.
     pub fn ack(&self, id: i64) -> anyhow::Result<()> {
         self.db.execute("DELETE FROM outbox WHERE id=?1", [id])?;
         Ok(())
     }
 
+    /// Counts one more failed attempt on a queued change; the write-back gives up after five.
     pub fn fail(&self, id: i64) -> anyhow::Result<()> {
         self.db
             .execute("UPDATE outbox SET tries=tries+1 WHERE id=?1", [id])?;
@@ -1656,6 +1690,7 @@ impl Store {
     }
 
     // ---- log / overrides / cursor / meta ----
+    /// Adds a line to the activity log shown in the app and in the support report. Old lines are removed by `prune`.
     pub fn log(&self, msg: &str) -> anyhow::Result<()> {
         self.db.execute(
             "INSERT INTO log(at,msg) VALUES(strftime('%s','now'),?1)",
@@ -1664,6 +1699,7 @@ impl Store {
         Ok(())
     }
 
+    /// The newest `n` log lines as (unix seconds, text), newest first.
     pub fn recent_log(&self, n: i64) -> Vec<(f64, String)> {
         let Ok(mut st) = self
             .db
@@ -1703,6 +1739,7 @@ impl Store {
         }
     }
 
+    /// The newest `n` priority corrections, newest first, for the AI prompt's hints.
     pub fn recent_overrides(&self, n: i64) -> Vec<Override> {
         let Ok(mut st) = self
             .db
@@ -1722,6 +1759,7 @@ impl Store {
         .unwrap_or_default()
     }
 
+    /// A stored text value (counters, dates, markers) by name, or `None` when it is not set or cannot be read.
     pub fn meta_get(&self, key: &str) -> Option<String> {
         self.db
             .query_row("SELECT value FROM meta WHERE key=?1", [key], |r| r.get(0))
@@ -1730,6 +1768,7 @@ impl Store {
             .flatten()
     }
 
+    /// Stores a text value by name, replacing any earlier one.
     pub fn meta_set(&self, key: &str, value: &str) -> anyhow::Result<()> {
         self.db.execute(
             "INSERT OR REPLACE INTO meta VALUES(?1,?2)",
@@ -1738,12 +1777,14 @@ impl Store {
         Ok(())
     }
 
+    /// The highest IMAP UID of this store's mailbox that the sync has handled; 0 before the first sync.
     pub fn last_uid(&self) -> u32 {
         self.meta_get(&self.mkey("last_uid"))
             .and_then(|v| v.parse().ok())
             .unwrap_or(0)
     }
 
+    /// Records the highest handled IMAP UID of this store's mailbox. It stores exactly what it is given, so callers pass the larger of the old and new value.
     pub fn set_last_uid(&self, uid: u32) -> anyhow::Result<()> {
         self.meta_set(&self.mkey("last_uid"), &uid.to_string())
     }

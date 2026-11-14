@@ -22,7 +22,7 @@ small command set and never sees mailbox names or addresses.
 
 A task is identified everywhere (the list, the commands, the phone) by one `u32`. The id space is cut into blocks:
 
-```
+```text
 MAILBOX_SPAN = 400,000,000
 task id of IMAP message `uid` in mailbox n  =  n * MAILBOX_SPAN + uid          (n = 0 to 4; mailbox 0 is the first)
 tasks you add yourself and follow-ups       =  LOCAL_UID_BASE (2,000,000,000) and up

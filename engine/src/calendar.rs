@@ -10,6 +10,8 @@ use std::path::{Path, PathBuf};
 pub const MAX_ICS_BYTES: usize = 64 * 1024;
 const MAX_TEXT_CHARS: usize = 200;
 
+/// The first event of a calendar invitation, as plain text fields cut to a safe length.
+/// `parse` builds it from the invitation, and `to_ics` builds the saved `.ics` file from these fields, never from the message itself.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Event {
     pub summary: String,

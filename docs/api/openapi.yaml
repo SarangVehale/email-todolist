@@ -1,0 +1,242 @@
+# Inbox Agent phone hub, as served by engine/src/hub.rs. Human-readable version: docs/api/hub-http.md.
+# Status: current · Audience: developers who change the phone hub · Last reviewed: 2026-11-14
+openapi: 3.0.3
+info:
+  title: Inbox Agent phone hub
+  version: "0.0.0"
+  description: |
+    A small HTTP/1.1 server inside the Inbox Agent engine. It serves the window's files and one command endpoint to a phone
+    or tablet on the user's own network. Plain HTTP, no TLS: use it on a trusted network or a private VPN.
+
+    * Answers only peers on loopback, private, link-local, 100.64/10 and IPv6 local addresses; any other connection is
+      closed without an answer. At most 32 connections at once; one request per connection (`Connection: close`).
+    * Request head at most 16 KB (else 431), body at most 64 KB by `Content-Length` (else 413), 5-second read and write
+      timeouts (else 408). Chunked bodies are not supported.
+    * Every response carries `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
+      `Referrer-Policy: no-referrer`, `Cross-Origin-Resource-Policy: same-origin` and a `Content-Security-Policy`.
+    * Ten wrong access codes from one address within 60 seconds lock that address out of `/api/rpc` (429) until 60 seconds
+      after its first failure.
+
+    No stability is promised: this interface ships with the app and changes with it. The version above is not checked.
+  license:
+    name: See the repository
+servers:
+  - url: http://{host}:{port}
+    description: The computer running Inbox Agent, on the local network
+    variables:
+      host:
+        default: 192.168.1.20
+        description: The computer's local network address (Settings shows it).
+      port:
+        default: "8787"
+        description: The `hub.port` setting (1024 or higher).
+tags:
+  - name: files
+    description: The window's files, built into the engine. No access code needed. Any other GET path is 404.
+  - name: commands
+    description: The command endpoint. Needs the access code.
+paths:
+  /:
+    get: { tags: [files], summary: "The window (same as /index.html)", operationId: getRoot, responses: { "200": { $ref: "#/components/responses/Html" }, "404": { $ref: "#/components/responses/NotFound" } } }
+  /index.html:
+    get: { tags: [files], summary: The window, operationId: getIndex, responses: { "200": { $ref: "#/components/responses/Html" } } }
+  /style.css:
+    get: { tags: [files], summary: Style sheet, operationId: getStyle, responses: { "200": { $ref: "#/components/responses/Css" } } }
+  /main.js:
+    get: { tags: [files], summary: "List, polling and backend adapter", operationId: getMainJs, responses: { "200": { $ref: "#/components/responses/Js" } } }
+  /drafts.js:
+    get: { tags: [files], summary: "Drafts, filters, snooze and select mode", operationId: getDraftsJs, responses: { "200": { $ref: "#/components/responses/Js" } } }
+  /setup.js:
+    get: { tags: [files], summary: "Setup wizard and Settings dialog", operationId: getSetupJs, responses: { "200": { $ref: "#/components/responses/Js" } } }
+  /boot.js:
+    get: { tags: [files], summary: "Start-up and polling timer", operationId: getBootJs, responses: { "200": { $ref: "#/components/responses/Js" } } }
+  /manifest.json:
+    get:
+      tags: [files]
+      summary: Web app manifest (Add to Home Screen)
+      operationId: getManifest
+      responses:
+        "200":
+          description: The manifest.
+          headers: { Cache-Control: { $ref: "#/components/headers/CacheControl" } }
+          content: { application/manifest+json: { schema: { type: object } } }
+  /icon.svg:
+    get:
+      tags: [files]
+      summary: App icon
+      operationId: getIcon
+      responses:
+        "200":
+          description: The icon.
+          content: { image/svg+xml: { schema: { type: string } } }
+  /fonts/bodoni-moda-latin-wght-normal.woff2:
+    get: { tags: [files], summary: Font, operationId: getFontBodoni, responses: { "200": { $ref: "#/components/responses/Font" } } }
+  /fonts/bodoni-moda-latin-wght-italic.woff2:
+    get: { tags: [files], summary: Font, operationId: getFontBodoniItalic, responses: { "200": { $ref: "#/components/responses/Font" } } }
+  /fonts/ibm-plex-mono-latin-400-normal.woff2:
+    get: { tags: [files], summary: Font, operationId: getFontPlex400, responses: { "200": { $ref: "#/components/responses/Font" } } }
+  /fonts/ibm-plex-mono-latin-500-normal.woff2:
+    get: { tags: [files], summary: Font, operationId: getFontPlex500, responses: { "200": { $ref: "#/components/responses/Font" } } }
+  /fonts/space-grotesk-latin-wght-normal.woff2:
+    get: { tags: [files], summary: Font, operationId: getFontGrotesk, responses: { "200": { $ref: "#/components/responses/Font" } } }
+  /api/rpc:
+    post:
+      tags: [commands]
+      summary: Run one engine command
+      description: |
+        Runs `state` (the phone view) or one of the commands in `commands::PUBLIC`. Every other name, known or not, is
+        answered 400 with `not available from the hub`. Arguments and answers of each command: docs/api/rpc.md. A body
+        that is not JSON is read as an empty command. `Content-Type` is not checked. A `GET` on this path is 404 and any
+        other method is 405.
+      operationId: rpc
+      security:
+        - accessCode: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RpcRequest" }
+            examples:
+              star:
+                summary: Star a task
+                value: { cmd: set_star, args: { uid: 812, star: true } }
+              state:
+                summary: Read the list
+                value: { cmd: state, args: { done: 200 } }
+      responses:
+        "200":
+          description: The command succeeded.
+          headers: { Cache-Control: { $ref: "#/components/headers/CacheControl" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RpcSuccess" }
+              example: { ok: true, data: true }
+        "400":
+          description: |
+            The command failed or is not allowed from the hub (body with `error`), or the request was malformed (bad request
+            line, a header without `:`, a `Content-Length` that is not a number, a body shorter than its length; body
+            without `error`).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - { $ref: "#/components/schemas/RpcError" }
+                  - { $ref: "#/components/schemas/BareError" }
+              examples:
+                refused: { value: { ok: false, error: not available from the hub } }
+                failed: { value: { ok: false, error: Pick a day from tomorrow to a year ahead } }
+                malformed: { value: { ok: false } }
+        "401":
+          description: Missing or wrong access code (or the hub has none). Counted towards the lock-out.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RpcError" }
+              example: { ok: false, error: unauthorized }
+        "408": { $ref: "#/components/responses/Timeout" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "429":
+          description: This address sent 10 wrong codes within 60 seconds. Sent even when the code is right, until the window ends.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RpcError" }
+              example: { ok: false, error: too many attempts }
+        "431": { $ref: "#/components/responses/HeadTooLarge" }
+    put:
+      tags: [commands]
+      summary: Not allowed (any method other than GET or POST on this path)
+      operationId: rpcWrongMethod
+      responses:
+        "405":
+          description: Method not allowed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BareError" }
+components:
+  securitySchemes:
+    accessCode:
+      type: http
+      scheme: bearer
+      description: |
+        The 32-character access code (letters and digits) from Settings, sent as `Authorization: Bearer <code>`. The scheme
+        name is case-insensitive. Compared in constant time. Rotated by "Rotate access code", cleared when the hub is turned off.
+  headers:
+    CacheControl:
+      description: Never cached.
+      schema: { type: string, enum: [no-store] }
+  responses:
+    Html:
+      description: The window's HTML page.
+      headers: { Cache-Control: { $ref: "#/components/headers/CacheControl" } }
+      content: { text/html: { schema: { type: string } } }
+    Css:
+      description: A style sheet.
+      headers: { Cache-Control: { $ref: "#/components/headers/CacheControl" } }
+      content: { text/css: { schema: { type: string } } }
+    Js:
+      description: A script.
+      headers: { Cache-Control: { $ref: "#/components/headers/CacheControl" } }
+      content: { text/javascript: { schema: { type: string } } }
+    Font:
+      description: A font file.
+      headers: { Cache-Control: { $ref: "#/components/headers/CacheControl" } }
+      content: { font/woff2: { schema: { type: string, format: binary } } }
+    NotFound:
+      description: Any GET path not in the file table, and any path other than the files and /api/rpc.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/RpcError" }
+          example: { ok: false, error: not found }
+    Timeout:
+      description: A read of the request head or body took longer than 5 seconds, or reading the body failed.
+      content: { application/json: { schema: { $ref: "#/components/schemas/BareError" } } }
+    TooLarge:
+      description: Content-Length over 65,536 bytes.
+      content: { application/json: { schema: { $ref: "#/components/schemas/BareError" } } }
+    HeadTooLarge:
+      description: The request head grew past 16 KB.
+      content: { application/json: { schema: { $ref: "#/components/schemas/BareError" } } }
+  schemas:
+    RpcRequest:
+      type: object
+      required: [cmd]
+      properties:
+        cmd:
+          type: string
+          description: The command. Only these are allowed from the hub.
+          enum:
+            - state
+            - set_done
+            - set_star
+            - set_priority
+            - set_snooze
+            - set_pref
+            - draft_update
+            - draft_discard
+            - set_note
+            - add_task
+            - set_due
+            - set_title
+            - set_reminder
+        args:
+          type: object
+          description: The command's arguments (docs/api/rpc.md). Missing means none.
+          additionalProperties: true
+    RpcSuccess:
+      type: object
+      required: [ok, data]
+      properties:
+        ok: { type: boolean, enum: [true] }
+        data:
+          description: The command's answer. For `state`, see docs/reference/state-shape.md.
+          nullable: true
+    RpcError:
+      type: object
+      required: [ok, error]
+      properties:
+        ok: { type: boolean, enum: [false] }
+        error: { type: string }
+    BareError:
+      type: object
+      required: [ok]
+      properties:
+        ok: { type: boolean, enum: [false] }

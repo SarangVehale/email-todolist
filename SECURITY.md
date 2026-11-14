@@ -71,7 +71,7 @@ overlap for one 20-second tick.
 
 Exact-match routes only (no filesystem access, path traversal tested); bound SQL parameters
 everywhere; constant-time token comparison; 32-character access code from a CSPRNG; hub commands
-limited to a short allow-list (eleven today, none of which can reach the account, settings, secrets or the AI); secrets in the OS keychain only; the API key is
+limited to a short allow-list (twelve today, plus reading the list, none of which can reach the account, settings, secrets or the AI); secrets in the OS keychain only; the API key is
 sent only to a fixed Anthropic HTTPS URL; TLS to the mail server with hostname verification;
 ntfy title restricted to ASCII; all UI sinks escape `& < > " '`.
 
@@ -95,7 +95,8 @@ in; the Windows build does not use them. They wait on upstream Tauri releases.
 - **Local data is not encrypted at rest.** `agent.db` holds subjects, 400-character excerpts, up to 3,000 characters of message text (kept only to write replies) and any reply drafts;
   `settings.json` holds the access code. They live in the user's profile; use full-disk encryption.
 - **Email content goes to the chosen model.** Rules-only mode sends nothing. Ollama stays on the
-  computer. An Anthropic key sends email text to Anthropic.
+  computer while its address is this computer's (the default; Settings accepts any http or https address, so pointing it at
+  another machine sends the text there). An Anthropic key sends email text to Anthropic.
 - **Authentication-Results is only as good as the receiving server.** If a provider adds none, trust
   falls back to the previous behaviour.
 - **AI-written drafts can be wrong or persuasive.** They are always shown for review, never sent, and clearly labelled by source (AI, quick reply or edited).
@@ -356,6 +357,19 @@ pass and a Haiku pass over the documents, and an Opus reviewer in two rounds (ro
 | What the harness ends: it ends processes. The first version ended the one process it started (not the browser, on Windows, and `taskkill` was not found from some shells), a later one searched for processes by the run's own temporary profile folder without a time limit, and a number the browser had reported could be reused by another process before it was killed | It asks the browser for its own process number and ends that process, and its helpers, at the moment it reports it; it calls the system tools by full path; the search by profile folder (the run's own random folder name, never anything else) is used only if the browser does not stop answering, with a time limit; folders are deleted by a process that only ever deletes folders it created |
 | A start that failed part-way left a server listening and a browser running, so a test run never ended and the browser stayed | A failed start ends what it began; every wait has a time limit |
 | No dependency was added (a request to install a DOM library was refused by the permission system and not retried), nothing is downloaded, nothing can send mail, and `app/test` is outside what the installer bundles | |
+
+## Review 11 (Phase 10: documentation as code; three-seat council, drift passes and an Opus review loop, 2026-11-14)
+
+A documentation phase with one engine fix. Opus, Sonnet and Fable seats (the owner asked for Fable) each said **ship with caveats**; a Sonnet
+pass over the technical documents, and two Haiku passes over what the guides, FAQ and runbooks promise, checked about 1,300 claims
+against the code; an Opus reviewer approved in the second round. Full ledger: `docs/2026-11-14_PHASE10_REVIEW.md`.
+
+| Finding | Fix |
+| --- | --- |
+| Statements about security and privacy that the code does not support: the phone hub's command allow-list is twelve commands, not eleven; Ollama stays on the computer only while its address is this computer's (Settings accepts any http or https address); "never deletes a message" (on a server that cannot move one, the app copies it to Archive and removes the original); a backup module comment said it holds no message text (a correction keeps the sender and subject); a hub time limit described as on the whole request when it is on each read | The documents and comments now say what the code does |
+| The Settings "Test" for ranking showed a green "Works" when no model was chosen or no API key was saved, so a person could believe mail was being ranked by a model when it was ranked by rules | It answers "No model is chosen" or "No API key is saved"; test first, each guard put back once |
+| The documentation checker itself: what it can and cannot catch is written in the review record (it checks structure, the command list, limits and counts, not whether a sentence is true) | Hardened against the weaknesses the reviewers found; 38 tests of its own |
+| A new runbook for a leaked password, key, access code or topic | Revoke at the source first, then give the app the new one; every button named is real |
 
 ## Reporting a vulnerability
 

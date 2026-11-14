@@ -13,14 +13,17 @@ pub fn parse_local(s: &str) -> Option<NaiveDateTime> {
     (d.format(FORMAT).to_string() == s).then_some(d)
 }
 
+/// A local date and time as the stored text `YYYY-MM-DD HH:MM`, the one form `parse_local` accepts.
 pub fn fmt_local(d: NaiveDateTime) -> String {
     d.format(FORMAT).to_string()
 }
 
+/// The wall-clock time now with no time zone, to compare with stored reminder times.
 pub fn now_local() -> NaiveDateTime {
     Local::now().naive_local()
 }
 
+/// Is this a repeat a task may have: empty (no repeat), "daily", "weekly" or "monthly"?
 pub fn valid_repeat(r: &str) -> bool {
     matches!(r, "" | "daily" | "weekly" | "monthly")
 }

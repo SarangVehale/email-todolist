@@ -3,6 +3,7 @@
 use crate::mail::Email;
 use crate::signals::{base_score, Signals};
 
+/// The verdict on one message: a priority from 1 (ignore) to 5 (within the hour), a category, a short to-do line, whether it is urgent and needs a reply, and any due date.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Triage {
     pub priority: u8,
@@ -24,6 +25,8 @@ pub struct DraftCtx {
     pub instruction: String,
 }
 
+/// Something that can triage a message and draft a reply: the rules, or a model (local or API).
+/// `triage` may fail, and callers then fall back to the rules (see `triage_with_fallback`); `draft` fails unless the provider has a model.
 pub trait Triager: Send {
     fn triage(&self, email: &Email, sig: &Signals) -> anyhow::Result<Triage>;
 
@@ -33,6 +36,8 @@ pub trait Triager: Send {
     }
 }
 
+/// The triager that needs no model: it scores from the signals, sorts the category by keywords, and finds due dates in the text.
+/// It never fails and never marks a message urgent, so it is the fallback for every other triager.
 pub struct RulesTriager;
 
 const CATEGORIES: &[(&str, &[&str])] = &[

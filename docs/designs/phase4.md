@@ -106,7 +106,7 @@ For each candidate (newest first, at most 10 per pass) the client first looks in
 message that replies to it counts, even if you have since filed it away. Otherwise it asks the server, read-only, in INBOX
 and in the `\All` and `\Archive` folders when the server has them:
 
-```
+```text
 UID SEARCH NOT FROM "<your address>" ... NOT HEADER Auto-Submitted "auto-" OR HEADER In-Reply-To "<id>" HEADER References "<id>"
 ```
 

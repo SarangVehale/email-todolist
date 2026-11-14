@@ -1,7 +1,7 @@
 # Manual test plan (live mailbox)
 
 The automated suite never touches a real mailbox. These cases need your own account. Use a throwaway message wherever
-a case changes mail. Record the result and, for any failure, the **Activity log** tab text (never the password).
+a case changes mail. Record the result and, for any failure, the **Log** tab text (never the password).
 
 **Setup:** install the build, run the wizard, use "Rules only", keep "Let Inbox Agent file mail" off until MT-20.
 

@@ -13,6 +13,8 @@ const MAX_BODY_CHARS: usize = 3000;
 const MAX_HTML_BYTES: usize = 256 * 1024;
 const MAX_REFERENCES: usize = 10;
 
+/// One received message after parsing: sender, subject, received time, a short excerpt, the capped body text, thread ids and attachment names.
+/// Every field is attacker-controlled; parsing has already cleaned or capped the ones that reach IMAP commands, headers or the screen.
 #[derive(Debug, Clone)]
 pub struct Email {
     pub uid: u32,
@@ -74,6 +76,8 @@ pub fn valid_address(a: &str) -> bool {
             .any(|c| c.is_control() || c.is_whitespace() || "<>,;\"\\()".contains(c))
 }
 
+/// The (display name, lower-cased address) pairs in an address header such as From or Reply-To, with groups flattened.
+/// A value that cannot be parsed gives an empty list. The addresses are not checked with `valid_address`.
 pub fn addresses(value: &str) -> Vec<(String, String)> {
     let mut out = vec![];
     if let Ok(list) = addrparse(value) {

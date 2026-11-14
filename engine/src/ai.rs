@@ -42,6 +42,8 @@ fn defang(s: &str) -> String {
     s.replace('<', "\u{2039}").replace('>', "\u{203a}")
 }
 
+/// The user message for triage: the mail's signals, the rules' prior score, recent priority corrections, and the sender, subject and excerpt.
+/// Every piece of email text goes through `defang`, so mail cannot close the `<email>` wrapper.
 pub fn build_prompt(e: &Email, s: &Signals, overrides: &[Override]) -> String {
     let hints: String = overrides
         .iter()
@@ -71,6 +73,8 @@ pub fn build_prompt(e: &Email, s: &Signals, overrides: &[Override]) -> String {
     )
 }
 
+/// The user message for drafting a reply: the requested tone, the user's own instruction and signature (trusted), and the email's sender, subject and full body (untrusted, defanged).
+/// An unknown tone is treated as friendly.
 pub fn build_draft_prompt(e: &Email, ctx: &DraftCtx) -> String {
     let tone = match ctx.tone.as_str() {
         "formal" => "formal and polite",
@@ -88,6 +92,7 @@ pub fn build_draft_prompt(e: &Email, ctx: &DraftCtx) -> String {
     )
 }
 
+/// The categories a triage result may carry; any other value from the model becomes "other".
 pub const CATEGORIES: &[&str] = &[
     "work",
     "personal",
@@ -135,6 +140,8 @@ fn boolish(v: &Value) -> bool {
         .unwrap_or(false)
 }
 
+/// Reads a triage result out of the model's reply text, which may be wrapped in prose or code fences.
+/// Fails if no JSON object with a priority is found; the priority is clamped to 1-5, the category is checked against `CATEGORIES`, the action and explanation are cut to 120 and 200 characters, and a due date that is not a valid date is dropped.
 pub fn parse_reply(text: &str) -> Result<Triage> {
     // Models often wrap the JSON in prose or code fences, or add a second object: use the first `{` that
     // starts a JSON object with a priority in it.
@@ -166,12 +173,13 @@ pub fn parse_reply(text: &str) -> Result<Triage> {
     })
 }
 
-/// Turns raw model output into a clean reply body: no code fences, no subject line, no control characters, capped.
 /// Zero-width and bidirectional-override characters can disguise text or links.
 fn is_invisible(c: char) -> bool {
     matches!(c, '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2060}'..='\u{2064}' | '\u{2066}'..='\u{2069}' | '\u{feff}')
 }
 
+/// Turns raw model output into a clean reply body: no code fences, no leading subject line, no control or invisible characters, capped at `MAX_DRAFT_CHARS`.
+/// The result may be empty; the caller treats that as a failed draft.
 pub fn clean_draft(text: &str) -> String {
     let t = text.trim();
     let t = t
@@ -254,6 +262,8 @@ impl Triager for Model {
     }
 }
 
+/// Picks the triager for the saved AI settings: a model when the mode is "ollama" with a model name, or "anthropic" with a key.
+/// Any other mode, or a missing model name or key, gives the rules-only triager, so this never fails.
 pub fn make_triager(
     cfg: &AiCfg,
     anthropic_key: Option<String>,

@@ -23,6 +23,8 @@ pub struct SentMsg {
     pub sent_at: f64,
 }
 
+/// What the Sent folder says about you: who you wrote to, your own addresses, the Message-IDs you sent, the ones you answered, and the conversations you started.
+/// It is topped up from headers only (`add_headers`), so no message text is kept.
 #[derive(Default)]
 pub struct SentIndex {
     /// Newest first, at most MAX_STARTED; see `SentMsg`.
@@ -135,6 +137,7 @@ pub fn is_forward(subject: &str) -> bool {
     })
 }
 
+/// Three yes/no facts about an incoming message that feed the prior score and the AI prompt: the sender is someone you have written to, the message answers one of yours, and it looks automated.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 pub struct Signals {
     pub known: bool,
@@ -142,6 +145,8 @@ pub struct Signals {
     pub bulk: bool,
 }
 
+/// The signals of one message against the Sent history.
+/// A message that failed the server's DKIM, SPF or DMARC check is never counted as `known` or as a `reply`, because its From address may be forged.
 pub fn compute(e: &Email, sent: &SentIndex) -> Signals {
     let a = &e.sender_addr;
     let noreply = [

@@ -29,6 +29,6 @@ Never record a release that was not published, and never edit the checksum of a 
 
 ## Row template
 
-```
+```text
 | <version> | v<version> | in preparation | Windows, macOS, Linux | no | | | |
 ```

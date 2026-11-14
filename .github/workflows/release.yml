@@ -48,6 +48,20 @@ jobs:
         run: |
           cargo clippy --locked --all-targets -- -D warnings
           cargo test --locked
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - name: Documentation checks
+        shell: bash
+        run: |
+          python3 scripts/test_check_docs.py
+          python3 scripts/check_docs.py
+      - name: The window's own tests
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          INBOX_AGENT_UI_TESTS: require
+        run: cd app && npm test
 
   build:
     needs: test

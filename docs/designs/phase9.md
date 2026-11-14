@@ -1,7 +1,7 @@
 # Phase 9: tests for the window
 
 * **Date:** 2026-11-14
-* **Status:** design for Run 6. Not a feature: the window (`app/ui`, about 1,500 lines of JavaScript that also run on the phone) had no
+* **Status:** design for Run 6. Not a feature: the window (`app/ui`, about 1,250 lines of JavaScript that also run on the phone) had no
   automated test, and most of the defects found in review of Runs 3, 4 and 5 that had no test to catch them were in it.
 
 ## Problem

@@ -5,7 +5,7 @@ handles and the test that pins them (see [TESTCASES.md](TESTCASES.md)).
 
 ## 1. Start-up (`core.rs: Core::start`)
 
-```
+```text
 start():
     stop every thread from the previous start; make a fresh stop flag
     settings = load settings.json            # corrupt or missing -> defaults
@@ -27,7 +27,7 @@ Edge cases: restarting after every settings save must not leave two hubs fightin
 
 ## 2. Watching the mailbox (`watcher.rs: run`)
 
-```
+```text
 run():
     loop until stop:
         connect over TLS (15 s connect, 60 s read/write limits); login
@@ -46,7 +46,7 @@ Edge cases: network drops, server hangs — timeouts; `a_failing_server…`, IMA
 
 ## 3. Fetching new mail (`watcher.rs: process_new`)
 
-```
+```text
 prune old data (done tasks past 90 days, log past 30, corrections past 365, restored mail state past 90 days)
 
 process_new():
@@ -76,7 +76,7 @@ Edge cases: empty inbox, UID gaps, renumbered mailbox, oversized and hostile mai
 
 ## 4. Parsing one message (`mail.rs: parse`)
 
-```
+```text
 parse(raw):
     if more than 200 "multipart/" markers: refuse                 # stack-depth attack
     on a 64 MB-stack thread:                                      # a panic cannot abort the app
@@ -103,7 +103,7 @@ Date, NUL bytes, attachment-only mail, 20 000-character subjects, forged Message
 
 ## 5. Ranking (`signals.rs`, `triage.rs`, `ai.rs`)
 
-```
+```text
 signals: known    = sender in my Sent recipients   AND sender_ok
          reply    = In-Reply-To matches a Message-ID I sent  AND sender_ok
          bulk     = List-Unsubscribe | List-Id | Precedence bulk | Auto-Submitted | noreply address
@@ -128,7 +128,7 @@ Edge cases: spoofed sender, prompt injection, hostile category strings, malforme
 
 ## 5b. Closing tasks that are finished elsewhere (`watcher.rs: reconcile_open`, `refresh_sent_index`)
 
-```
+```text
 after the first sync, after a mailbox change (at most every 20 s), and every 2 minutes while idle:                    # failures are logged, never fatal
     top up the Sent index with new Sent messages (read again if the Sent UIDVALIDITY changed)
         replied_to = every id named in In-Reply-To (not References) of a sent message, except forwards (Fwd, FW, WG, TR, RV, ENC...)
@@ -147,7 +147,7 @@ Edge cases: server errors and odd replies, renumbered folders, forwards, reopene
 
 ## 5c. Your own rules (`rules.rs`, `store.rs: add, apply_rules`)
 
-```
+```text
 rule = { id, field: sender | domain | subject, text, priority?, category?, file }
 valid: <= 50 rules, unique short ids, text 1-100 characters with no control characters, a known field, priority 1-5,
        a known category, at least one outcome, and `file` never together with a priority
@@ -181,7 +181,7 @@ hand-corrected tasks left alone, a refused rule set changing nothing, the reason
 
 ## 5d. Follow-ups (`followup.rs`, `signals.rs: note_started`, `store.rs`)
 
-```
+```text
 off by default (settings.followups.days = 0); 2, 3, 5 or 7 turns it on
 SentIndex.started: every sent message with a clean Message-ID, no In-Reply-To, a subject that is not a forward, at least
                    one valid recipient (first ten To and Cc) and a Date; newest 200 kept; subject cleaned and cut at 150
@@ -216,7 +216,7 @@ more than twenty open, sign-out in the middle of a check, the feature switched o
 
 ## 5e. Reminders and repeats (`reminders.rs`, `store.rs: set_reminder, due_reminders, advance_repeat`)
 
-```
+```text
 times are local wall-clock text "YYYY-MM-DD HH:MM" (exactly that shape; seconds, one-digit hours, stray spaces refused)
 set_reminder(uid, at, repeat):                 # your own tasks only; also from the phone
     mail task or no such task: refuse
@@ -247,7 +247,7 @@ mail tasks, bad times —
 
 ## 5f. Search inside message text (`store.rs: search, fts_query`)
 
-```
+```text
 index: SQLite FTS5 table over subject, sender, addr, body, note, content='tasks', tokenizer unicode61 (accents folded)
        kept by AFTER INSERT / DELETE / UPDATE OF those columns triggers; recursive_triggers is ON so a replace deletes
        the old entry; created after the columns exist; an older database gets 'rebuild' once, after the one-time copy
@@ -263,7 +263,7 @@ a version-1 database; text left on disk after sign-out — `phase5.rs` (search t
 
 ## 5g. Calendar invitations (`calendar.rs`, `mail.rs: find_event`, `commands.rs: save_event_in`)
 
-```
+```text
 parse (mail): each text/calendar, application/ics or *.ics part in turn (depth up to 24): decode, give it to
               calendar::parse; the first that yields an event is used
 calendar::parse(text):
@@ -292,7 +292,7 @@ random garbage, injection through the summary or place, file names from hostile 
 
 ## 5h. Several mailboxes (`store.rs: scoped, global_uid, remove_mailbox`, `core.rs: add_account, remove_account`)
 
-```
+```text
 ids:    task id = mailbox * 400,000,000 + IMAP uid       (mailbox 0..4; mailbox 0 = the raw IMAP uid, as before)
         your own tasks and follow-ups = 2,000,000,000 and up
         an IMAP uid >= 400,000,000 -> the store refuses it; the sync logs "skipped message N" and moves its cursor past it
@@ -351,7 +351,7 @@ emptied, the phone's log, many threads opening a new database at once —
 
 ## 5i. Backup and restore (`backup.rs`, `store/transfer.rs`)
 
-```
+```text
 backup_export():                                     # desktop only
     file = { format "inbox-agent-backup", version 1, app_version, created,
              settings: allow-list only (ranking mode and Ollama model name, desktop alerts, alert categories, quiet hours, digest time,
@@ -406,7 +406,7 @@ mailboxes, a reminder in the past, expiry and the bound of the parked table, the
 
 ## 5j. A big mailbox (`store.rs: tasks_for_window`, `core.rs: state`, `app/ui/main.js`)
 
-```
+```text
 state({ done? }):                          # the answer to every poll, for the window and the phone
     shown   = done clamped to 200 .. 20,000 (a missing or non-number value: 200)
     tasks   = every task that is not finished (all of them: they are what you act on)
@@ -444,7 +444,7 @@ is driven in the browser, by `scripts/scale_check` (`docs/designs/phase8.md`) an
 
 ## 6. Changing the real mailbox (`writeback.rs`) — only when the user turned it on
 
-```
+```text
 user action (done / star / priority / save draft) -> update local task AND queue an outbox item
     (tasks you added yourself, uid >= 2,000,000,000, and notes never queue anything: there is no message to change)
 
@@ -465,7 +465,7 @@ Edge cases: decoy IDs that merely contain the real one, duplicate copies, missin
 
 ## 7. Reply drafts (`commands.rs`, `drafts.rs`) — nothing is ever sent
 
-```
+```text
 draft_generate(task):                              # desktop only
     if the task is one you added yourself: refuse (nothing to reply to)
     if the existing draft has the user's edits and no explicit "replace": refuse
@@ -488,7 +488,7 @@ Edge cases: header injection, extreme subjects, empty bodies, odd sender names, 
 
 ## 8. Phone hub (`hub.rs`)
 
-```
+```text
 accept loop (non-blocking, honours the stop flag):
     if the peer is not on a local network (loopback, private, link-local, 100.64/10, IPv6 local): drop it
     if 32 connections are already open: drop the new one
@@ -508,7 +508,7 @@ Edge cases: stalled clients, floods, hostile headers, odd methods — `stalled_c
 
 ## 9. Scheduler (`jobs.rs`)
 
-```
+```text
 every 20 s:
     for tasks whose snooze time has passed: clear the snooze, notify once ("Back from snooze")
     for your reminders that have come due: notify once each up to three, one summary for more (section 5e)
@@ -528,7 +528,7 @@ earliest valid local time is used) — `snooze_presets_across_month_year_and_lea
 
 ## 10. Settings (`settings.rs`)
 
-```
+```text
 save_settings(patch):
     merged = current + patch (unknown fields ignored; wrong types -> error)
     validate: server host = letters digits . - only; ports 1..65535, hub port >= 1024;
@@ -544,7 +544,7 @@ Edge cases: corrupt or older settings files fall back safely — `corrupt_or_old
 
 ## 11. Update check and diagnostics (`updates.rs`, `diag.rs`)
 
-```
+```text
 every scheduler tick:
     if UPDATE_REPO is empty, the user turned the check off, the server already answered today, or a failed try
        is still inside its hour: do nothing

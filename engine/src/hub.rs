@@ -316,6 +316,8 @@ fn bind(port: u16, stop: &AtomicBool) -> Option<TcpListener> {
     None
 }
 
+/// Runs the phone hub on the configured port until `stop` is set; it blocks, so `Core::start` runs it on its own thread.
+/// It gives up quietly, with a line in the log, if the port stays busy for about six seconds. Connections from outside the local network are dropped, as are those past 32 at once.
 pub fn serve(core: Arc<Core>, stop: Arc<AtomicBool>) {
     let s = core.settings();
     let Some(listener) = bind(s.hub.port, &stop) else {

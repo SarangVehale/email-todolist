@@ -54,6 +54,8 @@ fn template_key(instruction: &str) -> &'static str {
     }
 }
 
+/// A reply made from a fixed quick-reply text, picked from the user's instruction (thanks, confirm, decline or later), with a greeting by first name and the signature if there is one.
+/// It never fails, so it is the fallback when no model can draft.
 pub fn template_draft(e: &Email, ctx: &DraftCtx) -> String {
     let key = template_key(&ctx.instruction);
     let text = TEMPLATES
@@ -93,6 +95,8 @@ pub fn generate(t: &dyn Triager, e: &Email, ctx: &DraftCtx) -> (String, &'static
 
 // ───────── building the RFC 822 message for the Drafts folder ─────────
 
+/// The parts of a reply to save into the mailbox's Drafts folder; `build_message` turns them into the message text.
+/// The fields are untrusted until `build_message` has checked them.
 pub struct DraftMessage<'a> {
     pub from: &'a str,
     pub to: &'a str,

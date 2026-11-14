@@ -2,7 +2,8 @@
 //!
 //! A backup is one JSON file with what you did on top of your mail: rules, sender choices, corrections, tasks of your own, what
 //! you did with mail (keyed by Message-ID, never its text), the mailboxes and a short allow-list of options. It never holds a
-//! password, a key, the phone hub's code, a network destination or any message text. Restoring only adds, in one transaction,
+//! password, a key, the phone hub's code, a network destination or a message body (a correction keeps the sender and the subject of
+//! the mail it corrected). Restoring only adds, in one transaction,
 //! and the file is treated as untrusted input.
 use crate::core::Core;
 use crate::rules::{self, Rule};
@@ -14,13 +15,19 @@ use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+/// The `format` text every backup file starts with; a file with any other value is refused.
 pub const FORMAT: &str = "inbox-agent-backup";
+/// The backup file layout this build writes. A file with a higher number is refused as coming from a newer app.
 pub const VERSION: u32 = 1;
 /// The largest file the app writes or reads.
 pub const MAX_BYTES: usize = 8 * 1024 * 1024;
+/// The most sender choices one file holds: the most that are exported, and the most that are accepted on restore.
 pub const MAX_CHOICES: usize = 5000;
+/// The most ranking corrections one file holds, on export and on restore.
 pub const MAX_CORRECTIONS: usize = 2000;
+/// The most tasks of your own one file holds, on export and on restore.
 pub const MAX_OWN_TASKS: usize = 2000;
+/// The most per-message entries (done, star, snooze, note, draft) one file holds, on export and on restore.
 pub const MAX_MAIL_STATE: usize = 5000;
 
 fn p993() -> u16 {
@@ -33,6 +40,8 @@ fn open() -> String {
     "open".into()
 }
 
+/// The whole backup file as a value: format and version, the allow-listed options, mailboxes, rules, sender choices, corrections, own tasks and per-message state.
+/// It never holds a password, a key or any message text.
 #[derive(Serialize, Deserialize, Default, Clone, Debug)]
 #[serde(default)]
 pub struct Backup {
@@ -69,6 +78,7 @@ impl Default for BoxCfg {
     }
 }
 impl BoxCfg {
+    /// This mailbox as an account setting with id 0; restore gives it a real id when it adds the mailbox.
     pub fn account(&self) -> AccountCfg {
         AccountCfg {
             id: 0,
@@ -131,6 +141,7 @@ impl Default for OwnTask {
     }
 }
 
+/// The reply draft kept for a message: its text and where it came from ("ai", "template" or "user").
 #[derive(Serialize, Deserialize, Default, Clone, Debug)]
 #[serde(default)]
 pub struct DraftState {
@@ -177,6 +188,7 @@ pub struct Options {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updates: Option<UpdateOpt>,
 }
+/// The AI options a backup may carry: the mode and the Ollama model name. Never an API key or a server address.
 #[derive(Serialize, Deserialize, Default, Clone, Debug)]
 #[serde(default)]
 pub struct AiOpt {
@@ -185,6 +197,7 @@ pub struct AiOpt {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ollama_model: Option<String>,
 }
+/// The alert options a backup may carry: desktop alerts, which categories alert, quiet hours and the digest time.
 #[derive(Serialize, Deserialize, Default, Clone, Debug)]
 #[serde(default)]
 pub struct AlertOpt {
@@ -199,6 +212,7 @@ pub struct AlertOpt {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub digest_time: Option<String>,
 }
+/// The reply-draft options a backup may carry: automatic drafting, tone, signature, minimum priority and daily cap.
 #[derive(Serialize, Deserialize, Default, Clone, Debug)]
 #[serde(default)]
 pub struct DraftOpt {
@@ -213,12 +227,14 @@ pub struct DraftOpt {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub daily_cap: Option<u32>,
 }
+/// The follow-up option a backup may carry: how many days to wait for an answer before a follow-up task is made.
 #[derive(Serialize, Deserialize, Default, Clone, Debug)]
 #[serde(default)]
 pub struct FollowOpt {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub days: Option<u32>,
 }
+/// The update option a backup may carry: whether the app checks for a new version.
 #[derive(Serialize, Deserialize, Default, Clone, Debug)]
 #[serde(default)]
 pub struct UpdateOpt {
@@ -487,6 +503,7 @@ pub fn build(core: &Core) -> Result<Backup> {
     })
 }
 
+/// The backup as pretty-printed JSON text. Fails if the text is over `MAX_BYTES` (8 MB).
 pub fn to_json(b: &Backup) -> Result<String> {
     let text = serde_json::to_string_pretty(b)?;
     if text.len() > MAX_BYTES {
@@ -687,6 +704,7 @@ pub fn import(core: &Arc<Core>, text: &str, apply: bool, with_options: bool) -> 
     Ok(report)
 }
 
+/// The current time as seconds since 1970, or 0.0 if the clock is before that.
 pub fn now_secs() -> f64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

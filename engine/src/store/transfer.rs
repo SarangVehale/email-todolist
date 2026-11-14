@@ -60,6 +60,7 @@ fn fresh_rule_id(taken: &HashSet<String>) -> String {
 
 impl Store {
     // ---- reading what goes into a backup ----
+    /// The sender choices ("important" or "mute") for a backup, by address, at most `MAX_CHOICES`.
     pub fn backup_choices(&self) -> Vec<Choice> {
         let Ok(mut q) = self
             .db
@@ -204,6 +205,7 @@ impl Store {
     }
 
     // ---- state for mail that has not been read yet ----
+    /// How many restored entries are waiting for their message to be read by the sync.
     pub fn parked_count(&self) -> usize {
         self.db
             .query_row("SELECT COUNT(*) FROM restored_state", [], |r| {

@@ -4,9 +4,13 @@
 //! docs/designs/phase4.md.
 use serde::{Deserialize, Serialize};
 
+/// The most rules the user may have; `validate` refuses a longer list.
 pub const MAX_RULES: usize = 50;
+/// The most characters in a rule's match text (and at least one is needed).
 pub const MAX_TEXT: usize = 100;
 
+/// One user rule: text to look for in the sender, domain or subject, and what to do on a match (set a priority, set a category, or mark done).
+/// Matching is plain case-insensitive text; the first rule that matches is the one used.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Rule {

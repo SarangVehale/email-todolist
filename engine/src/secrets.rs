@@ -1,8 +1,8 @@
 //! Secrets live in the OS keychain (Windows Credential Manager, macOS Keychain, Secret Service).
 //!
-//! With `INBOX_AGENT_KEYCHAIN=memory` in the environment they live in memory instead. The engine's own `.cargo/config.toml`
-//! sets that for `cargo test`, so a test run never overwrites a password saved by the real app on the same computer. The
-//! built app does not set it.
+//! With `INBOX_AGENT_KEYCHAIN=memory` in the environment they live in memory instead. The engine's own tests use memory whatever
+//! the environment says (see `in_memory`), so a test run never overwrites a password saved by the real app on the same computer.
+//! The built app does not set it.
 use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -51,6 +51,7 @@ fn lock(m: &Mutex<HashMap<String, String>>) -> std::sync::MutexGuard<'_, HashMap
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// Stores `value` under `name` in the keychain, replacing any earlier value. Fails if the keychain cannot be written.
 pub fn set(name: &str, value: &str) -> Result<()> {
     if let Some(m) = memory() {
         lock(m).insert(name.to_string(), value.to_string());
@@ -60,6 +61,8 @@ pub fn set(name: &str, value: &str) -> Result<()> {
     Ok(())
 }
 
+/// The saved value, or `None` when there is none, it is empty, or the keychain could not be read.
+/// Use `lookup` when a keychain failure must be told apart from a missing entry.
 pub fn get(name: &str) -> Option<String> {
     lookup(name).ok().flatten()
 }
@@ -73,6 +76,7 @@ pub fn lookup(name: &str) -> Result<Option<String>> {
     classify(keyring::Entry::new(SERVICE, name).and_then(|e| e.get_password()))
 }
 
+/// Turns a keychain read into `lookup`'s answer: an empty value or a missing entry is `Ok(None)`; any other error stays an error.
 pub fn classify(r: keyring::Result<String>) -> Result<Option<String>> {
     match r {
         Ok(s) if s.is_empty() => Ok(None),
@@ -82,6 +86,7 @@ pub fn classify(r: keyring::Result<String>) -> Result<Option<String>> {
     }
 }
 
+/// Removes the entry `name`. It never fails: an entry that is not there, or a keychain that refuses, is ignored.
 pub fn delete(name: &str) {
     if let Some(m) = memory() {
         lock(m).remove(name);
@@ -92,6 +97,7 @@ pub fn delete(name: &str) {
     }
 }
 
+/// Removes every entry the app writes (all mailbox passwords and the API key), for signing out.
 pub fn delete_all() {
     for n in all_names() {
         delete(&n);

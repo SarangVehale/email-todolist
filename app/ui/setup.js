@@ -50,7 +50,7 @@ function drawWizard() {
       <p>Install the free ntfy app on your phone and subscribe to the same topic. Treat the topic like a password.</p>`;
   }
   if (n === 4) {
-    h += `<h2>Almost done.</h2><label class="sw"><input type="checkbox" data-c="writeback" ${W.writeback ? "checked" : ""}><div><b>Let Inbox Agent file mail for me</b><span>Marking a task done archives the message. Stars and priorities become flags, and labels on Gmail. Left off, your mailbox is untouched, but the changes you make are remembered and applied if you switch this on later.</span></div></label>
+    h += `<h2>Almost done.</h2><label class="sw"><input type="checkbox" data-c="writeback" ${W.writeback ? "checked" : ""}><div><b>Let Inbox Agent file mail for me</b><span>Marking a task done archives the message. Stars become flags, and on Gmail priorities become labels. Left off, your mailbox is untouched, but the changes you make are remembered and applied if you switch this on later.</span></div></label>
       <label class="sw"><input type="checkbox" data-c="hub" ${W.hub ? "checked" : ""}><div><b>Use on phone or tablet</b><span>Shows a QR code in Settings. Works on your home Wi-Fi (not encrypted) or over a private VPN such as Tailscale.</span></div></label>`;
     next = `<button class="btn pri" data-w="finish">Finish</button>`;
   }

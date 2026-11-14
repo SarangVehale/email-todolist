@@ -18,8 +18,11 @@ use std::time::Duration;
 /// Whether the database integrity check has already passed in this launch.
 static HEALTH_CHECKED: AtomicBool = AtomicBool::new(false);
 
+/// Shows a desktop notification, given a title and a body. The window shell supplies it; `Core` calls it for alerts when desktop alerts are on.
 pub type Notify = Arc<dyn Fn(&str, &str) + Send + Sync>;
 
+/// The running app: the data folder, the sync status of each mailbox, the stop flag of the background threads and the notifier.
+/// Settings and the database are read from the folder on each use, so the window and the phone hub always see current values.
 pub struct Core {
     pub dir: PathBuf,
     notify: Notify,
@@ -45,6 +48,7 @@ fn ascii(s: &str) -> String {
 }
 
 impl Core {
+    /// A core for the data folder `dir`, created if it is missing. It starts no threads; call `start` for that.
     pub fn new(dir: PathBuf, notify: Notify) -> Arc<Self> {
         let _ = std::fs::create_dir_all(&dir);
         Arc::new(Self {
@@ -55,10 +59,12 @@ impl Core {
         })
     }
 
+    /// The saved settings, read from disk each time; unreadable settings give the defaults.
     pub fn settings(&self) -> Settings {
         Settings::load(&self.dir)
     }
 
+    /// A new connection to the database `agent.db` in the data folder. Fails if it cannot be opened, for instance when it was made by a newer app.
     pub fn store(&self) -> Result<Store> {
         Store::open(&self.dir.join("agent.db"))
     }
@@ -390,6 +396,8 @@ impl Core {
         }
     }
 
+    /// Runs one named command with JSON arguments for the desktop window and returns its JSON answer; an unknown command is an error.
+    /// This reaches everything, settings and secrets included, so the phone hub must go through `rpc_public` instead.
     pub fn rpc(self: &Arc<Self>, cmd: &str, a: &Value) -> Result<Value> {
         if let Some(r) = commands::run(self, cmd, a) {
             return r;
@@ -605,7 +613,16 @@ impl Core {
             }
             "test_ai" => {
                 let s = self.settings();
-                let t = make_triager(&s.ai, secrets::get("anthropic-key"), vec![]);
+                let key = secrets::get("anthropic-key");
+                // With no model name or no key `make_triager` quietly gives the rules, which never fail: the test would say it works
+                // for a model that was never chosen.
+                if s.ai.mode == "ollama" && s.ai.ollama_model.trim().is_empty() {
+                    return Err(anyhow!("No model is chosen"));
+                }
+                if s.ai.mode == "anthropic" && key.is_none() {
+                    return Err(anyhow!("No API key is saved"));
+                }
+                let t = make_triager(&s.ai, key, vec![]);
                 let sample = crate::mail::parse(
                     0,
                     b"From: Priya <priya@example.com>\r\nSubject: Contract needs your signature today\r\n\r\nCan you sign by 5pm? Legal has cleared it.\r\n",
@@ -685,8 +702,8 @@ fn for_the_phone(msg: &str) -> String {
     }
 }
 
-/// The status to show for several mailboxes: an error of any of them first, then "connecting" or "syncing" if any is,
-/// then whatever else is not "idle" (a missing password), else "idle". No mailbox at all is "setup".
+/// The status to show for several mailboxes, in this order: an error of any of them, then "no password", then "connecting",
+/// then "syncing", then any other status that is not "idle", else the first one. No mailbox at all is "setup".
 pub fn worst_status(all: &[String]) -> String {
     let find = |f: &dyn Fn(&str) -> bool| all.iter().find(|s| f(s)).cloned();
     find(&|s| s.starts_with("error"))
@@ -698,6 +715,7 @@ pub fn worst_status(all: &[String]) -> String {
         .unwrap_or_else(|| "setup".to_string())
 }
 
+/// A random access code of 32 letters and digits, used for the phone hub.
 pub fn new_token() -> String {
     use rand::Rng;
     const A: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";

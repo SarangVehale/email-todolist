@@ -53,12 +53,22 @@ jobs:
         run: |
           python3 scripts/gen_testcases.py
           git diff --exit-code docs/TESTCASES.md || { echo "docs/TESTCASES.md is stale: run python scripts/gen_testcases.py and commit"; exit 1; }
+      - name: Documentation checks (links, diagrams, the command reference, ADRs, doc comments)
+        shell: bash
+        run: |
+          python3 scripts/test_check_docs.py
+          python3 scripts/check_docs.py
       - name: Format
         working-directory: engine
         run: cargo fmt --check
       - name: Lint (warnings are errors)
         working-directory: engine
         run: cargo clippy --locked --all-targets -- -D warnings
+      - name: Rust documentation builds (warnings are errors)
+        working-directory: engine
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --no-deps --locked
       - name: Engine tests (unit, security, edge cases, mock IMAP server, phone hub)
         working-directory: engine
         run: cargo test --locked

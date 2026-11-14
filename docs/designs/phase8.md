@@ -91,7 +91,7 @@ scrolling; a search on the Done tab.
   `done_total` is 250; with 600 open tasks all are there; the phone's answer has the same finished count and total; a finished task
   beyond the newest 200 is still in the database and found by the engine's search; `done_total` follows a finish and a reopen; the
   window may ask for more (600), never fewer than 200, a non-number is ignored, and the most one answer holds is 20,000.
-* **The window** has no automated test (the repository has no JavaScript test harness). It was driven in the browser against the demo
+* **The window** had no automated test when this was written (the repository had no JavaScript test harness; [Phase 9](phase9.md) added one). It was driven in the browser against the demo
   backend with 3,000 open and 5,000 finished tasks: 150 rows at first; "Show more" and "Show all"; `j` past the last drawn row; a
   filter resets the count; opening a row shows its detail and closing hides it; Select all and "Done all" count the whole list; undo of a
   finish; **undo of a bulk finish after a poll, with every task reopened**; a row with the keyboard focus and `j`; a click inside an open

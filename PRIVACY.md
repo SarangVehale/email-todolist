@@ -24,12 +24,12 @@ follow-up reminders, which conversations you started.
 - If you choose **Claude with your own API key**: the sender, subject and a short excerpt of each new
   message go to Anthropic to be ranked, and up to 3,000 characters of a message go when a reply draft is written for it.
   Each ranking request also carries your ten most recent corrections, which include the sender name and subject of those
-  other messages. Rules-only and local Ollama send nothing out.
+  other messages. Rules-only sends nothing out, and neither does a local Ollama while its address is this computer's (the default).
 - If you set an **ntfy topic**: the sender name and a short action text of high-priority mail go to
   the ntfy server you configured (ntfy.sh by default). The daily digest (counts only) and "back from snooze" notices
   (which carry a task's title) go there too, whatever their priority. Treat the topic like a password.
 - **Reminders** you set are announced by a desktop notification (when Desktop notifications is on) and, if you set an ntfy topic, by ntfy: the task's title goes to the ntfy server you configured. They ignore quiet hours, because you chose the time.
-- The **phone hub** serves the list only to devices that hold its access code, on your own private networks (your home Wi-Fi, a VPN such as Tailscale). It may set reminders on your own tasks (their times are the computer's clock), and it shows an invitation's event. It can search the sender, subject, the first 400 characters and your note, but not the stored message text, and it cannot save calendar files.
+- The **phone hub** serves the list only to devices that hold its access code, on your own private networks (your home Wi-Fi, a VPN such as Tailscale). It may set reminders on your own tasks (their times are the computer's clock), and it shows an invitation's event. It can search the sender, address, subject, action, the first 400 characters and your note, but not the stored message text, and it cannot save calendar files.
 - **Follow-up reminders** (off by default) ask your own mail provider whether a reply to a message you sent exists. The
   request is a search, in your Inbox and in All Mail or Archive when your provider has them, carrying that message's
   Message-ID and your own address; it goes only to your mail provider and no message is downloaded for it. A reply the app

@@ -55,7 +55,7 @@ function mock(cmd, a) {
     case "state": {
       // like the engine: every task that is not finished, and the newest 200 finished ones with their total
       const done = M.tasks.filter(x => x.status === "done").sort((x, y) => (y.done_at || y.received) - (x.done_at || x.received)), shown = Math.min(20000, Math.max(200, Number.isFinite(+(a && a.done)) ? +a.done : 200));
-      return Promise.resolve(JSON.parse(JSON.stringify({ ...M, tasks: [...M.tasks.filter(x => x.status !== "done"), ...done.slice(0, shown)], done_total: done.length, has_anthropic_key: false, rules: M.rules })));
+      return Promise.resolve(JSON.parse(JSON.stringify({ ...M, tasks: [...M.tasks.filter(x => x.status !== "done"), ...done.slice(0, shown)], done_total: done.length, has_anthropic_key: !!M.hasKey, rules: M.rules })));
     }
     case "set_done": if (t().repeat && a.done && t().uid >= 2000000000) { const nx = (t().remind || t().due || "2026-11-17").slice(0, 10); const d = new Date(nx + "T12:00:00"); d.setDate(d.getDate() + (t().repeat === "daily" ? 1 : t().repeat === "weekly" ? 7 : 30)); const iso = d.toISOString().slice(0, 10); if (t().remind) t().remind = iso + t().remind.slice(10); if (t().due) t().due = iso; return Promise.resolve(true) } t().status = a.done ? "done" : "open"; t().done_at = a.done ? Date.now() / 1000 : 0; log((a.done ? "archived “" : "reopened “") + (t().action || t().subject) + "”"); return Promise.resolve(true);
     case "set_snooze": if (a.date) { if (!/^\d{4}-\d{2}-\d{2}$/.test(a.date) || new Date(a.date + "T09:00:00") <= new Date()) return Promise.reject("Pick a day from tomorrow to a year ahead"); t().snooze_until = new Date(a.date + "T09:00:00").getTime() / 1000; return Promise.resolve(true) } { const p = a.preset; if (!["3h", "tomorrow", "nextweek", "clear"].includes(p)) return Promise.reject("unknown snooze option"); t().snooze_until = p === "clear" ? 0 : Date.now() / 1000 + (p === "3h" ? 10800 : p === "tomorrow" ? 86400 : 604800); log((p === "clear" ? "unsnoozed “" : "snoozed “") + (t().action || t().subject) + "”"); return Promise.resolve(true) }
@@ -111,7 +111,7 @@ function mock(cmd, a) {
     case "save_account": {
       const id = a.id || 0;
       if (id === 0) M.settings.account = { id: 0, host: a.host, port: a.port, user: a.user };
-      else { const m = M.settings.more_accounts.find(x => x.id === id); if (!m) return Promise.reject("There is no mailbox with that number"); Object.assign(m, { host: a.host, port: a.port, user: a.user }) }
+      else { const m = M.settings.more_accounts.find(x => x.id === id); if (!m) return Promise.reject("There is no such mailbox"); Object.assign(m, { host: a.host, port: a.port, user: a.user }) }
       syncAccounts(); return Promise.resolve(true);
     }
     case "add_account": {
@@ -119,12 +119,12 @@ function mock(cmd, a) {
       if (!String(a.password || "").replace(/ /g, "")) return Promise.reject("Enter the app password for this mailbox");
       if (M.accounts.length >= 5) return Promise.reject("You can read at most five mailboxes at once");
       if (!/@/.test(a.user || "") || !a.host) return Promise.reject("Enter a server and an email address");
-      if (M.accounts.some(m => m.host.toLowerCase() === String(a.host).toLowerCase() && m.user.toLowerCase() === String(a.user).toLowerCase())) return Promise.reject("That mailbox is already added");
+      if (M.accounts.some(m => m.host.toLowerCase() === String(a.host).toLowerCase() && m.user.toLowerCase() === String(a.user).toLowerCase())) return Promise.reject("That mailbox is already in the app");
       const used = new Set(M.accounts.map(m => m.id)); let id = 0; while (used.has(id)) id++;
       if (id === 0) M.settings.account = { id, host: a.host, port: a.port || 993, user: a.user }; else M.settings.more_accounts.push({ id, host: a.host, port: a.port || 993, user: a.user }); syncAccounts(); return Promise.resolve(id);
     }
     case "remove_account": {
-      const id = a.id, had = M.accounts.some(m => m.id === id); if (!had) return Promise.reject("There is no mailbox with that number");
+      const id = a.id, had = M.accounts.some(m => m.id === id); if (!had) return Promise.reject("There is no such mailbox");
       M.tasks = M.tasks.filter(x => x.mailbox !== id);
       if (id === 0) M.settings.account = { id: 0, host: "", user: "", port: 993 }; else M.settings.more_accounts = M.settings.more_accounts.filter(m => m.id !== id);
       syncAccounts(); if (!M.accounts.length) M.settings.onboarded = false; return Promise.resolve(true);
@@ -161,9 +161,9 @@ function mock(cmd, a) {
       M.tasks.forEach(x => { const r = hit(x); if (!r) return; matched++; const np = r.file ? Math.min(x.priority, 2) : (r.priority || x.priority), nc = r.category || x.category; if (np === x.priority && nc === x.category && !r.file) return; changed++; if (r.file) filed++; if (!a.dry) { x.priority = np; x.category = nc; if (r.file) x.status = "done" } });
       return Promise.resolve({ matched, changed, filed });
     }
-    case "set_secret": return Promise.resolve(true);
+    case "set_secret": if (a.name === "anthropic-key" && a.value) M.hasKey = true; return Promise.resolve(true);
     case "detect_ollama": return Promise.resolve(["llama3.2:3b", "qwen2.5:7b"]);
-    case "test_ai": return new Promise(r => setTimeout(() => r({ priority: 5, category: "work", action: "Sign the contract", why: "deadline today" }), 700));
+    case "test_ai": { const ai = M.settings.ai || {}; if (ai.mode === "ollama" && !String(ai.ollama_model || "").trim()) return Promise.reject("No model is chosen"); if (ai.mode === "anthropic" && !M.hasKey) return Promise.reject("No API key is saved"); } return new Promise(r => setTimeout(() => r({ priority: 5, category: "work", action: "Sign the contract", why: "deadline today" }), 700));
     case "rotate_hub_token": return Promise.resolve(true);
     case "finish_setup": M.settings.onboarded = true; return Promise.resolve(true);
     case "sign_out": M.settings.onboarded = false; M.settings.account = { id: 0, host: "", user: "", port: 993 }; M.settings.more_accounts = []; syncAccounts(); return Promise.resolve(true);

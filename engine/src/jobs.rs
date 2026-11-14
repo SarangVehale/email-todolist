@@ -1,4 +1,5 @@
-//! Background scheduler: wakes snoozed tasks, sends the daily digest, and decides quiet hours.
+//! Background scheduler: wakes snoozed tasks, announces reminders, runs the daily clean-up and the update check, sends the daily
+//! digest, and decides quiet hours.
 //! The decisions are pure functions of the clock so they can be tested without waiting.
 use crate::core::Core;
 use chrono::{Datelike, Duration as Span, Local, NaiveTime, TimeZone, Weekday};
@@ -37,6 +38,7 @@ pub fn prune_due(last_run_date: Option<&str>, today: &str) -> bool {
     last_run_date != Some(today)
 }
 
+/// The local time now as minutes since midnight, in the same form `clock_minutes` gives.
 pub fn now_minutes() -> u32 {
     use chrono::Timelike;
     let n = Local::now();
@@ -213,6 +215,8 @@ fn tick(core: &Arc<Core>) {
     }
 }
 
+/// The scheduler loop: wakes snoozed tasks, announces reminders, prunes old data once a day, checks for updates and sends the digest, about every 20 seconds until `stop` is set.
+/// It blocks, so `Core::start` runs it on its own thread.
 pub fn run(core: Arc<Core>, stop: Arc<AtomicBool>) {
     while !stop.load(Ordering::Relaxed) {
         tick(&core);

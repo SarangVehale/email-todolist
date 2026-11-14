@@ -154,7 +154,7 @@ pub fn redact(line: &str) -> String {
     }
 }
 
-/// A crash-log line is "<date> <time> [<thread>] <file:line> <panic text>". The panic text can quote user data
+/// A crash-log line is `<date> <time> [<thread>] <file:line> <panic text>`. The panic text can quote user data
 /// (Rust quotes strings it fails to slice), so only the first four parts are kept.
 pub fn redact_crash(line: &str) -> String {
     let parts: Vec<&str> = line.split_whitespace().collect();

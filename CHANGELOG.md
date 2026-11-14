@@ -13,6 +13,24 @@ work goes under `[0.1.0] - Unreleased`; after it, new work goes under `## [Unrel
 First public build.
 
 ### Added
+- Documentation as code. A [documentation map](docs/README.md) and about 80 documents in the repository, with 54 diagrams (Mermaid, so they are
+  reviewed like code): the architecture (the system, the life of a message, the data model, the threads and the poll loop, the trust
+  boundaries), fourteen architecture decision records, a reference for every one of the engine's 36 commands, the phone hub's HTTP
+  interface (with an OpenAPI file), the answer to `state` and every setting, guides for each service the app connects to, runbooks,
+  a troubleshooting page and a FAQ, product requirements and 40 user stories that name the tests checking them, coding standards,
+  a documentation style guide (the Google developer documentation style guide plus this project's rules), a testing strategy and a
+  release test plan, and templates for every kind of document. `python scripts/check_docs.py` (38 tests of its own; also run by CI and
+  by the release workflow) checks every link and anchor, every code block and diagram, the header and review date of each document
+  (180 days), that the map reaches every document, that each engine command has an entry in the reference and none is invented, the
+  numbering of the decision records, and that every public item of the engine has a doc comment (100 were added); the Rust
+  documentation now builds with warnings as errors. The release workflow now also runs the documentation checks and the window's
+  tests. Reading the code for the documents corrected a few things: the wizard's sentence about filing mail (stars become flags;
+  priorities become labels on Gmail only), the demo backend's two mailbox error messages (now the engine's words), the count of
+  commands a phone may use (twelve, not eleven), the statement that Ollama stays on the computer (true while its address is this
+  computer's), and several code comments. It also found one defect, now fixed with a test: the Settings "Test" button for ranking
+  said it worked when no model was chosen or no API key was saved (the engine quietly ranks with rules, which never fail); it now
+  says "No model is chosen" or "No API key is saved". New: `CONTRIBUTING.md`, a pull-request checklist that asks for the documents
+  to change in the same pull request, and a runbook for a leaked password, key or access code.
 - A big mailbox stays fast. Measured with the packaged app and 3,000 open plus 5,000 finished tasks: the window was re-reading 6.4 MB
   every 3 seconds, drawing the list took 2 seconds and each key press about a second. The window is now sent every open task but only
   the 200 most recently finished ones and how many there are in all (the Done tab says "The 200 most recently finished of N" and has
@@ -99,7 +117,7 @@ First public build.
 - Third review (Opus, 2026-11-13): one bad unsubscribe link could blank the list; a crashing message could crash the app on every start; hostile HTML could stall the watcher; sign-out left mail text in the database files; the hub answered public networks; mail data sat in Roaming AppData. All fixed with tests; see SECURITY.md.
 - A damaged database is set aside and rebuilt, newer data is refused, and a `crash.log` records internal errors (no telemetry).
 - Two independent security reviews; all confirmed findings fixed with regression tests. See SECURITY.md.
-- 459 automated tests of the engine, including protocol tests against a scripted mock IMAP server and a dedicated edge-case suite, and 49 tests of the window itself (`cd app && npm test`): they run the real window in a headless browser that is already on the computer (Edge or Chrome; Node 22 or later), with real key presses and mouse clicks and nothing else to install. Nearly every defect that review found in the window in the last three runs now has a test that fails when the old behaviour is put back (`docs/2026-11-14_PHASE9_REVIEW.md` names the few that do not). Writing them showed that the restore dialog's code said it would put the keyboard on Restore but always put it on Cancel, because Cancel comes first in the dialog; the code now says Cancel outright, so that Enter pressed by reflex restores nothing. Nothing visible changed.
+- 461 automated tests of the engine, including protocol tests against a scripted mock IMAP server and a dedicated edge-case suite, and 49 tests of the window itself (`cd app && npm test`): they run the real window in a headless browser that is already on the computer (Edge or Chrome; Node 22 or later), with real key presses and mouse clicks and nothing else to install. Nearly every defect that review found in the window in the last three runs now has a test that fails when the old behaviour is put back (`docs/2026-11-14_PHASE9_REVIEW.md` names the few that do not). Writing them showed that the restore dialog's code said it would put the keyboard on Restore but always put it on Cancel, because Cancel comes first in the dialog; the code now says Cancel outright, so that Enter pressed by reflex restores nothing. Nothing visible changed.
 
 ### Known limitations
 - Microsoft (Outlook, Microsoft 365) accounts are not supported: Microsoft turned off password sign-in for IMAP.

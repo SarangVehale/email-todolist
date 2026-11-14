@@ -2,6 +2,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
+/// One mailbox: its IMAP server, port and address. The password is never kept here.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct AccountCfg {
@@ -23,6 +24,7 @@ impl Default for AccountCfg {
     }
 }
 
+/// Which AI helps with triage and drafts ("rules" means none) and where to find the model. A key for the API mode is kept in the keychain, not here.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct AiCfg {
@@ -43,6 +45,7 @@ impl Default for AiCfg {
     }
 }
 
+/// How and when to alert: desktop notifications, the ntfy server and topic for phone alerts, quiet hours, the daily digest time and which categories alert.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct AlertCfg {
@@ -71,6 +74,7 @@ impl Default for AlertCfg {
     }
 }
 
+/// How reply drafts are written: whether they are made automatically, the tone, the signature and the limits on automatic drafting.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct DraftCfg {
@@ -96,6 +100,7 @@ impl Default for DraftCfg {
     }
 }
 
+/// The phone hub: whether it runs, the port it listens on (1024 or higher) and its access code, which is made fresh each time the hub is switched on.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct HubCfg {
@@ -113,6 +118,7 @@ impl Default for HubCfg {
     }
 }
 
+/// Whether the app checks for a newer version of itself.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct UpdateCfg {
@@ -125,6 +131,7 @@ impl Default for UpdateCfg {
     }
 }
 
+/// How long to wait for an answer to mail you sent before a follow-up task is made.
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 #[serde(default)]
 pub struct FollowCfg {
@@ -133,6 +140,8 @@ pub struct FollowCfg {
     pub days: u32,
 }
 
+/// Everything the user sets, saved as `settings.json` in the app data folder: mailboxes, AI, alerts, drafts, phone hub, updates and follow-ups.
+/// Passwords and keys are not in it.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct Settings {
@@ -183,6 +192,7 @@ impl Settings {
         all
     }
 
+    /// The settings saved in `dir`. A missing or unreadable file gives the defaults; this never fails.
     pub fn load(dir: &Path) -> Self {
         std::fs::read_to_string(dir.join("settings.json"))
             .ok()
@@ -190,6 +200,8 @@ impl Settings {
             .unwrap_or_default()
     }
 
+    /// Writes the settings to `dir`, through a temporary file and a rename so a crash cannot leave half a file.
+    /// It does not call `validate`.
     pub fn save(&self, dir: &Path) -> anyhow::Result<()> {
         std::fs::create_dir_all(dir)?;
         let tmp = dir.join("settings.json.tmp");

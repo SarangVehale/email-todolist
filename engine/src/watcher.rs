@@ -12,6 +12,7 @@ use std::net::TcpStream;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+/// An IMAP session over TLS, as `connect` returns it.
 pub type Sess = Session<TlsStream<TcpStream>>;
 
 /// Messages larger than this are skipped (memory and parse-time DoS).
@@ -19,6 +20,8 @@ const MAX_MESSAGE_BYTES: u32 = 5 * 1024 * 1024;
 /// How many times one message may be started without finishing (a crash each time) before it is skipped.
 const MAX_ATTEMPTS: u32 = 2;
 
+/// What is needed to sign in to one mailbox: server, port, user name and password.
+/// The password comes from the keychain and is never written to a file or a log.
 #[derive(Clone)]
 pub struct Account {
     pub host: String,
@@ -102,6 +105,8 @@ pub fn find_special<T: Read + Write>(s: &mut Session<T>, attr: &str) -> Option<S
         .map(|n| n.name().to_string())
 }
 
+/// The name of the Sent folder: the one flagged `\Sent` by the server, else the first of a few common names such as `Sent`, `Sent Items` or `[Gmail]/Sent Mail`.
+/// Fails if neither is found, for instance when the folder has a translated name and no flag.
 pub fn find_sent_folder<T: Read + Write>(s: &mut Session<T>) -> Result<String> {
     if let Some(f) = find_special(s, "\\Sent") {
         return Ok(f);
@@ -129,6 +134,8 @@ fn uid_set(uids: &[u32]) -> String {
         .join(",")
 }
 
+/// Builds the Sent history from the headers of the newest `limit` messages in `folder`, fetched 100 at a time with `BODY.PEEK`, so nothing is marked read and no message text is kept.
+/// The index remembers the folder's UIDVALIDITY and highest UID so a later pass can add only new messages.
 pub fn build_sent_index<T: Read + Write>(
     s: &mut Session<T>,
     folder: &str,

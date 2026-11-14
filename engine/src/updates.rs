@@ -9,6 +9,7 @@ pub const UPDATE_REPO: &str = "";
 
 const MAX_RESPONSE_BYTES: u64 = 256 * 1024;
 
+/// A newer release that was found: its tag, its plain version number and the release page.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Update {
     /// The release tag exactly as GitHub published it, so the stored value and the page address agree.

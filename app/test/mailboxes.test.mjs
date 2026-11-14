@@ -72,10 +72,10 @@ suite("the Add a mailbox dialog", it => {
 
   it("adding a mailbox that is already there is refused with the engine's message and nothing changes", async page => {
     await addDialog(page);
-    await fillAndTest(page, "you@example.com", "secret"); // already added: the demo backend says so
+    await fillAndTest(page, "you@example.com", "secret"); // already in the app: the demo backend says so, as the engine does
     await page.click("#m-add");
     await page.waitFor(() => document.querySelector("#mtestres .bad"));
-    assert.match(await page.run(() => document.querySelector("#mtestres .bad").textContent), /already added/);
+    assert.match(await page.run(() => document.querySelector("#mtestres .bad").textContent), /already in the app/);
     assert.equal(await page.run(() => S.accounts.length), 2);
   });
 });

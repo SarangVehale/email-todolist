@@ -34,7 +34,10 @@ python scripts/bump_version.py 0.1.0
 #    and its milestone to docs/VERSION_HISTORY.md
 
 # 3. Everything must be green locally
-cd engine && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cd ..
+cd engine && cargo fmt --check && cargo clippy --locked --all-targets -- -D warnings && cargo test --locked && cd ..
+(cd engine && RUSTDOCFLAGS="-D warnings" cargo doc --no-deps)   # the Rust documentation builds
+(cd app && npm test)                      # the window's own tests, in a real browser
+python scripts/test_check_docs.py && python scripts/check_docs.py    # links, diagrams, the command reference, ADRs, doc comments
 python scripts/gen_testcases.py          # keeps docs/TESTCASES.md current
 python scripts/bump_version.py --check 0.1.0      # the release checks too: a dated changelog heading, a release-history row
 python scripts/test_bump_version.py
