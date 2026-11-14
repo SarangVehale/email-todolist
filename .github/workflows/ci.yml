@@ -81,7 +81,7 @@ jobs:
         run: |
           f="$RUNNER_TEMP/engine-tests.log"
           [ -f "$f" ] || exit 0
-          msg=$(grep -E -A4 "panicked at|^test .* FAILED$|^---- .* stdout ----$" "$f" | head -80 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}' || true)
+          msg=$( { grep -E -A4 "panicked at|^test .* FAILED$|^---- .* stdout ----$" "$f" | head -60; echo "--- the last lines ---"; tail -20 "$f"; } | tr -d '\r' | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}' || true)
           echo "::error title=Engine tests failed::$msg"
       - name: The window's own tests (the real window in a real browser)
         # Needs no install: Node's own test runner and the browser the runner already has. A missing browser is a failure here.
@@ -99,7 +99,9 @@ jobs:
         run: |
           f="$RUNNER_TEMP/window-tests.log"
           [ -f "$f" ] || exit 0
-          msg=$(grep -E -A6 "^\s*✖|AssertionError|Error:" "$f" | head -80 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}' || true)
+          # The failures the runner names, and always the last lines too: a test that timed out or a browser that never
+          # started names nothing the first part would find.
+          msg=$( { grep -E -A6 "^\s*✖|AssertionError|Error:|^not ok" "$f" | head -60; echo "--- the last lines ---"; tail -30 "$f"; } | tr -d '\r' | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}' || true)
           echo "::error title=Window tests failed::$msg"
 
   audit:
