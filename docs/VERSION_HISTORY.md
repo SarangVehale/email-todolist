@@ -55,7 +55,7 @@ different questions:
 | Phase 12 review fixes | 2026-11-15 | `667c28e` | 516 + 123 window + 42 documentation-check + 10 licence-rule + 114 packaged-app | The fixes from the three-seat council and two drift passes over `3434999` (see CHANGELOG), a guide for the installer warning, and a fix for the two window tests CI run 42 failed on; two more rounds of the Opus loop (`05af712`, `0179532` and the commit after it) and a real focus fault that CI run 43 showed; the release workflow rehearsed once more (`v0.1.0-rc.6`, passed) | [the Phase 12 review record](2026-11-15_PHASE12_REVIEW.md) |
 | Plain status messages | 2026-11-15 | `f73b3a4` | 516 + 125 window + 42 documentation-check + 10 licence-rule + 114 packaged-app | The simple view's status line and mailbox rows say a sentence instead of the engine's `error: …` (the gap the Phase 12 review left on purpose) | the new tests and a mutation of each guard |
 
-| First close notice | 2026-11-15 | _pending_ | 517 + 125 window + 42 documentation-check + 10 licence-rule + 114 packaged-app | A notification the first time the window is closed (the last gap of the council's list that the shell had to fill) | the engine test and a mutation of each guard; the shell's part by hand (MT-144, MT-157) |
+| First close notice | 2026-11-15 | `4128222` | 517 + 125 window + 42 documentation-check + 10 licence-rule + 114 packaged-app | A notification the first time the window is closed (the last gap of the council's list that the shell had to fill) | the engine test and a mutation of each guard; the shell's part by hand (MT-144, MT-157) |
 
 ## What has not happened yet
 
