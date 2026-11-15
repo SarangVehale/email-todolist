@@ -21,15 +21,18 @@ fn main() -> anyhow::Result<()> {
         .and_then(|p| p.parse().ok())
         .unwrap_or(20);
     let mut s = watcher::connect(&a)?;
-    let folder = watcher::find_sent_folder(&mut s)?;
-    println!("connected; Sent folder: {folder}");
-    let sent = watcher::build_sent_index(&mut s, &folder, 500)?;
+    let store = Store::memory()?; // throwaway: nothing is saved
+                                  // as the sync does: a mailbox with no Sent folder we can find is read all the same (replies will not close tasks)
+    let (folder, sent) = watcher::sent_or_empty(&mut s, &store);
+    match folder {
+        Some(f) => println!("connected; Sent folder: {f}"),
+        None => println!("connected; no Sent folder found (replies you send will not close tasks)"),
+    }
     println!(
         "sent index: {} recipients, {} message ids",
         sent.recipients.len(),
         sent.message_ids.len()
     );
-    let store = Store::memory()?; // throwaway: nothing is saved
     let n = watcher::process_new(&mut s, &store, &RulesTriager, &sent, limit, &mut |e, t| {
         println!(
             "P{} {:<10} {} | {}",
