@@ -24,6 +24,7 @@ and a phone can differ. The phone hub always shows the dense view for now.
 | A circle, a star, five priority dots and small print on each row | A card: what it is, who it is from and how long ago, and two big buttons **Done** and **Later** |
 | An opened row with signals, priority, snooze, sender choices and reply drafts | Who it is from, why it is in the list, the start of the message, and buttons to read all of it and (Gmail) to open it in Gmail |
 | Undo shows for five seconds | Undo stays until you do the next thing |
+| `error: …` in the status line and in a mailbox row of Settings | A sentence: what to do ("Your mail server did not accept the saved code. Open Settings and paste a new one.") or that Inbox Agent will try again by itself ("Couldn't reach Gmail. Check that this computer is online, then try again. Inbox Agent will try again by itself.") |
 | "Watching your inbox" | "Watching your mailbox. Last read at 2:32 PM." (the time is when the mailbox last answered: it is renewed about once a minute while the connection is up) |
 | White text on black, 15-pixel text | Dark text on a light page, large text |
 

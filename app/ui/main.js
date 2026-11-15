@@ -268,7 +268,7 @@ function render() {
   const wasSearching = document.activeElement?.id === "q", caret = wasSearching ? document.activeElement.selectionStart : 0;
   $("#view").innerHTML = h;
   if (wasSearching) { const q = $("#q"); q.focus(); q.setSelectionRange(caret, caret) }
-  const msg = err ? `<span class="e">${esc(st === "no password" ? (isHub ? "Open the desktop app to sign in again" : "Sign in again in Settings") : st)}</span>` : ok ? (easy() ? easyWatching() : "Watching your inbox") : st === "connecting" ? "Connecting…" : st === "setup" ? "Setup needed" : esc(st);
+  const msg = err ? `<span class="e">${esc(st === "no password" ? (isHub ? "Open the desktop app to sign in again" : "Sign in again in Settings") : easy() && st.startsWith("error") ? plainStatus(st, (S.accounts || []).find(a => String(a.status).startsWith("error")) || (S.accounts || [])[0]) : st)}</span>` : ok ? (easy() ? easyWatching() : "Watching your inbox") : st === "connecting" ? "Connecting…" : st === "setup" ? "Setup needed" : esc(st);
   const rl = view === "log" ? [] : l.slice(0, 80), ch = Math.max(5, Math.min(18, Math.floor((innerHeight - 40) / Math.max(rl.length, 1))));
   $("#rail").style.setProperty("--ch", ch + "px");
   $("#rail").innerHTML = rl.map(t => `<div class="rc ${t.uid === cur ? "cur" : ""}" data-rail="${t.uid}" title="${esc(label(t))}">${ch >= 10 ? [5, 4, 3, 2, 1].map(n => `<i class="${t.priority >= n ? "h" : ""}"></i>`).join("") : `<i class="${t.priority >= 4 ? "h" : ""}"></i>`}</div>`).join("");

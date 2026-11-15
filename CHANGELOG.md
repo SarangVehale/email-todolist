@@ -13,6 +13,10 @@ work goes under `[0.1.0] - Unreleased`; after it, new work goes under `## [Unrel
 First public build.
 
 ### Added
+- Plain status messages in the simple view. What the engine says is wrong with a mailbox (the status line at the bottom and the mailbox rows in Settings) was shown as the engine's own text
+  (`error: No such host is known. (os error 11001)`); the simple view now shows a sentence: what to do ("Your mail server did not accept the saved code. Open Settings and paste a new
+  one.", "Your account's sign-in was refused. Open Settings and press Sign in again.") or that it will go away ("Couldn't reach Gmail. Check that this computer is online, then try again. Inbox Agent will
+  try again by itself."). The dense view keeps the engine's text. Two window tests.
 - Phase 12 review fixes (a three-seat council and two drift passes; [the record](docs/2026-11-15_PHASE12_REVIEW.md)). Signing in: the mail server is asked with exactly the new token, once, before
   anything is saved (a retry used to fall back to the old saved token, hiding the server's refusal and, when signing in again, approving the old grant instead of the
   new one); a sign-in is refused before it is used up if its mailbox cannot be saved, and a grant that was never used is cancelled at Google; signing in again cancels

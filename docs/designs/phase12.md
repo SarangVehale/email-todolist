@@ -37,7 +37,7 @@ each other. They agreed on almost everything; this is what they said and what is
 * **No tokens in a log, a backup or a URL an error could echo.** The refresh token lives in the system keychain beside the app passwords;
   the access token only in memory; the loopback listener and every other point of the Phase 3 checklist (`designs/phase3.md`, section 3) stay.
 * **Plain words.** App password becomes "the 16-letter code", snooze "Later", mute "Stop showing mail from them"; the engine's error text is
-  mapped to sentences in the window's setup screens (the engine keeps its precise messages: they are the log's and the tests'; the status line and the mailbox rows still show the engine's text).
+  mapped to sentences in the window's setup screens (the engine keeps its precise messages: they are the log's and the tests'; the status line and the mailbox rows of the simple view show a sentence too: `plainStatus` in `setup.js`; the dense view keeps the engine's text).
 
 ## What is built, in order
 

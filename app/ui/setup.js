@@ -54,6 +54,16 @@ function friendly(raw, providerKey, host, how) {
   if (/network is unreachable|no route|os error 10051|os error 10065|os error 101\b|os error 113\b/.test(l)) return say("This computer doesn't seem to be online. Check your internet, then try again.");
   return say("Something went wrong while connecting. Wait a minute and try again.");
 }
+/** What the engine says is wrong with a mailbox (its status text: `error: …`), as a sentence for the simple view. The engine's own words are for the log and for a helper.
+ *  `acct` is the mailbox it is about, when there is one. A problem the person has to fix says where; one that goes away says that the app will try again. */
+function plainStatus(st, acct) {
+  const raw = String(st).replace(/^error:\s*/, "");
+  if (/refused the sign-in|sign-in was refused/.test(raw)) return acct && acct.auth ? "Your account's sign-in was refused. Open Settings and press Sign in again." : "Your mail server did not accept the saved code. Open Settings and paste a new one.";
+  if (/keychain is not available/.test(raw)) return "Your computer's password safe could not be opened. Unlock it, then start Inbox Agent again.";
+  if (/internal error/.test(raw)) return "Inbox Agent ran into a problem and is trying again. If this keeps happening, tell whoever set it up.";
+  const f = friendly(raw, acct ? providerFor(acct.user || "") : "other", acct && acct.host);
+  return f.detail ? f.say + " Inbox Agent will try again by itself." : f.say;
+}
 /** A person's answer as markup: a sentence, and the engine's own words behind "Details for a helper". */
 const sayHTML = r => !r ? "" : r.ok ? `<p class="ok">${esc(r.ok)}</p>${r.device ? `<p class="devcode">Your code: <b>${esc(r.device.code)}</b></p><p>Type it on Microsoft's page: <b>${esc(String(r.device.url).replace(/^https:\/\//, ""))}</b> <button class="btn sm" data-w="opendevice" data-m="opendevice" data-s="opendevice" data-url="${esc(r.device.url)}">Open that page</button></p>` : ""}${r.cancel ? '<button class="btn sm" data-w="cancelsignin" data-m="cancelsignin" data-s="cancelsignin">Cancel</button>' : ""}` : `<p class="bad">${esc(r.say)}</p>${r.detail ? `<details class="why"><summary>Details for a helper</summary><code>${esc(r.detail)}</code></details>` : ""}`;
 /** What setup makes sure of: the mailbox is not changed (no filing) and the phone hub is off. Ranking and alerts are left as they are: a new install already has rules and desktop alerts, and a person who set them up again after removing a mailbox keeps their choices. */
@@ -327,17 +337,17 @@ async function ruleClick(b) {
 }
 veil.addEventListener("input", e => { if (veil.dataset.kind === "settings" && e.target.dataset?.r === "text") ruleEdit(e.target) });
 /* ───────── several mailboxes ───────── */
-function mailStatus(st, auth) {
+function mailStatus(st, auth, acct) {
   st = String(st || "");
   if (st === "idle") return '<span class="ok">Connected</span>';
   if (st === "syncing" || st === "connecting") return "Reading mail…";
   if (st === "no password") return `<span class="bad">${auth ? "Needs you to sign in again" : easy() ? "Needs a new code. Paste it below." : "Needs a new app password"}</span>`;
-  if (st.startsWith("error")) return `<span class="bad">${esc(st.replace(/^error:\s*/, "").slice(0, 90))}</span>`;
+  if (st.startsWith("error")) return `<span class="bad">${esc(easy() ? plainStatus(st, acct) : st.replace(/^error:\s*/, "").slice(0, 90))}</span>`;
   return esc(st);
 }
 function mailboxesHTML(s) {
   const mbs = (S.accounts && S.accounts.length) ? S.accounts : [{ id: 0, user: s.account?.user, host: s.account?.host, status: S.status }];
-  return mbs.map(m => `<div class="mbx" data-id="${m.id}"><p><b>${esc(m.user)}</b> · ${esc(m.host)} · ${mailStatus(m.status, m.auth)}</p>
+  return mbs.map(m => `<div class="mbx" data-id="${m.id}"><p><b>${esc(m.user)}</b> · ${esc(m.host)} · ${mailStatus(m.status, m.auth, m)}</p>
     ${m.auth ? `<p>Signed in with ${PROVIDER_NAME[m.auth] || "an account"}. No password is kept.</p>` : `<label class="f" for="s-pw${m.id}">${easy() ? "Paste a new code if the old one stopped working" : "New app password"}</label><input id="s-pw${m.id}" type="password" data-s="newpw" data-id="${m.id}" autocomplete="off" placeholder="${easy() ? "paste the code here" : "paste a new app password"}">`}
     <div class="foot" style="margin-top:8px">${m.auth ? `<button class="btn sm" data-s="resign" data-id="${m.id}" data-provider="${esc(m.auth)}">Sign in again</button>` : `<button class="btn sm" data-s="savepw" data-id="${m.id}">${easy() ? "Save code" : "Save password"}</button>`}<span data-pwres="${m.id}"></span><span class="sp"></span>${mbs.length > 1 ? `<button class="btn sm" data-s="rmacct" data-id="${m.id}">Remove</button>` : ""}</div>
     ${m.auth ? `<details class="why"><summary>Use a code instead of signing in</summary><label class="f" for="s-pw${m.id}">${easy() ? "Paste the code" : "App password"}</label><input id="s-pw${m.id}" type="password" data-s="newpw" data-id="${m.id}" autocomplete="off" placeholder="${easy() ? "paste the code here" : "paste an app password"}"><div class="foot" style="margin-top:8px"><button class="btn sm" data-s="savepw" data-id="${m.id}">${easy() ? "Save code" : "Save password"}</button></div></details>` : ""}</div>`).join("");

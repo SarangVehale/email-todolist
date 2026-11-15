@@ -173,6 +173,40 @@ suite("the easy list", it => {
     assert.match(await page.run(() => document.querySelector(".empty").textContent), /Reading your latest mail… ?The first time it can take a few minutes\. Your list fills in by itself\./);
   });
 
+  it("what the engine says is wrong is a sentence: what to do, or that the app will try again by itself", async page => {
+    const gmail = { user: "me@gmail.com", host: "imap.gmail.com" };
+    const rows = [
+      ["error: your mail server refused the sign-in. Enter your password again in Settings", gmail, /^Your mail server did not accept the saved code\. Open Settings and paste a new one\.$/],
+      ["error: your account's sign-in was refused. Sign in again in Settings", { ...gmail, auth: "google" }, /^Your account's sign-in was refused\. Open Settings and press Sign in again\.$/],
+      ["error: your system keychain is not available (locked). Unlock it and restart the app", gmail, /password safe could not be opened/],
+      ["error: internal error, see crash.log in the app's data folder", gmail, /ran into a problem and is trying again/],
+      ["error: could not find the server imap.gmail.com", gmail, /^Couldn't reach Gmail\. Check that this computer is online, then try again\. Inbox Agent will try again by itself\.$/],
+      ["error: No such host is known. (os error 11001)", gmail, /^Couldn't reach Gmail\./],
+      ["error: secure connection failed: the certificate is not valid", gmail, /safe connection to Gmail couldn't be made.*try again by itself/],
+      ["error: something nobody has seen before", undefined, /^Something went wrong while connecting\. Wait a minute and try again\. Inbox Agent will try again by itself\.$/],
+    ];
+    await start(page, { easy: true });
+    const said = await page.run(rs => rs.map(([st, acct]) => plainStatus(st, acct)), rows);
+    rows.forEach(([st, , want], i) => {
+      assert.match(said[i], want, st);
+      assert.doesNotMatch(said[i], /error:|os error|\[|sign-in refused|crash\.log/, "no system text in: " + said[i]);
+    });
+  });
+
+  it("the footer and the mailbox rows say it in those sentences in the simple view, and the dense view keeps the engine's text", async page => {
+    await start(page, { easy: true });
+    const raw = "error: could not find the server imap.gmail.com";
+    await page.run(() => load()); // the window has seen the engine's answer once, so that the poll does not replace what the test sets
+    await page.run(r => { S.status = r; S.accounts[0].status = r; S.accounts[0].host = "imap.gmail.com"; S.accounts[0].user = "you@gmail.com"; render() }, raw);
+    assert.match(await page.run(() => document.querySelector("#foot .e").textContent), /^Couldn't reach Gmail\. Check that this computer is online/);
+    await openSettings(page);
+    assert.match(await page.run(() => document.querySelector(".mbx .bad").textContent), /^Couldn't reach Gmail\. Check that this computer is online/);
+    await page.key("Escape"); await page.key("Escape");
+    // the dense view: the engine's text, as before
+    // (closing Settings read the engine's answer again, so the status is set again, and read in the same step)
+    assert.equal(await page.run(r => { localStorage.setItem("ia.easy", "0"); applyLook(); S.status = r; render(); return document.querySelector("#foot .e").textContent }, raw), raw);
+  });
+
   it("Settings in the simple view has the look, the mailboxes, alerts and More options, and nothing about ranking models or the phone", async page => {
     await start(page, { easy: true });
     await openSettings(page);
