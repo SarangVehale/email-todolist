@@ -54,9 +54,9 @@ build-provenance attestation). Tags containing a dash (`v0.2.0-beta.1`) become p
 
 ## What the rehearsals found
 
-`release.yml` was rehearsed three times on 2026-11-14 and 2026-11-15, each with a throwaway tag (`v0.1.0-rc.1` to `-rc.3`, on branches
-that were never merged). **The third ran to the end** (30 minutes): `verify`, the three `test` jobs, the builds and `checksums`. The first two
-failed, and each showed something real.
+`release.yml` was rehearsed five times on 2026-11-14 and 2026-11-15, each with a throwaway tag (`v0.1.0-rc.1` to `-rc.5`, on branches
+that were never merged). **The last three ran to the end** (22 to 30 minutes): `verify`, the three `test` jobs, the builds and `checksums`. The
+first two failed, and each showed something real.
 
 *Rehearsal 1:* `verify`, the three `test` jobs and the Windows and Linux builds passed. **The macOS build failed**, and the cause was found
 by building the same thing on a branch that reported its own output: the workflow passed `APPLE_CERTIFICATE` and the other signing variables from secrets
@@ -75,11 +75,17 @@ installer (`..._x64-setup.exe`), a universal macOS disk image and app archive (`
 `.deb` and AppImage packages, all on one draft. That annotation can be read without signing in. Nothing was opened or run on a Mac or a Linux
 machine, and the builds are unsigned. *Rehearsal 4:* the same, with `tauri-apps/tauri-action` 1.0 and `actions/attest-build-provenance` 4.2 (the two Dependabot updates, which
 change this workflow); it passed in 22 minutes, the macOS archive now carries the version in its name, and the attestation step's Node 20 notice
-is gone. Both are taken. Rehearse again after any later change to the workflow.
+is gone. Both are taken.
 
-To rehearse again: `python scripts/bump_version.py 0.1.0-rc.4` on a branch, a dated `## [0.1.0-rc.4]` changelog heading and a row in
-`docs/RELEASE_HISTORY.md`, then tag `v0.1.0-rc.4`. It becomes a pre-release draft. Afterwards delete the draft (on the Releases page: it
-needs a sign-in), the tag and the branch. A rehearsal builds three installers one after the other, so it takes about an hour.
+*Rehearsal 5* ran on the tree as it stood after the first review of this work, with the licence files in the installers: it passed in 27
+minutes, and the `checksums` job's new step, which looks inside the `.deb`, the `.app.tar.gz` and the AppImage for `LICENSE`,
+`THIRD_PARTY_NOTICES.md` and `THIRD_PARTY_LICENSES.txt`, reported "missing: none" (an annotation, "Licence files inside the packages").
+What no rehearsal can show: the signed paths (Apple notarization, the Windows certificate), a real tag, a published release, and anything
+about installing or running the macOS and Linux packages. Rehearse again after any later change to the workflow.
+
+To rehearse again: `python scripts/bump_version.py 0.1.0-rc.6` on a branch, a dated `## [0.1.0-rc.6]` changelog heading and a row in
+`docs/RELEASE_HISTORY.md`, then tag `v0.1.0-rc.6`. It becomes a pre-release draft. Afterwards delete the draft (on the Releases page: it
+needs a sign-in), the tag and the branch. A rehearsal builds three installers one after the other, so it takes about half an hour.
 
 ## Before you publish the draft
 

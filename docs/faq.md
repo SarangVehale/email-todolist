@@ -32,8 +32,8 @@ and if either fails the rules rank the mail instead. See [choose how mail is ran
 ### Which operating systems does it run on?
 
 The build is set up to make a Windows installer, a macOS app and disk image, and Linux `.deb` and AppImage packages, and the release
-workflow is set up to build all three. The Windows installer has been built and installed by hand; the macOS and Linux packages were built once by the release workflow on a
-rehearsal tag and have not been opened on a Mac or a Linux machine. No release has been published yet, and releases are unsigned, so Windows SmartScreen and macOS Gatekeeper will
+workflow is set up to build all three. The Windows installer has been built and installed by hand; the macOS and Linux packages were built by the release workflow on rehearsal
+tags and have not been opened on a Mac or a Linux machine. No release has been published yet, and releases are unsigned, so Windows SmartScreen and macOS Gatekeeper will
 warn. See
 [release history](RELEASE_HISTORY.md) and [RELEASING.md](../RELEASING.md).
 

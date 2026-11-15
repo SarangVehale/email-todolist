@@ -15,8 +15,8 @@ tool checks says so: a reviewer is expected to look for it. Documents have their
 | **Script** | A script in `scripts/` fails or regenerates a file |
 | **Review** | No tool checks it; the three review gates and the author do. Where a command finds the cases, it is given |
 
-`ci.yml` has run on every push since 2026-11-14 and passes on Windows, Linux and macOS; `release.yml` ran to the end once, on a throwaway tag, so the marks that
-name it describe that run and what the file does; it has not run for a real release. See [the testing strategy](../testing/strategy.md).
+`ci.yml` has run on every push since 2026-11-14 and passes on Windows, Linux and macOS; `release.yml` ran to the end three times, on throwaway tags, so the marks that
+name it describe those runs and what the file does; it has not run for a real release. See [the testing strategy](../testing/strategy.md).
 
 ## Rust (the engine and the shell)
 

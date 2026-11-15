@@ -170,8 +170,8 @@ Limits the code enforces, which a person can rely on:
 | The phone hub is plain HTTP | An access code can be read on a shared network | Private networks only, a rotatable code, a lockout; use a trusted Wi-Fi or a VPN | Accepted ([SECURITY.md](../../SECURITY.md)) |
 | Data and backups are not encrypted | Another person on the computer can read them | Full-disk encryption; the privacy statement says so | Accepted |
 | AI-written drafts can be wrong or persuasive | A person sends a bad reply | Always shown for review, labelled by source, never sent | Accepted |
-| The macOS and Linux installers were built once, by a rehearsal of the release workflow, and the app has never been run by hand there | A release that fails there | CI runs the tests on all three systems at every push and builds all three installers on a tag; the manual cases on clean machines | Open |
-| The release workflow (`release.yml`) has run to the end once, on a throwaway tag, after two failures it found and fixed | A broken release workflow is found on release day | Rehearse again on a pre-release tag after any change to it (RELEASING.md) | Open |
+| The macOS and Linux installers were built by rehearsals of the release workflow (three runs, unsigned), and the app has never been run by hand there | A release that fails there | CI runs the tests on all three systems at every push and builds all three installers on a tag; the manual cases on clean machines | Open |
+| The release workflow (`release.yml`) was rehearsed five times on throwaway tags: the first two failed (and found two real problems, fixed), the last three ran to the end | A broken release workflow is found on release day | Rehearse again on a pre-release tag after any change to it (RELEASING.md) | Open |
 | An IMAP parser dependency has an advisory (`lexical-core`) | A soundness bug in a parser of server replies | Accepted until a stable `imap` 3.x; revisit then | Accepted |
 
 ## Open items the owner holds

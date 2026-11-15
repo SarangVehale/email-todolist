@@ -93,7 +93,7 @@ Not verified against GitHub: the build names no repository (`UPDATE_REPO` is uns
 * Given an uninstall, then the program, shortcut and registry entry go and the data folder stays (the documents say so).
 
 **Verified by:** no automated test. Manual: MT-60, MT-61, MT-62, MT-63, MT-64, MT-65. The checks of the version fields
-(`python scripts/bump_version.py --check`) are in CI on all three systems; the macOS and Linux installers were built once by a rehearsal of the release workflow and have not been opened by hand.
+(`python scripts/bump_version.py --check`) are in CI on all three systems; the macOS and Linux installers were built by rehearsals of the release workflow and have not been opened by hand.
 
 ## Epic: triage and ranking
 

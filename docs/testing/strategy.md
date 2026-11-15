@@ -126,8 +126,9 @@ cd engine && IMAP_HOST=imap.example.com IMAP_USER=you@example.com IMAP_PASS=your
 ## What CI runs
 
 The workflows are `.github/workflows/ci.yml` (on every push to `main` and every pull request) and `release.yml` (on a tag). `ci.yml`
-has run on every push since 2026-11-14 and passes on all three systems (three runs of the window tests on Linux failed in the first day: a slow browser start, fixed). `release.yml` ran to the end once, on a
-throwaway tag after two failures it showed and that were fixed (RELEASING.md); it has not run for a real release.
+has run on every push since 2026-11-14 and passes on all three systems (three runs of the window tests on Linux failed in the first day: a slow browser start, fixed). `release.yml` was rehearsed five times on
+throwaway tags: the first two failed and showed two real problems (fixed), the last three ran to the end (RELEASING.md); it has not run for a
+real release.
 
 | Job and step | Systems | Command | Stops the build when |
 | --- | --- | --- | --- |
@@ -224,7 +225,7 @@ A test that fails once in a hundred runs is a defect in the test or in the code,
 * **Real mail servers.** The scripted server proves what the client sends and how it reads standard replies, not what Gmail, iCloud
   or another provider does, and not TLS. The manual cases MT-01 to MT-39 are the answer, and none has been run.
 * **Linux and macOS by hand.** CI runs the engine tests and the window tests on both at every push, but no one has used the app on
-  either, and their installers were only built by a rehearsal of the release workflow, never opened. The window tests need Node 22 or later, which CI installs.
+  either, and their installers were only built by rehearsals of the release workflow, never opened. The window tests need Node 22 or later, which CI installs.
 * **The Tauri shell** (`app/src-tauri/src`, two small files) has no test of its own; the packaged-app measurement and the manual cases
   exercise it.
 * **Appearance, the phone's layout, and what a screen reader says.** `a11y.test.mjs` checks what a machine can: every control has a name,
