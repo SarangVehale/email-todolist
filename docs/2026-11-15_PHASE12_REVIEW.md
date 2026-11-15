@@ -96,7 +96,7 @@ on a quiet machine and failed once in a full run that shared the machine with a 
 ## Not changed, on purpose
 
 * **The status line and the mailbox rows show the engine's text** (`error: …`) in the simple view, so a lost connection prints a system error. The design said the window maps
-  these to sentences; it did so in the setup screens only. **Done afterwards** (the follow-up below): `plainStatus` gives the simple view's status line and mailbox rows a sentence, with tests; the dense view keeps the engine's text.
+  these to sentences; it did so in the setup screens only. **Done afterwards** (the commit that follows this record): `plainStatus` gives the simple view's status line and mailbox rows a sentence, with tests; the dense view keeps the engine's text.
 * **A Microsoft refresh token may be longer than Windows' keychain accepts** (about 1,280 characters). Unverified; the save now says "Couldn't save the sign-in in your system
   keychain" and manual case MT-154 checks it with a real account.
 * **The production guard on the test endpoints** (`oauth::use_test_endpoints` does nothing outside this crate's tests) cannot be tested from a test of this crate, which is

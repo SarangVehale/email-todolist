@@ -178,11 +178,14 @@ suite("the easy list", it => {
     const rows = [
       ["error: your mail server refused the sign-in. Enter your password again in Settings", gmail, /^Your mail server did not accept the saved code\. Open Settings and paste a new one\.$/],
       ["error: your account's sign-in was refused. Sign in again in Settings", { ...gmail, auth: "google" }, /^Your account's sign-in was refused\. Open Settings and press Sign in again\.$/],
-      ["error: your system keychain is not available (locked). Unlock it and restart the app", gmail, /password safe could not be opened/],
+      ["error: your system keychain is not available (locked). Unlock it and restart the app", gmail, /^Your computer's password safe could not be opened\. Unlock it, then start Inbox Agent again\.$/],
       ["error: internal error, see crash.log in the app's data folder", gmail, /ran into a problem and is trying again/],
       ["error: could not find the server imap.gmail.com", gmail, /^Couldn't reach Gmail\. Check that this computer is online, then try again\. Inbox Agent will try again by itself\.$/],
       ["error: No such host is known. (os error 11001)", gmail, /^Couldn't reach Gmail\./],
       ["error: secure connection failed: the certificate is not valid", gmail, /safe connection to Gmail couldn't be made.*try again by itself/],
+      ["error: Connection Lost", gmail, /^The connection to Gmail was lost\. Inbox Agent will try again by itself\.$/],
+      ["error: Unknown", undefined, /^The connection to your mail server was lost\. Inbox Agent will try again by itself\.$/],
+      ["error: could not find the server imap.example.org", { user: "me@example.org", host: "imap.example.org" }, /^Couldn't find the mail server imap\.example\.org\. If its name is wrong, remove this mailbox and add it again/],
       ["error: something nobody has seen before", undefined, /^Something went wrong while connecting\. Wait a minute and try again\. Inbox Agent will try again by itself\.$/],
     ];
     await start(page, { easy: true });

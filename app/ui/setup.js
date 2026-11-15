@@ -61,7 +61,12 @@ function plainStatus(st, acct) {
   if (/refused the sign-in|sign-in was refused/.test(raw)) return acct && acct.auth ? "Your account's sign-in was refused. Open Settings and press Sign in again." : "Your mail server did not accept the saved code. Open Settings and paste a new one.";
   if (/keychain is not available/.test(raw)) return "Your computer's password safe could not be opened. Unlock it, then start Inbox Agent again.";
   if (/internal error/.test(raw)) return "Inbox Agent ran into a problem and is trying again. If this keeps happening, tell whoever set it up.";
-  const f = friendly(raw, acct ? providerFor(acct.user || "") : "other", acct && acct.host);
+  const key = acct ? providerFor(acct.user || "") : "other", name = key !== "other" ? PROVIDERS[key].name : "your mail server";
+  if (/^(connection lost|unknown)$/i.test(raw)) return `The connection to ${name} was lost. Inbox Agent will try again by itself.`; // (the mail library's own words)
+  // an address the app does not know: Settings has no server box to correct, so the way out is to add the mailbox again
+  if (key === "other" && acct && /could not find the server|no such host|failed to lookup|name or service not known|nodename nor servname|os error 11001|os error 11004/i.test(raw))
+    return `Couldn't find the mail server ${acct.host || "of this mailbox"}. If its name is wrong, remove this mailbox and add it again with the right one. If your internet was down, Inbox Agent will try again by itself.`;
+  const f = friendly(raw, key, acct && acct.host);
   return f.detail ? f.say + " Inbox Agent will try again by itself." : f.say;
 }
 /** A person's answer as markup: a sentence, and the engine's own words behind "Details for a helper". */
