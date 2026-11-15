@@ -429,12 +429,16 @@ Saves the mailbox of a sign-in that is `done`, once.
 * **Arguments:** `add` (boolean, default false): add a new mailbox with the lowest free number (setup must be finished); otherwise `id` (integer, default 0): the
   first mailbox during setup, or a mailbox that is signing in again.
 * **Answer:** the mailbox number.
-* **Errors:** `There is no finished sign-in to use. Sign in again.`; `That sign-in was too long ago to use. Sign in again.` (a finished sign-in that is not saved within ten minutes is forgotten, so tokens do not wait in memory); `Set up your first mailbox before adding another`; `You can read at most five mailboxes at
-  once`; `There is no such mailbox` (an `id` that is not set up); the settings validation messages; and, before anything is saved, the mail server's refusal of the token
-  (`sign-in refused: …`), or any connection error. Nothing is saved for a token the server does not accept.
-* **Side effects:** signs in to `imap.gmail.com` (Google) or `outlook.office365.com` (Microsoft) with the token (XOAUTH2) and out again, then saves the mailbox with
-  `oauth` set, the refresh token in the keychain (`oauth-refresh-<n>`) and no password (an app password the mailbox had is deleted). A new mailbox starts from
-  nothing; a changed address resets that mailbox's data as `save_account` does. Restarts the background threads if setup is finished.
+* **Errors:** a mailbox that cannot be saved is refused before the sign-in is spent: `Set up your first mailbox before adding another`, `You can read at most five mailboxes at
+  once`, `There is no such mailbox` (an `id` that is not set up) and the settings validation messages such as `That mailbox is already in the app`; the sign-in stays and can be
+  finished again once the cause is removed. Spent, with a Google grant that was never used revoked: the mail server's refusal of the token (`sign-in refused: …`) or any
+  connection error (nothing is saved for a token the server does not accept), `That sign-in changed. Sign in again.` (another sign-in finished in between) and
+  `Couldn't save the sign-in in your system keychain (…)` (the keychain is put back as it was). Not spent, and nothing to do with the mailbox: `There is no finished sign-in to use. Sign in again.`
+  and `That sign-in was too long ago to use. Sign in again.` (a finished sign-in that is not saved within ten minutes is forgotten, so tokens do not wait in memory).
+* **Side effects:** signs in to `imap.gmail.com` (Google) or `outlook.office365.com` (Microsoft) with exactly the new token (XOAUTH2, once, with no retry and no refresh: not through the
+  token store) and out again, reads the settings again, then saves the mailbox with `oauth` set, the refresh token in the keychain (`oauth-refresh-<n>`) and no password (an
+  app password the mailbox had is deleted). A new mailbox starts from nothing; a changed address resets that mailbox's data as `save_account` does. Restarts the background
+  threads if setup is finished. When the mailbox already had a Google sign-in, that old grant is revoked after everything is saved, so a failure leaves the old one working.
 * **Hub:** no.
 
 ### `test_account`
@@ -498,7 +502,7 @@ Adds another mailbox (up to five in all).
 * **Answer:** `true`.
 * **Errors:** `There is no such mailbox`.
 * **Side effects:** stops the syncs, deletes the mailbox's tasks, drafts, queued changes, corrections, follow-ups and counters,
-  deletes its password from the keychain, ends its sign-in if it had one (deletes `oauth-refresh-<n>`, removes its `oauth` entry, and tells Google to revoke the token), removes it from the settings (the last one also sets `onboarded` to `false`), and
+  deletes its password from the keychain, ends its sign-in if it had one (deletes `oauth-refresh-<n>`, removes its `oauth` entry, and tells Google to revoke the token: Google only), removes it from the settings (the last one also sets `onboarded` to `false`), and
   restarts. Nothing in the mailbox itself is touched.
 * **Hub:** no.
 

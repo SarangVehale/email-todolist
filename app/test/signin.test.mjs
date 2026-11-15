@@ -127,6 +127,19 @@ suite("sign in with an account: after the first mailbox", it => {
     assert.equal((await calls(page)).filter(c => c === "oauth_cancel").length, 1, "only the Cancel button cancelled: the first loop did not cancel the second sign-in");
   }, { path: WITH });
 
+  it("a sign-in that is finished just as Cancel is pressed does not save a mailbox", async page => {
+    await toScreen(page, "me@gmail.com");
+    // the engine's answer "done" is on its way when the person presses Cancel
+    await page.run(wrapMock, [{ cmd: "oauth_poll", hold: true, result: { state: "done", user: "me@gmail.com", provider: "google" } }]);
+    await page.click("[data-w=signin]");
+    await page.waitFor(() => document.querySelector("[data-w=cancelsignin]") && window.__held.length === 1);
+    await page.click("[data-w=cancelsignin]");
+    await page.run(() => { window.__held.forEach(f => f()) });
+    await page.settle(300);
+    assert.ok(!(await calls(page)).includes("oauth_finish"), "nothing was saved after Cancel");
+    assert.equal(await page.run(() => W.step), "guide");
+  }, { path: WITH });
+
   it("a signed-in mailbox can go back to a code, which ends the sign-in", async page => {
     await page.run(() => { M.settings.oauth = { 1: "google" }; syncAccounts() });
     await page.run(() => { lastSnap = ""; return load() });

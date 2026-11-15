@@ -41,7 +41,29 @@ All of it that is not listed under "Not changed" below was true and is fixed.
 
 ## Gate 3: sol-loop with Opus as the single reviewer
 
-Pending when this was written: see the end of the file for the rounds.
+Round 1 (a ledger of the council's and the drift passes' findings was given up front): **CHANGES REQUESTED**, no blocker or major, six minor and three nits.
+
+| Id | Severity | Outcome |
+| --- | --- | --- |
+| R1-1 | minor | **fixed**: a Microsoft refresh in flight while the person signed in again wrote the old grant's rotated token over the new one; it now writes back only if the keychain still holds the token it used (a test with a slow token server) |
+| R1-2, R1-3 | minor | **fixed**: the old Google grant was revoked before the new one was saved (a failed save left the mailbox with no working credential) and the 5-second revoke sat between the settings re-read and the save (a change made meanwhile was lost); the revoke is now after the save, the keychain is put back when the settings cannot be saved, and the IMAP password is deleted only after the save (a test makes the settings file unwritable) |
+| R1-4 | minor | **fixed**: the new access token was cached before the server accepted it (and under a number the mailbox might not get); it is cached only after the save |
+| R1-5, R1-9 | minor, nit | **fixed**: the mailbox is planned before the sign-in is taken, and the taken sign-in must be the one that was planned (else it is cancelled at Google) |
+| R1-6, R1-7 | minor, nit | **fixed**: the `oauth_finish` section of the command reference now says what is spent and what is not, and that revoking is Google only |
+| R1-8 | nit | **fixed**: a Cancel pressed while the "done" answer was on its way no longer leads to a saved mailbox (a window test sends "done" after Cancel) |
+| (test comment) | nit | **fixed**: a comment said the old grant "would pass"; it would show in the server's log |
+
+Round 2 verifies these (below).
+
+A mutant that revokes the old grant "even if nothing was saved" survived: the revoke is after the early return on a failed save, so the mutation changes nothing (equivalent); the
+ordering is held by the test that makes the save fail and checks that the old grant was not revoked.
+
+## A fault the CI found while this was being finished
+
+CI run 43 failed once on macOS in the first-run test of the Enter key. It did not fail in six runs on this machine, and it failed once in two full runs, with the window's own state in the message: the
+keyboard was on the **Open page** button, not in the code box. The cause is real and is not the test's: when a dialog opens, a 30-millisecond timer moves the keyboard to its first control; on a slow computer
+that timer fired after the person had already reached a later screen and pulled the keyboard away. It now does nothing if the keyboard is already inside the dialog (a window test fires the timer late
+and checks, and fails on the old code).
 
 ## Not changed, on purpose
 

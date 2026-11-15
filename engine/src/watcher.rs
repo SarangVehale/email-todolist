@@ -173,7 +173,7 @@ fn with_credential<R>(a: &Account, mut attempt: impl FnMut(&Secret) -> Result<R>
 /// Where a test says the mail server is, as a plain connection (the sign-in is then checked against a scripted server without TLS). `None` in the app.
 static PLAIN_SERVER: std::sync::Mutex<Option<std::net::SocketAddr>> = std::sync::Mutex::new(None);
 
-/// Sends `check_sign_in` to a scripted server on `addr` without TLS, or back to the real one. Only a test of this crate can: anywhere else this does
+/// Sends `check_token` to a scripted server on `addr` without TLS, or back to the real one. Only a test of this crate can: anywhere else this does
 /// nothing and says so.
 #[doc(hidden)]
 pub fn use_plain_server(addr: Option<std::net::SocketAddr>) -> bool {

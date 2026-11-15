@@ -121,6 +121,17 @@ suite("the first-run screens", it => {
     await page.run(() => localStorage.clear());
   });
 
+  it("a dialog's late focus timer does not pull the keyboard out of the box the person is typing in", async page => {
+    await toGuide(page, "me@gmail.com");
+    // what happens on a slow computer: the timer that moves the keyboard into a newly opened dialog fires after the person is already on a later screen
+    await page.run(() => { document.querySelector("#w-pw").focus(); dialogOpened("Set up Inbox Agent") });
+    await page.settle(150);
+    assert.equal(await page.run(() => document.activeElement.id), "w-pw", "the keyboard stayed in the code box");
+    // and a dialog opened from the page still gets the keyboard
+    await page.run(() => { document.activeElement.blur(); dialogOpened("Set up Inbox Agent") });
+    await page.waitFor(() => veil.contains(document.activeElement) && document.activeElement !== veil);
+  });
+
   it("Enter does what the big button does, on the address and on the code", async page => {
     await newInstall(page);
     await page.key("Enter"); await page.waitFor(() => W.step === "address"); // on Welcome the keyboard is on Get started
@@ -128,6 +139,10 @@ suite("the first-run screens", it => {
     await page.waitFor(() => W.step === "guide");
     assert.match(await page.run(() => document.querySelector("[data-w=open]").textContent), /Open Yahoo's page/);
     await page.fill("#w-pw", "abcdefghijklmnop"); await page.key("Enter");
+    // a key press sent to a slow browser can be lost once: press again if Connect has not started, and say what happened if it never does
+    const started = () => page.run(() => W.busy || W.step === "ready");
+    for (let i = 0; i < 3 && !(await started()); i++) { await page.settle(1500); if (!(await started())) await page.key("Enter") }
+    assert.ok(await started(), "Enter on the code started Connect: " + JSON.stringify(await page.run(() => ({ busy: W.busy, step: W.step, result: W.result, pw: W.pw.length, active: document.activeElement && (document.activeElement.id || document.activeElement.tagName), veil: veil.dataset.kind }))));
     await page.waitFor(() => W.step === "ready");
   });
 

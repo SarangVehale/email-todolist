@@ -857,11 +857,14 @@ impl Core {
             candidate.validate()?;
             Ok((id, new, candidate))
         };
-        plan(&self.settings())?;
-        let done = crate::oauth::take_done()?;
-        // prove it first: sign in to the mail server with exactly this token, so that nothing is saved for one the server does not accept
         let (id, new, _) = plan(&self.settings())?;
-        crate::oauth::prime(id, &done.access, done.expires_in);
+        let done = crate::oauth::take_done()?;
+        if (done.provider, done.user.as_str()) != (provider, user.as_str()) {
+            // another sign-in finished in the meantime: this one is not the one that was checked
+            crate::oauth::discard(id, &done);
+            return Err(anyhow!("That sign-in changed. Sign in again."));
+        }
+        // prove it first: sign in to the mail server with exactly this token (not through the token store), so that nothing is saved for one the server does not accept
         let acct = Account {
             host: new.host.clone(),
             port: 993,
@@ -882,7 +885,6 @@ impl Core {
                 return Err(e);
             }
         };
-        crate::oauth::prime(id, &done.access, done.expires_in);
         let old = s.mailboxes().into_iter().find(|m| m.id == id);
         let changed = old.as_ref().is_some_and(|o| {
             (o.host.as_str(), o.user.as_str()) != (new.host.as_str(), new.user.as_str())
@@ -898,29 +900,43 @@ impl Core {
                 .unwrap_or_else(|e| e.into_inner())
                 .store(true, Ordering::Relaxed);
         }
+        let old_refresh = secrets::get(&secrets::oauth_key(id));
         let saved = (|| -> Result<()> {
             if add {
                 self.store()?.clear_mailbox(id)?;
             } else if changed {
                 self.store_for(id)?.reset_for_new_account()?;
             }
-            // signing in again replaces the old grant: Google is told to cancel it
-            if let (Some(p), Some(old_refresh)) = (before, secrets::get(&secrets::oauth_key(id))) {
-                if old_refresh != done.refresh {
-                    crate::oauth::revoke(p, &old_refresh);
-                }
-            }
             secrets::set(&secrets::oauth_key(id), &done.refresh)
                 .map_err(|e| anyhow!("Couldn't save the sign-in in your system keychain ({e})"))?;
-            secrets::delete(&secrets::imap_key(id)); // a sign-in replaces any password the mailbox had
-            candidate.save(&self.dir)
+            let r = candidate.save(&self.dir);
+            if r.is_err() {
+                // the settings were not saved: the keychain goes back to what it held, so the mailbox keeps the sign-in it had
+                match &old_refresh {
+                    Some(o) => {
+                        let _ = secrets::set(&secrets::oauth_key(id), o);
+                    }
+                    None => secrets::delete(&secrets::oauth_key(id)),
+                }
+            }
+            r
         })();
+        if saved.is_ok() {
+            secrets::delete(&secrets::imap_key(id)); // a sign-in replaces any password the mailbox had
+            crate::oauth::prime(id, &done.access, done.expires_in);
+        }
         if s.onboarded && (changed || saved.is_ok()) {
             self.start();
         }
         if let Err(e) = saved {
             crate::oauth::discard(id, &done);
             return Err(e);
+        }
+        // signing in again replaces the old grant: Google is told to cancel it (after everything is saved, so that a failure leaves the old one working)
+        if let (Some(p), Some(o)) = (before, &old_refresh) {
+            if *o != done.refresh {
+                crate::oauth::revoke(p, o);
+            }
         }
         Ok(json!(id))
     }

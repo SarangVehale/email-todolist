@@ -336,7 +336,8 @@ const FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select,t
 function dialogOpened(label) {
   veilFrom = document.activeElement;
   const p = vl().querySelector(".panel"); if (p) { p.setAttribute("role", "dialog"); p.setAttribute("aria-modal", "true"); p.setAttribute("aria-label", label) }
-  setTimeout(() => (vl().querySelector("[autofocus]") || vl().querySelector(FOCUSABLE))?.focus(), 30);
+  // a dialog that has already put the keyboard somewhere inside itself (the first-run screens do, on each screen) is left alone: a late timer must not pull it away
+  setTimeout(() => { const a = document.activeElement; if (a && a !== vl() && vl().contains(a)) return; (vl().querySelector("[autofocus]") || vl().querySelector(FOCUSABLE))?.focus() }, 30);
 }
 document.addEventListener("keydown", e => {
   if (e.key !== "Tab" || !vl().classList.contains("show")) return;

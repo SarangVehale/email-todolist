@@ -196,6 +196,7 @@ async function signInFlow(provider, user, finishArgs, say, alive) {
     if (p.state === "failed") throw new Error(p.error);
     if (p.state === "idle") throw new Error("The sign-in was cancelled.");
   }
+  if (!alive()) { if (signInSeq === mine) rpc("oauth_cancel").catch(() => {}); throw ""; } // cancelled while the answer was on its way: nothing is saved
   say({ ok: "Signed in. Connecting to your mailbox…", final: true }); // too late to cancel: the mailbox is being saved
   return rpc("oauth_finish", finishArgs);
 }

@@ -437,11 +437,19 @@ pub fn access_token(id: u32, p: Provider) -> Result<String> {
         &[("grant_type", "refresh_token"), ("refresh_token", &refresh)],
     ) {
         Ok(t) => {
-            // the mailbox may have been removed while the provider was being asked: then nothing is written back
-            if secrets::lookup(&secrets::oauth_key(id))?.is_none() {
-                return Err(anyhow::Error::new(SignInRefused(
-                    "this sign-in was removed".into(),
-                )));
+            // the mailbox may have been removed, or signed in again, while the provider was being asked: then nothing is written back
+            match secrets::lookup(&secrets::oauth_key(id))? {
+                None => {
+                    return Err(anyhow::Error::new(SignInRefused(
+                        "this sign-in was removed".into(),
+                    )))
+                }
+                Some(now) if now != refresh => {
+                    return Err(anyhow!(
+                        "this sign-in was replaced while it was being refreshed"
+                    ))
+                }
+                Some(_) => {}
             }
             if let Some(new_refresh) = t.refresh.as_deref().filter(|n| *n != refresh) {
                 secrets::set(&secrets::oauth_key(id), new_refresh)?; // Microsoft hands out a new one each time

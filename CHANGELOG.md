@@ -29,6 +29,11 @@ First public build.
   longer calls Outlook unsupported when Microsoft sign-in is offered. Documents: 14 sentences in the guides about the old wizard or only the dense view, and about 40 in the technical documents
   (counts, the command reference, the security model, the settings reference, the design), corrected; a guide for the unsigned-installer warning (`docs/guides/install-and-the-windows-warning.md`).
   CI run 42 failed on Windows and macOS because two window tests read the page's background colour one frame after a switch; they now wait for it.
+  A first round of the review loop on those fixes found: signing in again could be overwritten by a refresh of the old grant that was in flight (the refreshed token is now written
+  back only if the keychain still holds the token that was used); the old Google grant was cancelled before the new one was saved (now after, and the keychain is put back if the
+  settings cannot be saved); the new token was held in memory before the server had accepted it; a Cancel pressed just as the sign-in finished could still save the mailbox. CI run 43 then
+  failed once on macOS in a setup test, which showed a real fault: a dialog's 30-millisecond focus timer, fired late on a slow computer, pulled the keyboard from the code box to
+  the "Open page" button, so Enter opened the page instead of connecting. The timer now leaves the keyboard alone when it is already inside the dialog.
 - Sign in with Google and with Microsoft (Phase 12, third part), built and off until the person who builds the app registers it (the buttons show only
   when `engine/src/oauth.rs` names a client ID: [the runbook](docs/runbooks/register-sign-in.md), [ADR-0015](docs/adr/0015-sign-in-with-google-and-microsoft-needs-the-owners-client-id.md)).
   Google uses the loopback flow with PKCE (a one-shot listener on `127.0.0.1` that keeps accepting until a request carries the right `state`, 5 seconds and 8 KB for

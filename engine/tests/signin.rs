@@ -936,6 +936,11 @@ fn nothing_is_saved_for_a_token_the_mail_server_does_not_accept() {
         secrets::get("oauth-refresh-0").is_none(),
         "no token was kept"
     );
+    // nor is the refused token left in memory for anything to use
+    assert!(
+        oauth::access_token(0, Provider::Google).is_err(),
+        "no token is held for the mailbox that was not saved"
+    );
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -1189,7 +1194,7 @@ fn gmail_mailbox_with_a_sign_in(dir: &std::path::Path, refresh: &str) {
 fn signing_in_again_proves_the_new_token_not_the_old_grant_and_keeps_the_old_one_when_it_fails() {
     let tok = Tok::start();
     tok.say("/gtoken", 200, tokens("NEW-BAD", Some("RT-new"), MAIL));
-    // the old grant still works: a retry that fell back to it would pass, and the new token would be saved unproved
+    // the old grant still works: a retry that fell back to it would show in the server's log, and the new token would be saved unproved
     let imap = imap_start(&["OLD-ACCESS"]);
     let _s = scene(Some(&tok));
     watcher::use_plain_server(Some(imap.addr));
@@ -1457,5 +1462,68 @@ fn a_change_made_in_settings_while_the_mail_server_is_asked_is_kept() {
         "the change was not undone by the save that followed"
     );
     assert_eq!(Settings::load(&dir).account.user, "me@gmail.com");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_refresh_that_was_overtaken_by_a_new_sign_in_does_not_write_its_token_over_it() {
+    let tok = Tok::start();
+    tok.say_slowly(
+        "/mstoken",
+        200,
+        json!({"access_token": "MT-old-grant", "refresh_token": "MR-rotated-old", "expires_in": 3600}),
+        500,
+    );
+    let _s = scene(Some(&tok));
+    secrets::set("oauth-refresh-0", "MR-old").unwrap();
+    let refresh = std::thread::spawn(|| oauth::access_token(0, Provider::Microsoft));
+    std::thread::sleep(Duration::from_millis(150)); // the provider is being asked about the old grant
+    secrets::set("oauth-refresh-0", "MR-resigned-in").unwrap(); // the person signed in again meanwhile
+    let e = refresh.join().unwrap().unwrap_err().to_string();
+    assert!(e.contains("replaced"), "{e}");
+    assert_eq!(
+        secrets::get("oauth-refresh-0").as_deref(),
+        Some("MR-resigned-in"),
+        "the new sign-in was not overwritten by the old grant's refreshed token"
+    );
+}
+
+#[test]
+fn when_the_settings_cannot_be_saved_the_old_sign_in_keeps_working_and_the_new_grant_is_cancelled()
+{
+    let tok = Tok::start();
+    tok.say("/gtoken", 200, tokens("AT-new", Some("RT-new"), MAIL));
+    tok.say("/grevoke", 200, json!({}));
+    let imap = imap_start(&["AT-new"]);
+    let _s = scene(Some(&tok));
+    watcher::use_plain_server(Some(imap.addr));
+    let (c, dir) = fresh("save-fails");
+    secrets::set("oauth-refresh-0", "RT-old").unwrap();
+    secrets::set("imap-password", "pw").unwrap();
+    // a settings file that cannot be written (it is a folder)
+    std::fs::create_dir_all(dir.join("settings.json")).unwrap();
+    google_round(&c, "me@gmail.com", |_, st| format!("/?code=C&state={st}"));
+    wait_state(&c, "done");
+    let e = c.rpc("oauth_finish", &json!({"id": 0}));
+    assert!(e.is_err(), "the save cannot work");
+    assert_eq!(
+        secrets::get("oauth-refresh-0").as_deref(),
+        Some("RT-old"),
+        "the keychain is as it was"
+    );
+    assert_eq!(
+        secrets::get("imap-password").as_deref(),
+        Some("pw"),
+        "no password was deleted"
+    );
+    let revoked = tok.bodies("/grevoke");
+    assert!(
+        revoked.contains(&"token=RT-new".to_string()),
+        "the grant that was not used is cancelled"
+    );
+    assert!(
+        !revoked.contains(&"token=RT-old".to_string()),
+        "the old grant, which still works, is not"
+    );
     let _ = std::fs::remove_dir_all(dir);
 }
