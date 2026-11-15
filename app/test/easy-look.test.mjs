@@ -231,10 +231,10 @@ suite("the easy list", it => {
     assert.equal((await look(page)).zoom, "1.2");
     await openSettings(page);
     assert.deepEqual(await page.run(() => [...document.querySelectorAll("[data-s=size]")].map(b => b.getAttribute("aria-pressed"))), ["false", "true", "false"], "Large is the one pressed");
-    await page.click("[data-size=huge]");
+    await page.run(() => document.querySelector("[data-size=huge]").click()); // (the page zooms as the size changes, which moves the buttons under a pointer; what is tested is the choice, so the button is pressed in the page)
     await page.waitFor(() => document.documentElement.style.zoom === "1.45");
     assert.equal(await page.run(() => localStorage.getItem("ia.size")), "huge");
-    await page.click("[data-size=normal]");
+    await page.run(() => document.querySelector("[data-size=normal]").click()); // (the page zooms as the size changes, which moves the buttons under a pointer; what is tested is the choice, so the button is pressed in the page)
     await page.waitFor(() => document.documentElement.style.zoom === "1");
     await page.run(() => { applyLook() }); // a reload reads the choice again
     assert.equal((await look(page)).zoom, "1");
