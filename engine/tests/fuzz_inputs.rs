@@ -11,129 +11,8 @@ use engine::{calendar, dates, mail, reminders, rules, signals};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::time::{Duration, Instant};
 
-/// xorshift64*: a small generator with a fixed seed (no dependency, the same inputs on every machine).
-struct Rng(u64);
-impl Rng {
-    fn next(&mut self) -> u64 {
-        self.0 ^= self.0 >> 12;
-        self.0 ^= self.0 << 25;
-        self.0 ^= self.0 >> 27;
-        self.0.wrapping_mul(0x2545F4914F6CDD1D)
-    }
-    fn below(&mut self, n: usize) -> usize {
-        (self.next() % n.max(1) as u64) as usize
-    }
-}
-
-/// Bytes that parsers tend to trip on.
-const AWKWARD: &[&[u8]] = &[
-    b"\r\n",
-    b"\n",
-    b"\r",
-    b"\0",
-    b":",
-    b";",
-    b"=",
-    b"<",
-    b">",
-    b"\"",
-    b"'",
-    b"\\",
-    b"%",
-    b"&",
-    b"(",
-    b")",
-    b"[",
-    b"]",
-    b",",
-    b" ",
-    b"\t",
-    b"=?utf-8?B?",
-    b"=?utf-8?Q?",
-    b"?=",
-    b"=C3=A9",
-    b"\xff\xfe",
-    b"\xc3",
-    b"\xe2\x82",
-    b"\xf0\x9f\x98",
-    b"\xed\xa0\x80",
-    b"%00",
-    b"&#x110000;",
-    b"boundary=",
-    b"--",
-    b"Content-Type: multipart/mixed; boundary=\"",
-    b"BEGIN:VEVENT\r\n",
-    b"END:VEVENT\r\n",
-    b"DTSTART:",
-    b"TZID=",
-    b"RRULE:FREQ=DAILY",
-    b"<script>",
-    b"</",
-    b"<!--",
-    b"-->",
-    b"<![CDATA[",
-    b"<a href=\"",
-    b"<br/>",
-    b"&nbsp;",
-    b"9999999999999999999",
-    b"-1",
-    b"2026-02-30",
-    b"31/12/9999",
-    b"00:00:60",
-    b"\xe2\x80\xae",
-];
-
-fn damage(rng: &mut Rng, sample: &[u8]) -> Vec<u8> {
-    let mut v = sample.to_vec();
-    for _ in 0..1 + rng.below(5) {
-        match rng.below(7) {
-            0 if !v.is_empty() => {
-                let i = rng.below(v.len());
-                v[i] = rng.next() as u8;
-            }
-            1 => {
-                let i = rng.below(v.len() + 1);
-                let a = AWKWARD[rng.below(AWKWARD.len())];
-                v.splice(i..i, a.iter().copied());
-            }
-            2 if !v.is_empty() => {
-                let i = rng.below(v.len());
-                let j = (i + 1 + rng.below(40)).min(v.len());
-                v.drain(i..j);
-            }
-            3 if !v.is_empty() => {
-                // a piece repeated many times: nested, long or quadratic input
-                let i = rng.below(v.len());
-                let j = (i + 1 + rng.below(60)).min(v.len());
-                let piece = v[i..j].to_vec();
-                let times = 2 + rng.below(300);
-                let mut out = v[..j].to_vec();
-                for _ in 0..times {
-                    out.extend_from_slice(&piece);
-                }
-                out.extend_from_slice(&v[j..]);
-                v = out;
-            }
-            4 if !v.is_empty() => {
-                let keep = rng.below(v.len());
-                v.truncate(keep);
-            }
-            5 => {
-                let n = rng.below(200);
-                for _ in 0..n {
-                    v.push(rng.next() as u8);
-                }
-            }
-            _ => {
-                if v.len() > 4 {
-                    let i = rng.below(v.len() - 2);
-                    v.swap(i, i + 1);
-                }
-            }
-        }
-    }
-    v
-}
+mod common;
+use common::{damage, factor, seeded, Rng};
 
 /// Runs `f` on `rounds` damaged variants of the samples and reports the first panic or slow call.
 fn hammer(name: &str, samples: &[&[u8]], rounds: usize, seed: u64, f: impl Fn(&[u8])) {
@@ -347,4 +226,187 @@ fn the_harness_notices_a_slow_input() {
     hammer("a parser that stalls", &[b"abc"], 3, 9, |_| {
         std::thread::sleep(Duration::from_millis(2100))
     });
+}
+
+// ───────────── JSON the app reads from outside: a backup file, a settings change ─────────────
+
+/// Damages parsed JSON where it still is JSON: a value replaced by one of another kind (null, a huge or negative or fractional number, a very long
+/// string, a list, an object), a key dropped, a list or an object nested deeper. Byte damage mostly breaks the syntax at once; this reaches the code behind it.
+fn damage_json(rng: &mut Rng, v: &serde_json::Value) -> serde_json::Value {
+    use serde_json::{json, Value};
+    let wild = |rng: &mut Rng| -> Value {
+        match rng.below(9) {
+            0 => Value::Null,
+            1 => json!(true),
+            2 => json!(u64::MAX),
+            3 => json!(-1),
+            4 => json!(1e308),
+            5 => json!("x".repeat(1 + rng.below(70_000))),
+            6 => json!([[[[[[[[[["deep"]]]]]]]]]]),
+            7 => json!({"a": {"b": {"c": null}}}),
+            _ => json!(""),
+        }
+    };
+    match v {
+        Value::Object(m) => {
+            let mut out = serde_json::Map::new();
+            for (k, x) in m {
+                match rng.below(8) {
+                    0 => {} // dropped
+                    1 => {
+                        out.insert(k.clone(), wild(rng));
+                    }
+                    _ => {
+                        out.insert(k.clone(), damage_json(rng, x));
+                    }
+                }
+            }
+            if rng.below(6) == 0 {
+                out.insert("unexpected".into(), wild(rng));
+            }
+            Value::Object(out)
+        }
+        Value::Array(a) => {
+            let mut out: Vec<Value> = a.iter().map(|x| damage_json(rng, x)).collect();
+            if rng.below(5) == 0 && !out.is_empty() {
+                let i = rng.below(out.len());
+                let again = out[i].clone();
+                out.extend(std::iter::repeat_n(again, 1 + rng.below(200)));
+            }
+            if rng.below(8) == 0 {
+                out.push(wild(rng));
+            }
+            Value::Array(out)
+        }
+        _ if rng.below(4) == 0 => wild(rng),
+        other => other.clone(),
+    }
+}
+
+fn onboarded_core(name: &str) -> (std::sync::Arc<engine::core::Core>, std::path::PathBuf) {
+    let dir = std::env::temp_dir().join(format!("ia-fuzz-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let s = engine::settings::Settings {
+        onboarded: true,
+        account: engine::settings::AccountCfg {
+            id: 0,
+            host: "127.0.0.1".into(),
+            port: 1,
+            user: "me@example.com".into(),
+        },
+        ..Default::default()
+    };
+    s.save(&dir).unwrap();
+    (
+        engine::core::Core::new(dir.clone(), std::sync::Arc::new(|_, _| {})),
+        dir,
+    )
+}
+
+#[test]
+fn a_backup_file_never_panics_the_restore() {
+    // a real backup of a computer with some of your work on it is the sample
+    let (c, dir_a) = onboarded_core("backup-source");
+    for (title, due) in [("Call the bank", "2026-12-01"), ("Renew the passport", "")] {
+        c.rpc(
+            "add_task",
+            &serde_json::json!({"title": title, "priority": 4, "due": due}),
+        )
+        .unwrap();
+    }
+    c.rpc(
+        "rules_save",
+        &serde_json::json!({"rules": [{"id": "r1", "field": "domain", "text": "shop.example", "priority": 1, "category": null, "file": false}]}),
+    )
+    .unwrap();
+    let sample = engine::backup::to_json(&engine::backup::build(&c).unwrap()).unwrap();
+    assert!(
+        sample.contains("Call the bank") && sample.contains("shop.example"),
+        "the sample holds the work"
+    );
+
+    let (target, dir_b) = onboarded_core("backup-target");
+    let ask = |text: &str, apply: bool| {
+        target.rpc(
+            "backup_import",
+            &serde_json::json!({"json": text, "apply": apply, "settings": true}),
+        )
+    };
+    assert!(
+        ask(&sample, false).is_ok(),
+        "the undamaged sample is a backup the restore accepts"
+    );
+
+    // damaged bytes, then damaged JSON, each only looked at (apply: false), then some of each really restored
+    hammer(
+        "backup_import (bytes, preview)",
+        &[sample.as_bytes()],
+        1500,
+        11,
+        |b| {
+            let _ = ask(&text(b), false);
+        },
+    );
+    let value: serde_json::Value = serde_json::from_str(&sample).unwrap();
+    let mut rng = Rng(seeded(12));
+    for round in 0..1500 * factor() {
+        let damaged = damage_json(&mut rng, &value).to_string();
+        let began = Instant::now();
+        let outcome = catch_unwind(AssertUnwindSafe(|| {
+            let _ = ask(&damaged, false);
+        }));
+        assert!(
+            outcome.is_ok(),
+            "backup_import (JSON, preview) panicked on round {round}: {:?}",
+            damaged.chars().take(300).collect::<String>()
+        );
+        assert!(
+            began.elapsed() < Duration::from_secs(5),
+            "backup_import took {:?} on round {round}",
+            began.elapsed()
+        );
+    }
+    for round in 0..150 * factor() {
+        let damaged = damage_json(&mut rng, &value).to_string();
+        let outcome = catch_unwind(AssertUnwindSafe(|| {
+            let _ = ask(&damaged, true);
+        }));
+        assert!(
+            outcome.is_ok(),
+            "backup_import (JSON, apply) panicked on round {round}: {:?}",
+            damaged.chars().take(300).collect::<String>()
+        );
+    }
+    let _ = std::fs::remove_dir_all(dir_a);
+    let _ = std::fs::remove_dir_all(dir_b);
+}
+
+#[test]
+fn a_settings_change_never_panics_the_reader() {
+    let default = serde_json::to_value(engine::settings::Settings::default()).unwrap();
+    let base = engine::settings::Settings::default();
+    let mut rng = Rng(seeded(13));
+    for round in 0..4000 * factor() {
+        // the whole settings object damaged, and a small patch of the kind the window sends damaged
+        let patch = if round % 2 == 0 {
+            damage_json(&mut rng, &default)
+        } else {
+            damage_json(
+                &mut rng,
+                &serde_json::json!({"ai": {"mode": "rules"}, "alerts": {"desktop": true, "ntfy_topic": "abc"}, "hub": {"enabled": false}}),
+            )
+        };
+        let outcome = catch_unwind(AssertUnwindSafe(|| {
+            if let Ok(s) = base.patched(&patch) {
+                let _ = s.validate();
+                let _ = serde_json::to_value(&s);
+            }
+        }));
+        assert!(
+            outcome.is_ok(),
+            "settings read panicked on round {round}: {:?}",
+            patch.to_string().chars().take(300).collect::<String>()
+        );
+    }
 }

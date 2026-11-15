@@ -28,9 +28,9 @@ toolchain (CI installs `stable` with `rustfmt` and `clippy`).
 | --- | --- | --- |
 | Format with `cargo fmt` and its defaults (there is no `rustfmt.toml`) | Diffs show changes, not layout | **CI** `cargo fmt --check` |
 | Clippy runs on everything, tests and examples included, and warnings are errors: `cargo clippy --locked --all-targets -- -D warnings` | A warning ignored once is ignored for ever | **CI**, and the release workflow |
-| No `unsafe` and no `#[allow(...)]` in `engine/src` (none exists today). A future one needs a comment saying why | Both switch off a check the compiler or clippy makes for you | **Review**: `grep -rn "unsafe \|allow(" engine/src` |
+| No `unsafe` in the engine, and no `#[allow(...)]` in `engine/src` (none exists today). A future `allow` needs a comment saying why | Both switch off a check the compiler or clippy makes for you | **The compiler**: `#![forbid(unsafe_code)]` in `engine/src/lib.rs`. **Review** for `allow(`: `grep -rn "allow(" engine/src` |
 | Functions that can fail return `anyhow::Result`. A message the window will show is a whole sentence that says what to do next ("Pick a day from today (only before 09:00) to a year ahead") | The window shows the engine's text as it is | **Review**; many refusal tests check the text |
-| No panic on anything that comes from mail, a server, a file, a model or the person: no `unwrap`, `expect`, `panic!` or unchecked index on such data. Today `engine/src` has two guarded `unwrap`/`expect` calls (`ai.rs` after an `is_some` match arm, `triage.rs` on the rules triager that cannot fail) | One hostile message must not stop the app. The watcher also catches a panic per message (`catch_unwind`) as a net, not as permission | **Review**: `grep -rn "\.unwrap()\|\.expect(" engine/src`. **Test**: `missing_or_strange_headers_never_panic`, `garbage_never_panics_the_parser`, `a_message_that_panics_is_skipped_and_the_rest_of_the_sync_continues` |
+| No panic on anything that comes from mail, a server, a file, a model or the person: no `unwrap`, `expect`, `panic!` or unchecked index on such data. `engine/src` has no `unwrap` or `expect` outside tests (the last two, `ai.rs` and `triage.rs`, were removed on 2026-11-15) | One hostile message must not stop the app. The watcher also catches a panic per message (`catch_unwind`) as a net, not as permission | **The compiler**: `#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]` (clippy in CI). **Test**: `fuzz_inputs.rs`, `missing_or_strange_headers_never_panic`, `garbage_never_panics_the_parser`, `a_message_that_panics_is_skipped_and_the_rest_of_the_sync_continues` |
 | Take a lock with `lock().unwrap_or_else(\|e\| e.into_inner())`, never `unwrap()` | A thread that panicked must not poison the lock for everyone else | **Review** |
 | SQL text is a constant. Values reach it only as parameters (`?1` with `params![]`). `format!` into SQL splices a constant only: a table name from a fixed list, the shared `SELECT`, a column definition | A value in the SQL text is an injection | **Review**: read every `format!` in `engine/src/store.rs`. **Test**: `hostile_and_unicode_text_is_stored_verbatim_and_safely` |
 | What you type into search never becomes search syntax: `fts_query` keeps at most 8 alphanumeric words, each quoted | `OR`, `NEAR`, a quote or `*` must be plain text | **Test**: `what_you_type_is_never_search_syntax` |
@@ -97,7 +97,7 @@ Window:
 - what changed, one line each
 
 Docs: design (docs/designs/phaseN.md), CHANGELOG, README, review record, version history.
-477 engine tests, 62 window tests.
+480 engine tests, 62 window tests.
 
 Co-Authored-By: Name <address>
 ```

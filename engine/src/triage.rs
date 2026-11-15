@@ -163,7 +163,16 @@ pub fn triage_with_fallback(primary: &dyn Triager, e: &Email, s: &Signals) -> Tr
     let mut t = primary
         .triage(e, s)
         .or_else(|_| RulesTriager.triage(e, s))
-        .expect("rules triage is infallible");
+        // the rules never fail, but a message must not be lost to a panic if that ever changes: a neutral verdict instead
+        .unwrap_or_else(|_| Triage {
+            priority: 3,
+            category: "other".into(),
+            action: String::new(),
+            urgent: false,
+            why: "no ranking was possible".into(),
+            needs_reply: false,
+            due: String::new(),
+        });
     if t.due.is_empty() {
         t.due = due_in(e); // a model that found no date may still have missed an obvious one
     }

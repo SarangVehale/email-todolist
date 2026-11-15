@@ -1,4 +1,9 @@
 //! Mail engine: IMAP watcher, signals, pluggable triage, SQLite store, write-back, phone hub.
+//!
+//! The engine reads text nobody here wrote, so it is held to two rules by the compiler: no `unsafe` code at all, and no `unwrap` or `expect`
+//! outside tests (a panic in the sync thread would be a crash on every start; see `mail::parse`, which also contains the parser's panics).
+#![forbid(unsafe_code)]
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
 pub mod ai;
 pub mod backup;
 pub mod calendar;

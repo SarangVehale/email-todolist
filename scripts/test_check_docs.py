@@ -268,5 +268,21 @@ class CheckDocsMore(unittest.TestCase):
         self.assertTrue(out and "same `with:`" in out[0], out)
 
 
+    def test_a_tag_name_must_not_be_written_into_a_script(self):
+        files = {"docs/README.md": GOOD_MAP, "docs/guides/a.md": doc("Text.")}
+        bad = "jobs:\n  x:\n    steps:\n      - run: gh release upload \"${{ github.ref_name }}\" f\n"
+        out = [e for e in problems({**files, ".github/workflows/r.yml": bad}) if "shell script" in e]
+        self.assertTrue(out and "github.ref_name" in out[0] and "r.yml:4" in out[0], out)
+        block = "jobs:\n  x:\n    steps:\n      - name: y\n        run: |\n          echo one\n          echo \"${{ github.event.head_commit.message }}\"\n"
+        out = [e for e in problems({**files, ".github/workflows/r.yml": block}) if "shell script" in e]
+        self.assertTrue(out and "r.yml:7" in out[0], out)
+
+    def test_values_the_workflow_controls_and_the_environment_are_fine(self):
+        files = {"docs/README.md": GOOD_MAP, "docs/guides/a.md": doc("Text.")}
+        ok = ("jobs:\n  x:\n    runs-on: ${{ matrix.os }}\n    steps:\n      - env:\n          TAG: ${{ github.ref_name }}\n"
+              "        run: |\n          echo \"$TAG\" ${{ runner.os }} ${{ matrix.os }} ${{ github.repository }}\n")
+        self.assertEqual([e for e in problems({**files, ".github/workflows/r.yml": ok}) if "shell script" in e], [])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

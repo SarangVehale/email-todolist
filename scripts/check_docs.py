@@ -476,6 +476,38 @@ def check_yaml(root):
     return errors
 
 
+SAFE_EXPRESSIONS = re.compile(r"^(runner\.|matrix\.|github\.(repository|run_id|run_number|sha)$)")
+
+
+def check_workflow_expressions(root):
+    """No `${{ ... }}` is pasted into a shell script, except values the workflow file itself controls (`runner.*`, `matrix.*`, the repository, the
+    run number, the commit). A tag name, a branch name, an issue title or an actor is text somebody else chose: git allows `$`, `(` and `;` in a tag,
+    and written into a script it runs. Pass such a value through `env:` and use `\"$NAME\"`; a secret goes the same way, or it can end up in a log."""
+    errors = []
+    folder = os.path.join(root, ".github", "workflows")
+    if not os.path.isdir(folder):
+        return errors
+    for name in sorted(os.listdir(folder)):
+        if not name.endswith((".yml", ".yaml")):
+            continue
+        path = os.path.join(folder, name)
+        in_run, run_indent = False, 0
+        for n, line in enumerate(read(path).splitlines(), 1):
+            m = re.match(r"^(\s*)(?:- )?run:\s*(.*)$", line)
+            if m:
+                run_indent = len(m.group(1)) + (2 if line.lstrip().startswith("- ") else 0)
+                in_run = m.group(2).strip() in ("|", ">", "|-", ">-", "")
+                text = "" if in_run else m.group(2)
+            elif in_run and line.strip() and len(line) - len(line.lstrip()) <= run_indent:
+                in_run, text = False, ""
+            else:
+                text = line if in_run else ""
+            for expr in re.findall(r"\$\{\{\s*([^}]*?)\s*\}\}", text):
+                if not SAFE_EXPRESSIONS.match(expr):
+                    errors.append(f"{rel(path, root)}:{n}: `${{{{ {expr} }}}}` is written into a shell script: pass it through `env:` and use the variable")
+    return errors
+
+
 def check_release_steps(root):
     """The release workflow builds with the Tauri action twice: with the Apple signing secrets when they exist, without any when they do not
     (an unset secret reaches a step as an empty string, and an empty certificate fails the macOS build). The two steps must say the same in
@@ -556,6 +588,7 @@ def run(root=ROOT, today=None):
     errors += check_counts(root)
     errors += check_yaml(root)
     errors += check_release_steps(root)
+    errors += check_workflow_expressions(root)
     return errors
 
 

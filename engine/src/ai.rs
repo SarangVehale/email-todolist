@@ -269,13 +269,13 @@ pub fn make_triager(
     anthropic_key: Option<String>,
     overrides: Vec<Override>,
 ) -> Box<dyn Triager> {
-    let backend = match cfg.mode.as_str() {
-        "ollama" if !cfg.ollama_model.is_empty() => Backend::Ollama {
+    let backend = match (cfg.mode.as_str(), anthropic_key) {
+        ("ollama", _) if !cfg.ollama_model.is_empty() => Backend::Ollama {
             url: cfg.ollama_url.clone(),
             model: cfg.ollama_model.clone(),
         },
-        "anthropic" if anthropic_key.is_some() => Backend::Anthropic {
-            key: anthropic_key.unwrap(),
+        ("anthropic", Some(key)) => Backend::Anthropic {
+            key,
             model: cfg.anthropic_model.clone(),
         },
         _ => return Box::new(RulesTriager),

@@ -18,6 +18,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false # no step pushes: the token is not left in the checkout
       - name: Tag, package versions and changelog all agree
         run: python3 scripts/bump_version.py --check "${GITHUB_REF_NAME#v}"
 
@@ -31,6 +33,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false # no step pushes: the token is not left in the checkout
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           components: clippy, rustfmt
@@ -104,6 +108,8 @@ jobs:
       HAS_APPLE_CERT: ${{ secrets.APPLE_CERTIFICATE != '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false # no step pushes: the token is not left in the checkout
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
@@ -162,8 +168,8 @@ jobs:
       - name: Warn when a build will be unsigned
         shell: bash
         run: |
-          if [ "${{ runner.os }}" = "Windows" ] && [ "$HAS_WIN_CERT" != "true" ]; then echo "::warning::Windows installer is UNSIGNED (no WINDOWS_CERTIFICATE secret). SmartScreen will warn users."; fi
-          if [ "${{ runner.os }}" = "macOS" ] && [ "$HAS_APPLE_CERT" != "true" ]; then echo "::warning::macOS app is UNSIGNED and NOT notarized (no APPLE_CERTIFICATE secret). Gatekeeper will block it."; fi
+          if [ "$RUNNER_OS" = "Windows" ] && [ "$HAS_WIN_CERT" != "true" ]; then echo "::warning::Windows installer is UNSIGNED (no WINDOWS_CERTIFICATE secret). SmartScreen will warn users."; fi
+          if [ "$RUNNER_OS" = "macOS" ] && [ "$HAS_APPLE_CERT" != "true" ]; then echo "::warning::macOS app is UNSIGNED and NOT notarized (no APPLE_CERTIFICATE secret). Gatekeeper will block it."; fi
 
       # An unset secret reaches a step as an EMPTY string, and an empty APPLE_CERTIFICATE is not "no certificate": Tauri tries to import it and the
       # macOS build fails ("failed to import the signing certificate"; the first rehearsal of this workflow, 2026-11-14). So the variables are
@@ -213,9 +219,11 @@ jobs:
       - name: Download every release file
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
         run: |
           mkdir dist && cd dist
-          gh release download "${{ github.ref_name }}" --repo "${{ github.repository }}" --pattern '*'
+          gh release download "$TAG" --repo "$REPO" --pattern '*'
           ls -l
           files=$(ls | tr '\n' ' ')
           echo "::notice title=Files on the draft release::$files"
@@ -246,4 +254,6 @@ jobs:
       - name: Attach the checksums to the draft release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${{ github.ref_name }}" dist/SHA256SUMS.txt --repo "${{ github.repository }}" --clobber
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: gh release upload "$TAG" dist/SHA256SUMS.txt --repo "$REPO" --clobber
