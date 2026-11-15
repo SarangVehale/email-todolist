@@ -107,6 +107,7 @@ on a quiet machine and failed once in a full run that shared the machine with a 
 
 | Run | Commit | Result |
 | --- | --- | --- |
+| 51 | `e6e3f36` | Ubuntu, macOS and the audit green; Windows failed once in an engine test from Phase 4 (`tasks_added_at_the_same_moment_from_different_threads_never_collide`): "database is locked" after the 5-second wait, with six threads writing as fast as they can on a loaded runner (SQLite's wait for a lock is not fair). Nothing in this change touches it. The test now tries again when the database says it is locked: what it checks is that the ids are unique. |
 | 45 | `0179532` | Ubuntu, Windows and the audit green; macOS failed in the accessibility test: a colour was measured half-way through a 150-millisecond transition (a contrast of 1.17 for text that is 11), and the failure left the simple view set on that device, which broke the Restore test that followed. The check now switches transitions off before it measures, and the test clears the device's look in a `finally`. |
 | 44 | `05af712` | Green on Ubuntu, Windows and macOS. |
 | 43 | `2fa4914` | Ubuntu, Windows and the audit green; macOS failed once in the Enter-key setup test, which showed the late focus timer described above. |

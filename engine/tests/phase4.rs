@@ -992,6 +992,18 @@ fn old_followup_records_are_forgotten_by_the_routine_clean_up_and_the_scheduler_
     assert!(!engine::jobs::prune_due(Some("2026-11-13"), "2026-11-13"));
 }
 
+/// Runs `f` again when the database says it is locked. SQLite's wait for a lock is not fair: six threads writing as fast as they can on a slow disk can starve
+/// one past the 5-second wait (seen once, on a loaded Windows runner). What the test below is about is that the ids are unique, not that nobody ever waits too long.
+fn when_locked_try_again<T>(mut f: impl FnMut() -> anyhow::Result<T>) -> anyhow::Result<T> {
+    for _ in 0..6 {
+        match f() {
+            Err(e) if e.to_string().contains("locked") => continue,
+            other => return other,
+        }
+    }
+    f()
+}
+
 #[test]
 fn tasks_added_at_the_same_moment_from_different_threads_never_collide() {
     let dir = std::env::temp_dir().join(format!("ia-p4-uid-{}", std::process::id()));
@@ -1007,7 +1019,9 @@ fn tasks_added_at_the_same_moment_from_different_threads_never_collide() {
                 (0..15)
                     .map(|i| {
                         if i % 2 == 0 {
-                            st.add_local_task(&format!("t{i}"), 3, "").unwrap().unwrap()
+                            when_locked_try_again(|| st.add_local_task(&format!("t{i}"), 3, ""))
+                                .unwrap()
+                                .unwrap()
                         } else {
                             let m = engine::signals::SentMsg {
                                 message_id: format!("<{i}-{:?}@x>", std::thread::current().id()),
@@ -1016,7 +1030,9 @@ fn tasks_added_at_the_same_moment_from_different_threads_never_collide() {
                                 subject: "s".into(),
                                 sent_at: NOW,
                             };
-                            st.add_followup(&m, NOW).unwrap().unwrap()
+                            when_locked_try_again(|| st.add_followup(&m, NOW))
+                                .unwrap()
+                                .unwrap()
                         }
                     })
                     .collect::<Vec<u32>>()
