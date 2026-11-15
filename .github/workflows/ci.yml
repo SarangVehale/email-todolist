@@ -59,12 +59,14 @@ jobs:
           python3 scripts/test_check_docs.py
           python3 scripts/check_docs.py
           python3 scripts/test_gen_licenses.py
-      - name: Licences are listed, and every one is on the reviewed list
+      # Only the policy here, not whether THIRD_PARTY_LICENSES.txt is current: every Dependabot update of a crate would fail on that and need the list
+      # regenerated on its branch. The release workflow (and RELEASING.md, before tagging) checks that it is current.
+      - name: Every licence is on the reviewed list
         if: runner.os == 'Linux'
         shell: bash
         run: |
           cargo fetch --locked --manifest-path app/src-tauri/Cargo.toml
-          python3 scripts/gen_licenses.py --check
+          python3 scripts/gen_licenses.py --policy
       - name: Format
         working-directory: engine
         run: cargo fmt --check

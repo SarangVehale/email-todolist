@@ -146,7 +146,7 @@ fn hammer(name: &str, samples: &[&[u8]], rounds: usize, seed: u64, f: impl Fn(&[
     };
     let (rounds, seed) = (
         rounds * env("FUZZ_FACTOR", 1) as usize,
-        seed + 1000 * env("FUZZ_SEED", 0),
+        seed.wrapping_add(1000u64.wrapping_mul(env("FUZZ_SEED", 0))),
     );
     let mut rng = Rng(seed);
     let limit = Duration::from_secs(2);
@@ -173,11 +173,17 @@ fn hammer(name: &str, samples: &[&[u8]], rounds: usize, seed: u64, f: impl Fn(&[
                 input.len()
             );
         }
-        assert!(
-            took < limit,
-            "{name} took {took:?} on round {round} (seed {seed}) for an input of {} bytes",
-            input.len()
-        );
+        if took >= limit {
+            // one stalled call on a shared machine is not a slow parser: the same input must be slow twice
+            let again = Instant::now();
+            let _ = catch_unwind(AssertUnwindSafe(|| f(&input)));
+            let took_again = again.elapsed();
+            assert!(
+                took_again < limit,
+                "{name} took {took:?} and then {took_again:?} on round {round} (seed {seed}) for an input of {} bytes",
+                input.len()
+            );
+        }
     }
     eprintln!(
         "{name}: {rounds} inputs, slowest {:?} for {} bytes",
@@ -198,13 +204,18 @@ const HTML: &[u8] = b"<html><head><style>p{color:red}</style></head><body><h1>He
 
 #[test]
 fn a_mail_message_never_panics_the_parser() {
+    // the samples must parse as they are, or damaging them tests nothing
+    assert!(mail::parse(7, PLAIN).is_ok() && mail::parse(7, MULTIPART).is_ok());
     hammer(
         "mail::parse",
         &[PLAIN, MULTIPART, NO_HEADERS_END, b""],
         6000,
         1,
         |b| {
-            let _ = mail::parse(7, b);
+            // `mail::parse` runs the parser on a thread of its own and turns a panic into an error: that error is what to look for
+            if let Err(e) = mail::parse(7, b) {
+                assert!(!e.to_string().contains("parser panicked"), "{e}");
+            }
         },
     );
 }
@@ -237,6 +248,7 @@ fn the_text_helpers_never_panic() {
 
 #[test]
 fn a_calendar_invitation_never_panics_the_reader() {
+    assert!(calendar::parse(&text(ICS)).is_some() && calendar::parse(&text(ICS_ALL_DAY)).is_some());
     hammer(
         "calendar::parse",
         &[ICS, ICS_ALL_DAY, b"BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n"],

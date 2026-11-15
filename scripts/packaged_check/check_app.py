@@ -4,19 +4,21 @@
 
 Starts the built app (app/src-tauri/target/release/app.exe) with a data folder of its own making and seeded settings, then drives
 it two ways: through the phone hub's HTTP interface (what a phone or a hostile neighbour on the Wi-Fi can do) and through the real
-window's own IPC with the browser protocol on port 9222 (desktop_checks.mjs: the commands the hub must refuse). It saves one fake
-password under the app's name in the system keychain for the setup checks and removes it again at the end.
+window's own IPC with the browser protocol on port 9222 (desktop_checks.mjs: the commands the hub must refuse). The app runs with its
+keychain in memory (INBOX_AGENT_KEYCHAIN=memory), so the setup checks' fake password never reaches the real credential store and a real
+mailbox password is neither read nor overwritten.
 
 It REFUSES TO RUN if the app already has a data folder (%LOCALAPPDATA%\\app.inboxagent.desktop): it deletes that folder afterwards,
 and that may be your real mail. Close the app, move that folder away, run this, and move it back."""
-import json, os, sqlite3, subprocess, sys, tempfile, time, urllib.request, urllib.error, shutil
+import json, os, secrets, sqlite3, string, subprocess, sys, tempfile, time, urllib.request, urllib.error, shutil
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 EXE = os.path.join(ROOT, "app", "src-tauri", "target", "release", "app.exe")
 DATA = os.path.join(os.environ["LOCALAPPDATA"], "app.inboxagent.desktop")
 PORT = 18787
-TOKEN = "T3stT0kenT3stT0kenT3stT0kenAB12"
+# the hub listens on the network while the check runs: a code made for this run, not one that is public in the repository
+TOKEN = "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(32))
 BASE = f"http://127.0.0.1:{PORT}"
 results = []
 
@@ -49,7 +51,7 @@ if not os.path.exists(EXE):
     sys.exit(f"{EXE} is missing: build the app first (cd app && npm run tauri build).")
 os.makedirs(DATA)
 json.dump({"onboarded": False, "account": {"host": "imap.example.com", "user": "me@example.com", "port": 993}, "hub": {"enabled": True, "port": PORT, "token": TOKEN}}, open(os.path.join(DATA, "settings.json"), "w"))
-env = dict(os.environ, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9222")
+env = dict(os.environ, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9222", INBOX_AGENT_KEYCHAIN="memory")
 proc = subprocess.Popen([EXE, "--minimized"], env=env)
 try:
     up = False
@@ -191,18 +193,14 @@ finally:
     except Exception:
         proc.kill()
     time.sleep(1)
-
-time.sleep(1)
-# the window's browser engine keeps files open for a few seconds after the app ends: try for a while
-for _ in range(30):
-    shutil.rmtree(DATA, ignore_errors=True)
-    if not os.path.exists(DATA):
-        break
-    time.sleep(1)
-if os.path.exists(DATA):
-    print(f"note: {DATA} could not be removed yet (the browser engine still holds it); remove it before the next run")
-# the setup checks saved a fake password under the app's own name in the system keychain: take it out again
-subprocess.run([os.path.join(os.environ.get("SystemRoot", "C:" + chr(92) + "Windows"), "System32", "cmdkey.exe"), "/delete:imap-password.InboxAgent"], capture_output=True)
+    # the window's browser engine keeps files open for a few seconds after the app ends: try for a while
+    for _ in range(30):
+        shutil.rmtree(DATA, ignore_errors=True)
+        if not os.path.exists(DATA):
+            break
+        time.sleep(1)
+    if os.path.exists(DATA):
+        print(f"note: {DATA} could not be removed yet (the browser engine still holds it); remove it before the next run")
 
 failed = [n for n, ok in results if not ok]
 print(f"\n{len(results) - len(failed)}/{len(results)} checks passed")

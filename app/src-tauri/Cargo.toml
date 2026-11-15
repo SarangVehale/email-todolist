@@ -6,7 +6,7 @@ authors = ["Inbox Agent"]
 license = "MIT"
 repository = ""
 edition = "2021"
-rust-version = "1.82"
+rust-version = "1.85"
 
 [lib]
 name = "app_lib"

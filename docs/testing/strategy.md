@@ -12,7 +12,7 @@ through. The plan for one release, with its sign-off, is [the test plan](test-pl
 | --- | --- | --- | --- | --- |
 | Engine tests | What the engine does: parsing, ranking, the store, the commands, the phone hub, and the IMAP client against a scripted server | `engine/tests/*.rs` | 477 in 22 files | `cd engine && cargo test` |
 | Window tests | What the real window does with the demo backend's answers, driven by real key presses and clicks in a headless browser | `app/test/*.test.mjs` | 62 in 6 files | `cd app && npm test` |
-| Scripts | The version fields agree, the release check works, the catalogue and the documents are current | `scripts/` | the checks, and tests of two of them (`test_bump_version.py` has 9) | see below |
+| Scripts | The version fields agree, the release check works, the catalogue and the documents are current | `scripts/` | the checks, and tests of three of them (`test_check_docs.py` has 40, `test_bump_version.py` 9 and `test_gen_licenses.py` 10) | see below |
 | Packaged app | The built program as a user and a hostile neighbour meet it, its installer, and a heavy mailbox (Windows only) | `scripts/packaged_check/`, `scripts/scale_check/` | 114 checks, an install cycle, one measurement | `python scripts/packaged_check/check_app.py` |
 | Manual cases | Behaviour that needs a real mailbox, a real calendar, a real phone or a clean machine | `docs/TESTCASES.manual.md` | 129 cases, MT-01 to MT-138 | by hand |
 
@@ -96,6 +96,8 @@ python scripts/test_bump_version.py                    # the release check itsel
 python scripts/gen_testcases.py                        # regenerate docs/TESTCASES.md, then commit it
 python scripts/test_check_docs.py                      # the documentation check itself
 python scripts/check_docs.py                           # links, diagrams, the map, the command reference, doc comments
+python scripts/test_gen_licenses.py                    # the licence rule itself
+(cd app/src-tauri && cargo fetch --locked) && python scripts/gen_licenses.py --check   # the licence list is current, every licence reviewed
 ```
 
 The same syntax check in PowerShell:
@@ -133,8 +135,8 @@ throwaway tag after two failures it showed and that were fixed (RELEASING.md); i
 | `test`: versions agree | all three | `python3 scripts/bump_version.py --check` | a version field differs, or the changelog or a history file is missing |
 | `test`: the release check works | all three | `python3 scripts/test_bump_version.py` | the check's own tests fail |
 | `test`: catalogue is up to date | all three | `python3 scripts/gen_testcases.py`, then `git diff --exit-code docs/TESTCASES.md` | the catalogue is stale |
-| `test`: documentation checks | all three | `python3 scripts/test_check_docs.py`, `python3 scripts/check_docs.py` | a broken link, bad diagram, missing map entry, undocumented command or public item |
-| `test`: licences | Linux | `cargo fetch --locked` in `app/src-tauri`, then `python3 scripts/gen_licenses.py --check` (and, on all three, `python3 scripts/test_gen_licenses.py`) | `THIRD_PARTY_LICENSES.txt` is out of date, or a crate has a licence that is not on the reviewed list |
+| `test`: documentation checks | all three | `python3 scripts/test_check_docs.py`, `python3 scripts/check_docs.py`, `python3 scripts/test_gen_licenses.py` | a broken link, bad diagram, missing map entry, undocumented command or public item |
+| `test`: licences | Linux | `cargo fetch --locked` in `app/src-tauri`, then `python3 scripts/gen_licenses.py --policy` (the release workflow runs `--check`, which also fails when `THIRD_PARTY_LICENSES.txt` is out of date) | a crate has a licence that is not on the reviewed list |
 | `test`: format | all three | `cargo fmt --check` | a file is not formatted |
 | `test`: lint | all three | `cargo clippy --locked --all-targets -- -D warnings` | a warning |
 | `test`: Rust documentation | all three | `cargo doc --no-deps --locked` with `RUSTDOCFLAGS: -D warnings` | a rustdoc warning |
@@ -149,10 +151,11 @@ because the browser did not open its debugging port within the harness's fixed 1
 into the annotation, which is how the cause was read.
 
 The release workflow runs on a tag like `v0.1.0`: it **verifies** that the tag, every version field, a dated changelog entry and a
-row in `docs/RELEASE_HISTORY.md` agree, **tests** (clippy, `cargo test` and the documentation checks on all three systems, and the
-window tests on Linux), **builds** the installers, and writes `SHA256SUMS.txt` with a build-provenance attestation to a draft
-release. It does not repeat the format check, the Rust documentation build, the catalogue check, the syntax check of the window's
-scripts or the tests of the release check; it does run the documentation checks and, on Linux, the window tests. Those it leaves out
+row in `docs/RELEASE_HISTORY.md` agree, **tests** (clippy, `cargo test` and the documentation checks on all three systems, and on Linux
+the licence list and the window tests), **builds** the installers one after the other, looks inside the deb, the app archive and the AppImage
+for the three licence files, and writes `SHA256SUMS.txt` with a build-provenance attestation to a draft release. It does not repeat the format
+check, the Rust documentation build, the catalogue check, the syntax check of the window's scripts or the tests of the release check; it
+does run the documentation checks, the licence list and, on Linux, the window tests. Those it leaves out
 come from CI on `main` and from the commands in [RELEASING.md](../../RELEASING.md).
 
 ## Review gates
@@ -225,8 +228,8 @@ A test that fails once in a hundred runs is a defect in the test or in the code,
 * **The Tauri shell** (`app/src-tauri/src`, two small files) has no test of its own; the packaged-app measurement and the manual cases
   exercise it.
 * **Appearance, the phone's layout, and what a screen reader says.** `a11y.test.mjs` checks what a machine can: every control has a name,
-  every dialog has a role and a name of its own, text is readable on black (4.5 to 1, 3 to 1 for large text) and nothing that is clicked is
-  under 24 by 24 pixels. It does not hear a screen reader, check focus order or what is announced, or look at the phone's layout. The Tab
+  every dialog has a role and a name of its own, text is readable on black (4.5 to 1, 3 to 1 for large text) and no button, link, field or menu is
+  under 24 by 24 pixels (checkboxes and radio buttons excepted). It does not hear a screen reader, check focus order or what is announced, or look at the phone's layout. The Tab
   trap in dialogs and selecting a range by key have no window test. Three runs of the window tests on Linux failed (a browser that was slow to
   start; fixed in Phase 12). No run has been repeated since the fix long enough to call it gone.
 * **A published release.** Nothing has been released; the signed-installer, checksum and update paths have never been exercised.

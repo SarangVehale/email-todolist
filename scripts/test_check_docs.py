@@ -257,5 +257,16 @@ class CheckDocsMore(unittest.TestCase):
             self.assertEqual(bool(out), missing, src)
 
 
+    def test_the_two_tauri_action_steps_must_say_the_same(self):
+        step = lambda name, env, with_: (f"      - name: {name}\n        uses: tauri-apps/tauri-action@abc123 # v1\n" + env + "        with:\n" + with_)
+        same = "          projectPath: app\n          args: ${{ matrix.args }}\n"
+        files = {"docs/README.md": GOOD_MAP, "docs/guides/a.md": doc("Text.")}
+        ok = "jobs:\n  build:\n    steps:\n" + step("signed", "        env:\n          A: b\n", same) + step("unsigned", "", same)
+        self.assertEqual([e for e in problems({**files, ".github/workflows/release.yml": ok}) if "tauri-action" in e], [])
+        differ = "jobs:\n  build:\n    steps:\n" + step("signed", "", same) + step("unsigned", "", same.replace("app", "other"))
+        out = [e for e in problems({**files, ".github/workflows/release.yml": differ}) if "tauri-action" in e]
+        self.assertTrue(out and "same `with:`" in out[0], out)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

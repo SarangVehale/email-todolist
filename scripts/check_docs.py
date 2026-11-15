@@ -476,6 +476,38 @@ def check_yaml(root):
     return errors
 
 
+def check_release_steps(root):
+    """The release workflow builds with the Tauri action twice: with the Apple signing secrets when they exist, without any when they do not
+    (an unset secret reaches a step as an empty string, and an empty certificate fails the macOS build). The two steps must say the same in
+    `with:`, or one kind of release would build differently from the other, and nothing else would notice."""
+    path = os.path.join(root, ".github", "workflows", "release.yml")
+    if not os.path.isfile(path):
+        return []
+    lines = read(path).splitlines()
+    blocks = []
+    for i, line in enumerate(lines):
+        if "uses: tauri-apps/tauri-action@" not in line:
+            continue
+        indent = len(line) - len(line.lstrip())
+        j = i + 1
+        while j < len(lines) and not (lines[j].strip() == "with:" and len(lines[j]) - len(lines[j].lstrip()) == indent):
+            if lines[j].strip() and len(lines[j]) - len(lines[j].lstrip()) < indent:
+                break
+            j += 1
+        body = []
+        if j < len(lines) and lines[j].strip() == "with:":
+            k = j + 1
+            while k < len(lines) and (not lines[k].strip() or len(lines[k]) - len(lines[k].lstrip()) > indent):
+                if lines[k].strip():
+                    body.append(lines[k].strip())
+                k += 1
+        blocks.append((i + 1, body))
+    if len(blocks) >= 2 and any(b[1] != blocks[0][1] for b in blocks[1:]):
+        where = ", ".join(f"line {n}" for n, _ in blocks)
+        return [f"{rel(path, root)}: the tauri-action steps ({where}) do not have the same `with:`; the signed and the unsigned release must build the same way"]
+    return []
+
+
 def check_counts(root):
     """The README says how many tests there are; docs/TESTCASES.md (generated) says how many there really are."""
     cat, readme = os.path.join(root, "docs", "TESTCASES.md"), os.path.join(root, "README.md")
@@ -523,6 +555,7 @@ def run(root=ROOT, today=None):
     errors += check_hub(root)
     errors += check_counts(root)
     errors += check_yaml(root)
+    errors += check_release_steps(root)
     return errors
 
 

@@ -141,6 +141,24 @@ jobs:
           $conf | ConvertTo-Json -Depth 30 | Set-Content $path -Encoding utf8
           "Signing with the imported certificate."
 
+      # A secret that is set must not be joined by one that is not: the missing one reaches the build as an empty string and fails it (the
+      # first rehearsal), so a half-set group stops here with a message that says which.
+      - name: The Apple signing secrets are all set, or none is
+        shell: bash
+        env:
+          S1: ${{ secrets.APPLE_CERTIFICATE }}
+          S2: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          S3: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          S4: ${{ secrets.APPLE_ID }}
+          S5: ${{ secrets.APPLE_PASSWORD }}
+          S6: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          n=0
+          for v in "$S1" "$S2" "$S3" "$S4" "$S5" "$S6"; do [ -n "$v" ] && n=$((n+1)); done
+          if [ "$n" -ne 0 ] && [ "$n" -ne 6 ]; then
+            echo "::error title=Apple signing secrets::$n of the 6 Apple secrets are set (APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY, APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID). Set all of them or none: a missing one reaches the build as an empty string and fails it."
+            exit 1
+          fi
       - name: Warn when a build will be unsigned
         shell: bash
         run: |
@@ -201,6 +219,22 @@ jobs:
           ls -l
           files=$(ls | tr '\n' ' ')
           echo "::notice title=Files on the draft release::$files"
+      # The licences must travel with the program: look inside each package for the three files the installer is told to carry.
+      - name: The packages carry the licence files
+        working-directory: dist
+        shell: bash
+        run: |
+          missing=""
+          inside() { # <package> <the names of the files in it>
+            for want in LICENSE THIRD_PARTY_NOTICES.md THIRD_PARTY_LICENSES.txt; do
+              grep -q -E "(^|/)${want}\$" <<< "$2" || missing="$missing $1:$want"  # (a here-string, not a pipe: grep -q stops early and pipefail would read that as a failure)
+            done
+          }
+          for deb in *.deb; do inside "$deb" "$(dpkg-deb -c "$deb" | awk '{ $1=$2=$3=$4=$5=""; print }' | sed 's/^ *//')"; done
+          for tgz in *.app.tar.gz; do inside "$tgz" "$(tar -tzf "$tgz")"; done
+          for img in *.AppImage; do chmod +x "$img"; ./"$img" --appimage-extract > /dev/null 2>&1; inside "$img" "$(find squashfs-root -type f -o -type l)"; rm -rf squashfs-root; done
+          echo "::notice title=Licence files inside the packages::checked the deb, the app archive and the AppImage (the Windows installer is checked by scripts/packaged_check/install_check.ps1); missing:${missing:- none}"
+          [ -z "$missing" ] || { echo "::error title=Licence files missing::$missing"; exit 1; }
       - name: Write SHA256SUMS.txt
         working-directory: dist
         run: |

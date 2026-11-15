@@ -214,7 +214,7 @@ export class Harness {
       try { const first = fs.readFileSync(portFile, "utf8").split("\n")[0].trim(); if (/^\d+$/.test(first)) port = +first } catch { /* not there yet, or in use */ }
       if (!port) await sleep(50);
     }
-    if (!port) throw Object.assign(new Error(`the browser did not start within ${Math.round(waitMs / 1000)} seconds`), { retry: true });
+    if (!port) { const secs = Math.round(waitMs / 1000); throw Object.assign(new Error(`the browser did not start within ${secs} second${secs === 1 ? "" : "s"}`), { retry: true }) }
     h.browserUrl = `http://127.0.0.1:${port}`;
     return h;
     } catch (e) { await h.stop(); throw e }
@@ -257,7 +257,8 @@ export class Harness {
     if (this.proc && this.proc.exitCode === null) this.proc.kill("SIGKILL"); // (the process that was started: Node holds its handle, so this cannot reach another)
     // If the browser did not go (it still answers), whatever is left is found by the profile folder it was started with, which is unique to
     // this run, and ended (looking for processes is slow on a busy machine, so it is not done when it is not needed, and it has a time limit).
-    if (this.browserUrl && await answers()) killByProfile(this.profile);
+    // (A start that timed out never got a browserUrl, and on Windows its process may be Edge's own hand-over: that browser is found the same way.)
+    if (this.profile && (!this.browserUrl || await answers())) killByProfile(this.profile);
     // The folder is deleted if that works within a few seconds. If a helper process still holds a file it stays on the list, and the process
     // that ends this run deletes it (see above) without anything waiting for it.
     for (let i = 0; i < 15; i++) { try { fs.rmSync(this.profile, { recursive: true, force: true }); live.delete(this.profile); break } catch { await sleep(200) } }

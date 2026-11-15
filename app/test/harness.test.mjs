@@ -20,7 +20,7 @@ if (dir) fs.writeFileSync(path.join(dir, "DevToolsActivePort"), "9\\n/devtools/b
 setTimeout(() => process.exit(0), 200);
 `);
 
-describe("the harness starting a browser", () => {
+describe("the harness starting a browser", { skip: typeof WebSocket === "undefined" ? "needs Node 22 or later (the built-in WebSocket)" : false }, () => {
   it("starts it again when the first start produced nothing", async () => {
     const mark = path.join(os.tmpdir(), `fake-browser-mark-${process.pid}`);
     fs.rmSync(mark, { force: true });
@@ -47,7 +47,7 @@ describe("the harness starting a browser", () => {
     fs.writeFileSync(nothing, "setTimeout(() => process.exit(0), 100);\n");
     const began = Date.now();
     try {
-      await assert.rejects(Harness.start({ exe: process.execPath, lead: [nothing], waitMs: 500, attempts: 2 }), /did not start within 1 seconds/);
+      await assert.rejects(Harness.start({ exe: process.execPath, lead: [nothing], waitMs: 500, attempts: 2 }), /did not start within 1 second$/);
       assert.ok(Date.now() - began >= 1000, "two waits of half a second each, so it was tried twice");
     } finally { fs.rmSync(nothing, { force: true }) }
   });

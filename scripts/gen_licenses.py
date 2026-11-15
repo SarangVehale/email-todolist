@@ -1,7 +1,8 @@
 """Lists the licence of every Rust crate in the app, with the licence texts, in THIRD_PARTY_LICENSES.txt, and refuses a licence nobody has reviewed.
 
     python scripts/gen_licenses.py            # writes THIRD_PARTY_LICENSES.txt
-    python scripts/gen_licenses.py --check    # fails if the file is out of date or a crate has a licence that is not on the reviewed list
+    python scripts/gen_licenses.py --policy   # fails if a crate has a licence that is not on the reviewed list (CI, on every push)
+    python scripts/gen_licenses.py --check    # that, and fails if the file is out of date (the release workflow, and before tagging)
 
 MIT, Apache-2.0 and the like ask that their text and copyright line travel with a program that contains the code, so the installer carries the
 file this writes (`bundle.resources` in app/src-tauri/tauri.conf.json). It reads the packages `cargo metadata` names for the Tauri app (the
@@ -27,16 +28,20 @@ ALLOWED = {
     "MIT", "MIT-0", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Zlib", "0BSD", "Unlicense", "CC0-1.0", "BSL-1.0",
     "Unicode-3.0",        # the Unicode data tables of the icu crates: permissive, attribution
     "CDLA-Permissive-2.0",  # webpki-roots: the list of trusted certificate authorities, as data
-    "MPL-2.0",            # file-level copyleft: cssparser, cssparser-macros, selectors (Servo), dtoa-short and option-ext, used unmodified through Tauri; their source is on crates.io
+    "MPL-2.0",            # file-level copyleft; allowed only for the crates in MPL_REVIEWED
 }
+# MPL-2.0 asks that the source of the MPL files travel with, or be easy to find for, a program that holds them: these are used unmodified
+# through Tauri and their source is on crates.io. A crate that is not here and has no other licence to choose is refused.
+MPL_REVIEWED = {"cssparser", "cssparser-macros", "selectors", "dtoa-short", "option-ext"}
 
 
 def _tokens(expr):
     return re.findall(r"\(|\)|[^\s()]+", expr.replace("/", " OR "))
 
 
-def acceptable(expr):
-    """True when the SPDX expression can be met using only licences in ALLOWED."""
+def acceptable(expr, allowed=None):
+    """True when the SPDX expression can be met using only licences in `allowed` (ALLOWED unless given)."""
+    allowed = ALLOWED if allowed is None else allowed
     toks = _tokens(expr)
     pos = 0
 
@@ -73,7 +78,7 @@ def acceptable(expr):
         ident = t
         if pos < len(toks) and toks[pos].upper() == "WITH":  # `Apache-2.0 WITH LLVM-exception`: the exception only widens the licence
             pos += 2
-        return ident in ALLOWED
+        return ident in allowed
 
     try:
         return bool(toks) and parse_or() and pos == len(toks)
@@ -101,12 +106,25 @@ def texts_of(pkg):
     return out
 
 
+def violations(pkgs):
+    """The crates whose licence is not acceptable: one that needs MPL-2.0 counts only if the crate is in MPL_REVIEWED."""
+    out = []
+    for p in pkgs:
+        lic = p.get("license") or ""
+        needs_mpl = not acceptable(lic, ALLOWED - {"MPL-2.0"})
+        if not acceptable(lic) or (needs_mpl and p["name"] not in MPL_REVIEWED):
+            out.append(f"{p['name']} {p['version']}: {lic or '(no licence field)'}")
+    return out
+
+
+REFUSED = "These crates have a licence that is not on the reviewed list (read it, then add it to ALLOWED, or the crate to MPL_REVIEWED, in this script with the reason):"
+
+
 def build():
     pkgs = packages()
-    bad = [f"{p['name']} {p['version']}: {p.get('license') or '(no licence field)'}" for p in pkgs if not acceptable(p.get("license") or "")]
+    bad = violations(pkgs)
     if bad:
-        raise SystemExit("These crates have a licence that is not on the reviewed list (read it, then add it to ALLOWED in this script with the reason):\n  "
-                         + "\n  ".join(bad))
+        raise SystemExit(REFUSED + "\n  " + "\n  ".join(bad))
     groups, unshipped = {}, []
     for p in pkgs:
         files = texts_of(p)
@@ -139,6 +157,12 @@ def build():
 
 
 def main():
+    if "--policy" in sys.argv:
+        bad = violations(packages())
+        if bad:
+            raise SystemExit(REFUSED + "\n  " + "\n  ".join(bad))
+        print("OK: every licence is on the reviewed list")
+        return
     text = build()
     if "--check" in sys.argv:
         have = open(OUT, encoding="utf-8", newline="").read().replace("\r\n", "\n") if os.path.exists(OUT) else ""

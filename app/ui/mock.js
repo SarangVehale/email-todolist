@@ -45,7 +45,7 @@ for (const x of M.tasks) x.mailbox = x.uid >= 2000000000 ? (x.kind === "followup
 for (const u of [15, 18]) { const x = M.tasks.find(y => y.uid === u); x.uid += 400000000; x.mailbox = 1; if (BODIES[u]) { BODIES[u + 400000000] = BODIES[u]; delete BODIES[u] } }
 // A mail server port that is given must be a whole number from 1 to 65535 (the engine refuses anything else; none means 993).
 const portBad = a => a.port !== undefined && a.port !== null && !(Number.isInteger(a.port) && a.port >= 1 && a.port <= 65535);
-const syncAccounts = () => { M.accounts =[M.settings.account, ...M.settings.more_accounts].filter(m => m.host).map(m => ({ id: m.id, user: m.user, host: m.host, gmail: /(^|\.)gmail\.com$/.test(m.host), status: "idle" })) };
+const syncAccounts = () => { M.accounts = [M.settings.account, ...M.settings.more_accounts].filter(m => m.host).map(m => ({ id: m.id, user: m.user, host: m.host, gmail: /(^|\.)gmail\.com$/.test(m.host), status: "idle" })) };
 syncAccounts();
 M.settings.drafts = { auto: false, tone: "friendly", signature: "Best,\nSam", min_priority: 3, daily_cap: 25 };
 Object.assign(M.settings.alerts, { quiet_start: "", quiet_end: "", digest_time: "", categories: [] });

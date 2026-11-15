@@ -142,6 +142,7 @@ flowchart LR
 | The window's files from `app/ui`, embedded through `frontendDist` | `engine/tests`, `engine/examples/probe.rs` (the read-only mailbox check) |
 | A second copy of the files the hub serves, inside the engine (`hub.rs`, `FILES`) | `docs/`, `scripts/`, `.github/workflows/` |
 | Icons from `app/src-tauri/icons` | Signing secrets, which exist only in CI (see [RELEASING.md](../../RELEASING.md)) |
+| `LICENSE`, `THIRD_PARTY_NOTICES.md` and `THIRD_PARTY_LICENSES.txt` next to the program (`bundle.resources`), because MIT and Apache licences ask that the notices travel with it | |
 
 Targets: NSIS for the current user on Windows (`tauri.conf.json`), deb and AppImage on Linux (`tauri.linux.conf.json`), app and
 dmg on macOS 11 or later (`tauri.macos.conf.json`). Releases are built by `.github/workflows/release.yml` and are unsigned

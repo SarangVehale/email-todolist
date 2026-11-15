@@ -49,7 +49,7 @@ git tag v0.1.0 && git push && git push origin v0.1.0
 ```
 
 The workflow then runs: **verify** (tag = every version field = a dated changelog entry = a row in `docs/RELEASE_HISTORY.md`) → **test** on Linux, Windows and
-macOS (a red test stops the release) → **build** the installers in parallel → **checksums** (`SHA256SUMS.txt` plus a
+macOS (a red test stops the release) → **build** the installers one after the other → **checksums** (`SHA256SUMS.txt` plus a
 build-provenance attestation). Tags containing a dash (`v0.2.0-beta.1`) become pre-releases.
 
 ## What the rehearsals found

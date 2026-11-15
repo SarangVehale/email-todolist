@@ -19,7 +19,7 @@ const rand = n => Array.from(crypto.getRandomValues(new Uint8Array(n)), b => "ab
 const panel = inner => `<div class="panel" role="dialog" aria-modal="true" aria-label="Inbox Agent">${inner}</div>`;
 /** What a passed connection test says. A server with no Sent folder we can find (`sent` is null) is still a mailbox, and the test says what is lost.
  *  The engine's own words are not used here: it answers `sent: null`, not a sentence. */
-const testedOk = t => `<span class="ok">Connected · ${t.sent ? "Sent folder: " + esc(t.sent) : "no Sent folder found, so a task will not close by itself when you reply"}</span>`;
+const testedOk = t => `<span class="ok">Connected · ${t.sent ? "Sent folder: " + esc(t.sent) : "no Sent folder found, so replies you send will not close tasks and there are no follow-up reminders"}</span>`;
 /** Draws a dialog's panel under its name (a redraw, such as the next wizard step, must keep it: a screen reader announces the name). */
 function showPanel(name, inner) { veil.innerHTML = panel(inner); veil.querySelector(".panel").setAttribute("aria-label", name); labelControls(veil) }
 /** A control is read out by its label, not by the text drawn near it: a label with no `for` names the control after it (the next sibling, or the first
@@ -210,7 +210,6 @@ function drawMailbox() {
     <label class="f" for="m-pw">App password</label><input id="m-pw" type="password" data-f="pw" value="${esc(MB.pw)}" autocomplete="off">
     <div class="foot"><button class="btn sm" id="m-test" data-m="test" ${MB.testing ? "disabled" : ""}>${MB.testing ? "Testing…" : "Test connection"}</button><span id="mtestres">${MB.tested ? (MB.tested.ok ? testedOk(MB.tested) : `<span class="bad">${esc(MB.tested.error)}</span>`) : ""}</span></div>
     <div class="foot"><span class="sp"></span><button class="btn" data-m="cancel">Cancel</button><button class="btn pri" id="m-add" data-m="add" ${MB.tested?.ok && !MB.busy ? "" : "disabled"}>Add mailbox</button></div>`);
-  veil.querySelector(".panel")?.setAttribute("aria-label", "Add a mailbox");
   if (focused) veil.querySelector("#" + focused)?.focus(); // a redraw must not drop the keyboard onto the page
 }
 async function mailboxClick(e) {

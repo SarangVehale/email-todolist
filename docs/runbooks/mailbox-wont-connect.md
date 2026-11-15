@@ -32,7 +32,7 @@ flowchart TD
     B -- "secure connection failed" --> D["Step 2: server and port"]
     B -- "a message about looking up the address, or a time-out" --> E["Step 3: network"]
     B -- "your system keychain is not available" --> F["Step 4: unlock the keychain"]
-    B -- "Connected, but no Sent folder found" --> G["Step 5: Sent folder"]
+    B -- "Connected · no Sent folder found" --> G["Step 5: Sent folder"]
     B -- "internal error, see crash.log" --> H["crash-log-and-diagnostics"]
     B -- "Microsoft or Outlook account" --> I["Not supported: use another mailbox"]
 ```

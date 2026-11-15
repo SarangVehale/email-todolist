@@ -126,7 +126,7 @@ input::placeholder{color:var(--dim)}
   #bar{padding:14px 18px 0;gap:14px}#bar .brand .mark{font-size:22px}#bar nav{gap:14px;margin-left:0}main{padding:4px 18px 30px}#foot{padding:8px 18px 12px}#foot .keys{display:none}
   h1{font-size:46px;margin-top:30px}.row{grid-template-columns:34px 1fr auto;padding:14px 0}.pri{grid-column:2/-1;margin-left:-4px}.star{opacity:1}
 }
-@media(pointer:coarse){.pri button{padding:12px 7px}.chk{width:40px;height:40px}.row{grid-template-columns:40px 1fr auto auto}}
+@media(pointer:coarse){.chk{width:40px;height:40px}.row{grid-template-columns:40px 1fr auto auto}}
 
 /* ───── Nothing x Teenage Engineering layer: dot-matrix numerals, dot grid, silkscreen keycaps, mono labels ───── */
 .lede,.sec,.kick,.spec span,.step,.f,.btn,#bar nav button,#bar .gear,#foot,.toast,.undo,.s,.empty small,.sect,.log,.cap,.stat em{font-family:var(--mono)}

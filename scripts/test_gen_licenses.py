@@ -46,5 +46,23 @@ class Acceptable(unittest.TestCase):
             self.assertFalse(gen.acceptable(e), repr(e))
 
 
+class Violations(unittest.TestCase):
+    def pkg(self, name, lic):
+        return {"name": name, "version": "1.0.0", "license": lic}
+
+    def test_mpl_is_for_the_reviewed_crates_only(self):
+        found = gen.violations([self.pkg("cssparser", "MPL-2.0"), self.pkg("some-new-crate", "MPL-2.0")])
+        self.assertEqual(found, ["some-new-crate 1.0.0: MPL-2.0"])
+
+    def test_a_crate_that_can_choose_something_else_is_not_held_to_the_mpl_list(self):
+        self.assertEqual(gen.violations([self.pkg("some-new-crate", "MIT OR MPL-2.0")]), [])
+        self.assertTrue(gen.acceptable("MIT OR MPL-2.0", gen.ALLOWED - {"MPL-2.0"}))
+        self.assertFalse(gen.acceptable("MPL-2.0", gen.ALLOWED - {"MPL-2.0"}))
+
+    def test_copyleft_and_a_missing_licence_are_reported_with_the_crate(self):
+        found = gen.violations([self.pkg("a", "GPL-3.0-only"), self.pkg("b", ""), self.pkg("c", "MIT")])
+        self.assertEqual(found, ["a 1.0.0: GPL-3.0-only", "b 1.0.0: (no licence field)"])
+
+
 if __name__ == "__main__":
     unittest.main()

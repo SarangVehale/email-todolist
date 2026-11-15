@@ -8,12 +8,13 @@ and how long the window takes to draw and to react (it is driven with the browse
 
 It REFUSES TO RUN if the app already has a data folder (%LOCALAPPDATA%\\app.inboxagent.desktop): it would have to delete it afterwards,
 and that may be your real mail. Close the app, move that folder away, run this, and move it back."""
-import json, os, shutil, sqlite3, subprocess, sys, time, urllib.request
+import json, os, secrets, shutil, sqlite3, string, subprocess, sys, time, urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 EXE = os.path.join(ROOT, "app", "src-tauri", "target", "release", "app.exe")
 DATA = os.path.join(os.environ["LOCALAPPDATA"], "app.inboxagent.desktop")
-PORT, TOKEN = 18788, "T3stT0kenT3stT0kenT3stT0kenAB12"
+# the hub listens on the network while this runs: a code made for this run, not one that is public in the repository
+PORT, TOKEN = 18788, "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(32))
 OPEN, DONE = int(sys.argv[1]), int(sys.argv[2])
 HERE = os.path.dirname(os.path.abspath(__file__))
 

@@ -27,7 +27,7 @@ This is what happens after you push the tag. Your part is the first and the last
 flowchart LR
     A["You: bump, changelog, checks, commit, tag"] --> B["verify: tag, versions, dated changelog, release-history row"]
     B --> C["test: clippy, tests and documentation checks on Linux, Windows, macOS; window tests on Linux"]
-    C --> D["build: Windows, macOS universal, Linux in parallel"]
+    C --> D["build: Windows, macOS universal, Linux, one after the other"]
     D --> E["checksums: SHA256SUMS.txt and provenance attestation"]
     E --> F["Draft release with installers"]
     F --> G["You: clean-machine checks"]
@@ -53,9 +53,10 @@ Run the checks in this order. Stop at the first one that fails.
    to `docs/VERSION_HISTORY.md`.
 3. **Everything green locally.** Run every command in step 3 of [RELEASING.md](../../RELEASING.md#cutting-a-release): the format check,
    clippy, the engine tests, `cargo doc`, the window's own tests (`npm test`; Node 22 or later and a Chromium-based browser on the
-   machine), `test_check_docs.py`, `check_docs.py`, `gen_testcases.py`, and the two version scripts. The release workflow repeats only
-   part of that list: on all three systems it runs `cargo clippy --locked --all-targets -- -D warnings`, `cargo test --locked` and the
-   documentation checks (`test_check_docs.py` and `check_docs.py`), and on Linux it runs the window's tests with
+   machine), `test_check_docs.py`, `check_docs.py`, `gen_testcases.py`, the two version scripts, and the licence list (`test_gen_licenses.py` and
+   `gen_licenses.py --check`). The release workflow repeats only part of that list: on all three systems it runs
+   `cargo clippy --locked --all-targets -- -D warnings`, `cargo test --locked` and the documentation checks (`test_check_docs.py`,
+   `check_docs.py` and `test_gen_licenses.py`), and on Linux it runs the licence check (`gen_licenses.py --check`) and the window's tests with
    `INBOX_AGENT_UI_TESTS=require`. It does not run `cargo fmt`, `cargo doc`, `gen_testcases.py` or `test_bump_version.py`, so a green
    run of the workflow does not replace them. If `gen_testcases.py` changes `docs/TESTCASES.md`, the commit must include that change.
 4. **Commit, tag, push.**
