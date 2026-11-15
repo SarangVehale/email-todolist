@@ -1,6 +1,6 @@
 # Phase 12: simple enough for a grandmother
 
-> **Status:** accepted (Run 10, 2026-11-15): steps 1 to 3 are built, step 4 (the gates and the release rehearsal) is next · **Audience:** maintainers · **Last reviewed:** 2026-11-15
+> **Status:** accepted (Run 10, 2026-11-15): all four steps are built and the gates and the release rehearsal are done ([the review record](../2026-11-15_PHASE12_REVIEW.md)); the test with a real grandmother is the owner's · **Audience:** maintainers · **Last reviewed:** 2026-11-15
 
 The owner's goal: "The entire app should be stupidly simple to use. My grandma should get it up and running." Three council seats
 (Opus, Sonnet, Fable) read the app as an 80-year-old on a Windows laptop with a Gmail, Outlook, Yahoo or iCloud address would meet it, blind to
@@ -59,7 +59,7 @@ each other. They agreed on almost everything; this is what they said and what is
    device-code (Microsoft) flows, a mailbox that says how it signs in, sign-out that removes the right keychain entries. *Tests:* a scripted
    token server and a scripted IMAP server that accepts XOAUTH2 (success, a rejected token that is refreshed once, a revoked grant, a flow
    with the wrong state, a stalled or oversized callback), and the Phase 3 checklist (one item, keeping the server's error challenge, is not done: the server's refusal text comes back as the error, which is what the challenge says).
-4. **Gates and a rehearsal of the release workflow** (the `open` crate is a new dependency of the engine; the shell's permissions are unchanged).
+4. **Gates and a rehearsal of the release workflow (done).** A three-seat council, two drift passes and three rounds of the Opus loop; the workflow rehearsed on `v0.1.0-rc.6`, which passed. (The `open` crate is a new dependency of the engine; the shell's permissions are unchanged.)
 
 ## Out of scope
 

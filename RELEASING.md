@@ -54,8 +54,8 @@ build-provenance attestation). Tags containing a dash (`v0.2.0-beta.1`) become p
 
 ## What the rehearsals found
 
-`release.yml` was rehearsed five times on 2026-11-14 and 2026-11-15, each with a throwaway tag (`v0.1.0-rc.1` to `-rc.5`, on branches
-that were never merged). **The last three ran to the end** (22 to 30 minutes): `verify`, the three `test` jobs, the builds and `checksums`. The
+`release.yml` was rehearsed six times on 2026-11-14 and 2026-11-15, each with a throwaway tag (`v0.1.0-rc.1` to `-rc.6`, on branches
+that were never merged). **The last four ran to the end** (22 to 32 minutes): `verify`, the three `test` jobs, the builds and `checksums`. The
 first two failed, and each showed something real.
 
 *Rehearsal 1:* `verify`, the three `test` jobs and the Windows and Linux builds passed. **The macOS build failed**, and the cause was found
@@ -80,12 +80,16 @@ is gone. Both are taken.
 *Rehearsal 5* ran on the tree of commit `41595fd` (after the first review of this work, with the licence files in the installers): it passed in 27
 minutes, and the `checksums` job's new step, which looks inside the `.deb`, the `.app.tar.gz` and the AppImage for `LICENSE`,
 `THIRD_PARTY_NOTICES.md` and `THIRD_PARTY_LICENSES.txt`, reported "missing: none" (an annotation, "Licence files inside the packages").
+*Rehearsal 6* ran on the tree of commit `667c28e` (the end of Phase 12: the engine's new `open` crate, the second licence check on a regenerated `THIRD_PARTY_LICENSES.txt`, the
+workflow's environment-variable change and the AppImage message, none of which had been through a rehearsal): it passed in 31 minutes. `verify`, the three `test` jobs, the three builds and `checksums` all
+succeeded; the draft held the `.exe`, the universal `.dmg` and `.app.tar.gz`, the `.AppImage` and the `.deb`, and the package check reported "missing: none". The tag and the branch were deleted
+afterwards; the draft release is the owner's to delete (it needs a sign-in).
 What no rehearsal can show: the signed paths (Apple notarization, the Windows certificate), a real tag, a published release, and anything
 about installing or running the macOS and Linux packages. Two small changes came after it (the AppImage step now says when extraction fails, and the scale check runs the app with its keychain in
-memory); the first touches `release.yml` and has not been through a rehearsal. Rehearse again after any later change to the workflow.
+memory); rehearsal 6 covered both. Rehearse again after any later change to the workflow.
 
-To rehearse again: `python scripts/bump_version.py 0.1.0-rc.6` on a branch, a dated `## [0.1.0-rc.6]` changelog heading and a row in
-`docs/RELEASE_HISTORY.md`, then tag `v0.1.0-rc.6`. It becomes a pre-release draft. Afterwards delete the draft (on the Releases page: it
+To rehearse again: `python scripts/bump_version.py 0.1.0-rc.7` on a branch, a dated `## [0.1.0-rc.7]` changelog heading and a row in
+`docs/RELEASE_HISTORY.md`, then tag `v0.1.0-rc.7`. It becomes a pre-release draft. Afterwards delete the draft (on the Releases page: it
 needs a sign-in), the tag and the branch. A rehearsal builds three installers one after the other, so it takes about half an hour.
 
 ## Before you publish the draft
