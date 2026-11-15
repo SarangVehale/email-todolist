@@ -45,8 +45,11 @@ flowchart TD
 | `account.id` | integer | `0` | always 0 for the first mailbox | none |
 | `more_accounts` | array of `{id, host, port, user}` | `[]` | at most 4; ids 1 to 4, each once; each needs a valid server and a non-empty login; no mailbox (server and login, ignoring case, `googlemail.com` read as `gmail.com`) twice | "Add another mailbox", "Remove" |
 
+| `oauth` | object, mailbox number to `google` or `microsoft` | `{}` | a number of a mailbox that is set up; the kind has to be known; `google` only with `imap.gmail.com` and `microsoft` only with `outlook.office365.com`, port 993 | "Sign in again" (Settings); never edited by a settings change |
+
 The app password of each mailbox is in the keychain (`imap-password`, `imap-password-1` … `-4`), changed with "Save
-password". "Sign out and reset" clears the mailboxes.
+password". A mailbox listed in `oauth` has no password: its refresh token is the keychain entry `oauth-refresh-<n>`, made by
+`oauth_finish` and removed with the mailbox. "Sign out and reset" clears the mailboxes.
 
 ### Ranking
 
@@ -137,6 +140,7 @@ Urgent mail alerts whatever the quiet hours and categories; your reminders are a
 | `Model name isn't valid` | `ai.ollama_model` or `ai.anthropic_model` |
 | `At most five mailboxes can be read at once` | more than 4 in `more_accounts` |
 | `Every extra mailbox needs its own number from 1 to 4` | an id outside 1 to 4, or used twice |
+| `A sign-in belongs to a mailbox that is not set up`, `That kind of sign-in isn't known`, `A sign-in with Google is only for imap.gmail.com` | an `oauth` entry for no mailbox, for a kind that is not `google` or `microsoft`, or for another server or port |
 | `That mailbox is already in the app` | the same server and login twice |
 | `Times must look like 22:30, and quiet hours need both a start and an end` | `quiet_start`, `quiet_end`, `digest_time` |
 | `Unknown alert category` | `alerts.categories` |
@@ -150,7 +154,7 @@ Urgent mail alerts whatever the quiet hours and categories; your reminders are a
 A value of the wrong JSON type (for example a string for `drafts.daily_cap`) fails before validation with the reader's own
 message. Three refusals come from `save_settings` itself, before validation: `A settings change must be an object` (the patch is not an
 object), `The account is changed with save_account, not
-with settings` (a patch that changes `account`, `more_accounts` or `onboarded`) and `The access code is made by the app: use
+with settings` (a patch that changes `account`, `more_accounts`, `oauth` or `onboarded`) and `The access code is made by the app: use
 Rotate access code` (a patch that changes `hub.token`; a patch that leaves it as saved is accepted).
 
 ## What a backup restores

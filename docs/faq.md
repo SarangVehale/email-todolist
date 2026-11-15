@@ -86,8 +86,10 @@ crash log. Your ntfy topic and ranking choice stay, and backup and `.ics` files 
 
 ### Why does it ask for an app password?
 
-The app signs in over IMAP with an address and a password, and has no web sign-in. An app password is made by your provider for one
-program, works for IMAP, and can be cancelled without changing your main password. See [connect a mailbox](guides/connect-a-mailbox.md).
+The app signs in over IMAP with an address and a password, and has no web sign-in yet. An app password (the 16-letter code the first-run screens
+call "the code") is made by your provider for one program, works for IMAP, and can be cancelled without changing your main password. The app
+opens the right page for you. See [connect a mailbox](guides/connect-a-mailbox.md). A "Sign in with Google" and a "Sign in with Microsoft" button
+are built ([ADR-0015](adr/0015-sign-in-with-google-and-microsoft-needs-the-owners-client-id.md)); they appear only once the person who builds the app has registered it with Google or Microsoft, and Google limits an unverified app to 100 people, so a code is the way for most. See [connect a mailbox](guides/connect-a-mailbox.md#sign-in-with-google-or-microsoft-instead-of-a-code).
 
 ### Why is Outlook / Microsoft 365 not supported?
 
@@ -188,8 +190,8 @@ Yes. Closing the window hides it to the tray and the engine keeps reading mail; 
 
 ### How do I stop it starting with my computer?
 
-The only switch is "Start with this computer" in the setup wizard. The window has no setting for it afterwards: use your operating
-system's list of startup apps (not checked here).
+The only switch is "Open Inbox Agent when I turn on this computer" on the last first-run screen (on unless you untick it). The window has no setting for it
+afterwards: use your operating system's list of startup apps (not checked here).
 
 ### Does it work offline?
 

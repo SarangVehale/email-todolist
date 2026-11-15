@@ -15,6 +15,7 @@ fn main() -> anyhow::Result<()> {
             .unwrap_or(993),
         user: var("IMAP_USER")?,
         password: var("IMAP_PASS")?,
+        oauth: None,
     };
     let limit = std::env::var("PROBE_LIMIT")
         .ok()

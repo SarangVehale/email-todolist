@@ -13,6 +13,40 @@ work goes under `[0.1.0] - Unreleased`; after it, new work goes under `## [Unrel
 First public build.
 
 ### Added
+- Sign in with Google and with Microsoft (Phase 12, third part), built and off until the person who builds the app registers it (the buttons show only
+  when `engine/src/oauth.rs` names a client ID: [the runbook](docs/runbooks/register-sign-in.md), [ADR-0015](docs/adr/0015-sign-in-with-google-and-microsoft-needs-the-owners-client-id.md)).
+  Google uses the loopback flow with PKCE (a one-shot listener on `127.0.0.1` that keeps accepting until a request carries the right `state`, 5 seconds and 8 KB for
+  each connection, a fixed page); Microsoft uses the device-code flow (the window shows the code). The mailbox signs in with XOAUTH2; a refused token is dropped and a
+  new one tried once, a withdrawn sign-in is not asked about again for five minutes, and one refresh happens at a time. The lasting token is in the system keychain
+  (`oauth-refresh-<n>`), the short one only in memory; tokens travel in a POST body or an IMAP command, never in an address, and no text from a provider is kept.
+  A Google sign-in is only ever for `imap.gmail.com` and a Microsoft one for `outlook.office365.com`, and only the sign-in commands can change it. Nothing is saved for a token
+  the mail server refuses; removing a mailbox or signing out deletes the token (and Google is told with the token in the body). New commands `oauth_start`, `oauth_poll`,
+  `oauth_cancel` and `oauth_finish`, the setting `oauth`, the state fields `sign_in` and `accounts[].auth`, and `www.microsoft.com` on the pages the app may open. The
+  first-run screens, the Add a mailbox dialog and Settings ("Sign in again") have the buttons. Eighteen engine tests against scripted token and mail servers, and
+  ten window tests; a finished sign-in that is not saved within ten minutes is forgotten. It has not been run against Google or Microsoft: that needs a registered client ID (manual cases MT-150 to MT-156).
+- The simple view (Phase 12, second part): the list for someone who does not want to learn it. Every message is a card with what it is, who it
+  is from and how long ago in words, and two big buttons: **Done** (hides it) and **Later** (puts it away until nine the next morning). The
+  headings are plain ("Your list", "Needs you now", "Needs you today", "Can wait", "Not important"); the tabs are Your list, Later and Done; the dot
+  counters, the rail, the filter bar, the circles, stars and priority dots are hidden (the keys still work). **Undo** stays until the next thing is
+  done, a card at the top says in four sentences how it works, an opened card shows who, why and the start of the message with **Read message**
+  and, for Gmail, **Open in Gmail** (also in the dense view), and the status line says when the mailbox was last read ("Watching your mailbox.
+  Last read at 2:32 PM."; the engine's `state` has a new `checked_at`, for the window only). Text size (Normal, Large, Huge) and light colours are
+  choices of their own in Settings, in either view, and belong to the device. Settings in the simple view has the look, the mailboxes, alerts and
+  starting with the computer, with **More options** for the rest. A new install gets the simple view when setup finishes; an install already in
+  use keeps the dense one. The accessibility checks run in both views, both colour schemes and every text size, the hostile-text test runs on
+  the cards, and the dense view's own tests are unchanged. Guide: `docs/guides/the-simple-view.md`.
+- Simple setup (Phase 12, first part). The first-run wizard is three screens and a last one, written for someone who has never heard of IMAP.
+  It asks for the email address and reads the provider from it. A button opens the page where the provider makes the 16-letter code (Google,
+  Apple, Yahoo, Fastmail), with three plain steps beside it. **Paste**, or one **Connect** button, tests the details, saves the mailbox and
+  finishes setup with safe settings: ranked by rules, desktop alerts on, the mailbox left untouched, the phone hub off. What the server says
+  becomes a sentence ("That code didn't work. Make a new one with the button above and paste it here."), with the server's own words behind
+  "Details for a helper". Outlook, Hotmail and Live addresses get an honest screen instead of a form that cannot work, and an address the app
+  does not know gets the plain server form with the server guessed. The questions about ranking models, phone alerts, filing mail and the
+  phone hub left the first run; they are in Settings, as they were, and off. The last screen says that closing the window leaves the app
+  running. The new engine command `open_page` opens only an `https` page on a short list of provider hosts (no user name, no port, nothing
+  encoded) and the phone hub cannot call it; a test reads every page named in the window and checks the engine allows it. The Add a mailbox
+  dialog got the same button and sentences. Four engine tests and 19 window tests; the accessibility checks (names, targets, contrast) run on every
+  first-run screen. Design: `docs/designs/phase12.md`; next are the easy look of the list and Sign in with Google and with Microsoft.
 - Gaps closed (Phase 11), found by writing the documentation and by the first CI run. A task number, a priority and a mail server port
   were cut to 32, 8 and 16 bits: task 2^32 + n acted on task n, priority 261 was read as 5, port 66529 as 993; they are now
   refused. A request can no longer set the phone hub's access code to a string of its choosing or the ranking mode to a word that is

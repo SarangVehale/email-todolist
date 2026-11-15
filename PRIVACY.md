@@ -25,6 +25,7 @@ follow-up reminders, which conversations you started.
   message go to Anthropic to be ranked, and up to 3,000 characters of a message go when a reply draft is written for it.
   Each ranking request also carries your ten most recent corrections, which include the sender name and subject of those
   other messages. Rules-only sends nothing out, and neither does a local Ollama while its address is this computer's (the default).
+- If you use **Sign in with Google** or **Sign in with Microsoft** (offered only when the person who built the app registered it): your browser goes to Google's or Microsoft's own page to sign in, and the app then asks that provider's token address for tokens (the address you typed goes to Google as a hint). The tokens stay on this computer (the lasting one in the system keychain), and the app uses them only to read your mail from that provider's own mail server. Removing the mailbox in the app asks Google to cancel the sign-in; you can also cancel it yourself at myaccount.google.com/permissions or account.microsoft.com.
 - If you set an **ntfy topic**: the sender name and a short action text of high-priority mail go to
   the ntfy server you configured (ntfy.sh by default). The daily digest (counts only) and "back from snooze" notices
   (which carry a task's title) go there too, whatever their priority. Treat the topic like a password.

@@ -21,9 +21,15 @@ pub fn imap_key(id: u32) -> String {
     }
 }
 
+/// The keychain entry holding the refresh token of a mailbox that signs in with a Google or Microsoft account (see `oauth`).
+pub fn oauth_key(id: u32) -> String {
+    format!("oauth-refresh-{id}")
+}
+
 /// Every entry this app ever writes, so "sign out" can remove all of them.
 fn all_names() -> Vec<String> {
     let mut v: Vec<String> = (0..MAX_MAILBOXES).map(imap_key).collect();
+    v.extend((0..MAX_MAILBOXES).map(oauth_key));
     v.push("anthropic-key".to_string());
     v
 }
@@ -33,9 +39,15 @@ fn all_names() -> Vec<String> {
 /// touch the passwords of the person running it. (A cargo test binary is recognised by the variables cargo gives it, or by
 /// living in a `deps` folder; the installed app and `tauri dev` are neither.)
 pub fn in_memory() -> bool {
-    std::env::var_os("INBOX_AGENT_KEYCHAIN").is_some_and(|v| v == "memory")
-        || (std::env::var_os("CARGO_PKG_NAME").is_some_and(|v| v == "engine")
-            && std::env::var_os("CARGO_MANIFEST_DIR").is_some())
+    std::env::var_os("INBOX_AGENT_KEYCHAIN").is_some_and(|v| v == "memory") || under_cargo_test()
+}
+
+/// Is this process one of this crate's own tests (a cargo test binary)? Recognised by the variables cargo gives it, or by living in a `deps`
+/// folder; the installed app and `tauri dev` are neither. Anything that touches the person's own computer (the keychain, their browser)
+/// is held back when this is true.
+pub fn under_cargo_test() -> bool {
+    (std::env::var_os("CARGO_PKG_NAME").is_some_and(|v| v == "engine")
+        && std::env::var_os("CARGO_MANIFEST_DIR").is_some())
         || std::env::current_exe()
             .ok()
             .and_then(|p| p.parent().map(|d| d.ends_with("deps")))

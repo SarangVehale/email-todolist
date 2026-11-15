@@ -1,14 +1,67 @@
 "use strict";
 /* ───────── dialogs: first-run wizard & settings ───────── */
+/** The mail providers the app can guide a person through. `match` says which email domains are theirs. `page` is where their mail code is made: the address
+ *  must be on the engine's list of pages it opens (an engine test reads every `page:` written in this file). `steps` are what to do there, in plain words. */
 const PROVIDERS = {
-  gmail: { name: "Gmail", host: "imap.gmail.com", help: ["Turn on 2-Step Verification in your Google account.", "In Security, open App passwords and create one called Inbox Agent.", "Paste the 16 characters below. IMAP must be on in Gmail settings."] },
-  icloud: { name: "iCloud Mail", host: "imap.mail.me.com", help: ["Sign in at account.apple.com.", "Create an app-specific password for Inbox Agent and paste it below."] },
-  yahoo: { name: "Yahoo", host: "imap.mail.yahoo.com", help: ["In Account security, generate an app password and paste it below."] },
-  fastmail: { name: "Fastmail", host: "imap.fastmail.com", help: ["Settings, Privacy & Security, App passwords. Choose IMAP access."] },
-  outlook: { name: "Outlook / Microsoft 365 (not supported yet)", host: "outlook.office365.com", help: ["Microsoft has turned off password sign-in for IMAP, so a password or app password will be refused. Sign-in with Microsoft is not supported in this version.", "Gmail, iCloud, Yahoo, Fastmail and most other IMAP providers work with an app password."] },
-  other: { name: "Other IMAP server", host: "", help: ["Enter your server and an app password if your provider offers one."] },
+  gmail: { name: "Gmail", maker: "Google", host: "imap.gmail.com", match: d => d === "gmail.com" || d === "googlemail.com", page: "https://myaccount.google.com/apppasswords",
+    steps: ["Press the button above. Google's page opens in your web browser. Sign in if it asks you to.", "Type Inbox Agent as the name and press Create.", "Google shows a code of 16 letters. Copy it, then come back to this window."],
+    tip: "If Google says it can't make a code, “2-Step Verification” has to be turned on first. Search for it on that page, turn it on, then press the button again." },
+  icloud: { name: "iCloud Mail", maker: "Apple", host: "imap.mail.me.com", match: d => ["icloud.com", "me.com", "mac.com"].includes(d), page: "https://account.apple.com/account/manage",
+    steps: ["Press the button above and sign in with your Apple ID.", "Open “Sign-In and Security”, then “App-Specific Passwords”, and press the + button.", "Type Inbox Agent as the name. Copy the code Apple shows, then come back to this window."] },
+  yahoo: { name: "Yahoo Mail", maker: "Yahoo", host: "imap.mail.yahoo.com", match: d => ["ymail.com", "rocketmail.com"].includes(d) || (/^yahoo\.[a-z]{2,3}(\.[a-z]{2})?$/.test(d) && d !== "yahoo.co.jp"), page: "https://login.yahoo.com/account/security",
+    steps: ["Press the button above and sign in to Yahoo.", "Look for “Generate app password” (or “App passwords”) on that page. Type Inbox Agent as the name and press Generate.", "Copy the code Yahoo shows, then come back to this window."] },
+  fastmail: { name: "Fastmail", maker: "Fastmail", host: "imap.fastmail.com", match: d => ["fastmail.com", "fastmail.fm", "messagingengine.com"].includes(d), page: "https://app.fastmail.com/settings/security/integrations",
+    steps: ["Press the button above and sign in to Fastmail.", "Press “New app password”, type Inbox Agent as the name, and choose “Mail (IMAP/SMTP)”.", "Copy the code Fastmail shows, then come back to this window."] },
+  outlook: { name: "Outlook, Hotmail or Live (not supported yet)", maker: "Microsoft", host: "outlook.office365.com", match: d => /^(outlook|hotmail|live)\.[a-z]{2,3}(\.[a-z]{2})?$/.test(d) || d === "msn.com", page: null,
+    steps: ["Microsoft has turned off password sign-in for IMAP, so a password or app password will be refused. Sign-in with Microsoft is not supported in this version.", "Gmail, iCloud, Yahoo, Fastmail and most other IMAP providers work with an app password."] },
+  other: { name: "Other IMAP server", maker: "", host: "", match: null, page: null, steps: ["Enter your server and an app password if your provider offers one."] },
 };
-let W = { step: 0, provider: "gmail", host: "imap.gmail.com", port: 993, user: "", pw: "", tested: null, testing: false, ai: "rules", ollamaModels: [], model: "", key: "", aiTest: null, desktop: true, topic: "", autostart: true, writeback: false, hub: false };
+/** Which provider an email address belongs to: a key of PROVIDERS, or "other" when it is not one the app knows. */
+function providerFor(address) {
+  const d = domainOf(address);
+  for (const [k, p] of Object.entries(PROVIDERS)) if (p.match && p.match(d)) return k;
+  return "other";
+}
+/** The part of an address after its last @, in lower case. */
+const domainOf = a => String(a).slice(String(a).lastIndexOf("@") + 1).trim().toLowerCase();
+/** Does this look like name@example.com? Only a check on typing: the mail server is the judge of whether the mailbox exists. */
+function validAddress(a) {
+  a = String(a).trim();
+  if (a.length > 320 || /[\s<>(),;:"\\]/.test(a)) return false;
+  const i = a.indexOf("@");
+  return i > 0 && /^[^@.][^@]*\.[^@.]{2,}$/.test(a.slice(i + 1)); // the part after the first @ may hold no @ at all
+}
+/** What went wrong, as a sentence a person can act on. `raw` is the engine's own text: precise, and what the log and a helper need, so it stays behind
+ *  "Details". An engine message that is already a plain sentence (it starts with a capital and has no colon, bracket or system error number) is shown as it is. */
+function friendly(raw, providerKey, host, how) {
+  raw = String(raw).replace(/^Error: /, "");
+  const l = raw.toLowerCase(), known = providerKey && providerKey !== "other" && PROVIDERS[providerKey], name = known ? known.name : "your mail server", maker = known ? known.maker : "your provider";
+  const say = s => ({ say: s, detail: raw });
+  if (/^[A-Z][^:[\]]*$/.test(raw) && !/os error/i.test(raw)) return { say: raw, detail: "" };
+  if (/web login required|log in via your web browser/.test(l)) return say(`${name} wants you to sign in on its website first. Open ${name} in your web browser, sign in there, then try again here.`);
+  if (/imap access is disabled|imap is disabled|imap.*not enabled|imap.*turned off/.test(l)) return say(`${name} says other mail programs are switched off for this account. Look for "IMAP" in ${name}'s mail settings, turn it on, then try again.`);
+  if (/too many|rate limit|try again later|temporarily|throttl/.test(l)) return say(`${name} asks you to wait a little. Try again in a few minutes.`);
+  if (how === "account" && /sign-in refused|authenticationfailed|invalid credentials|login failed|authenticate failed/.test(l)) return say(`${maker} did not let Inbox Agent in with that account. Make sure you signed in with the address you typed, then try again.`);
+  if (/sign-in refused|authenticationfailed|invalid credentials|login failed|authenticate failed|application-specific password|app password/.test(l))
+    return say(known ? `That code didn't work. Make a new one with the button above and paste it here. Your usual ${maker} password won't work.` : "The server didn't accept that sign-in. Check the email address and the password. Many providers need an app password instead of your usual one.");
+  if (/could not find the server|no such host|failed to lookup|name or service not known|nodename nor servname|os error 11001|os error 11004/.test(l))
+    return say(known ? `Couldn't reach ${name}. Check that this computer is online, then try again.` : `Couldn't find a mail server called "${host || "that"}". Check how it is spelled.`);
+  if (/timed out|timeout|did not properly respond|os error 10060|os error 110\b/.test(l)) return say(`${name} took too long to answer. Check that this computer is online, then try again.`);
+  if (/actively refused|connection refused|os error 10061|os error 111\b/.test(l)) return say(known ? `Couldn't connect to ${name}. Check that this computer is online, then try again.` : `Couldn't connect to "${host || "that server"}". Check the server name and the port.`);
+  if (/secure connection failed|certificate|tls|ssl|handshake/.test(l)) return say(`A safe connection to ${name} couldn't be made. This can happen on a work or school network, or when the date or time on this computer is wrong. Check the clock, or try another network.`);
+  if (/network is unreachable|no route|os error 10051|os error 10065|os error 101\b|os error 113\b/.test(l)) return say("This computer doesn't seem to be online. Check your internet, then try again.");
+  return say("Something went wrong while connecting. Wait a minute and try again.");
+}
+/** A person's answer as markup: a sentence, and the engine's own words behind "Details for a helper". */
+const sayHTML = r => !r ? "" : r.ok ? `<p class="ok">${esc(r.ok)}</p>${r.device ? `<p class="devcode">Your code: <b>${esc(r.device.code)}</b></p><p>Type it on Microsoft's page: <b>${esc(String(r.device.url).replace(/^https:\/\//, ""))}</b> <button class="btn sm" data-w="opendevice" data-url="${esc(r.device.url)}">Open that page</button></p>` : ""}${r.cancel ? '<button class="btn sm" data-w="cancelsignin" data-m="cancelsignin" data-s="cancelsignin">Cancel</button>' : ""}` : `<p class="bad">${esc(r.say)}</p>${r.detail ? `<details class="why"><summary>Details for a helper</summary><code>${esc(r.detail)}</code></details>` : ""}`;
+/** What a first run starts with: ranked by rules, desktop alerts on, the mailbox left untouched, no phone hub. */
+const SAFE_START = { ai: { mode: "rules" }, alerts: { desktop: true }, writeback: false, hub: { enabled: false } };
+/** Which account sign-in this provider of the first-run screens has and this build offers: "google", "microsoft" or "". */
+const signInOffer = k => { const p = k === "gmail" ? "google" : k === "outlook" ? "microsoft" : ""; return p && S.sign_in && S.sign_in[p] ? p : "" };
+const PROVIDER_NAME = { google: "Google", microsoft: "Microsoft" };
+/** The state of the first-run screens. The default is the screen a new install starts on. */
+const freshWizard = () => ({ flow: 0, step: "welcome", provider: "other", host: "", hostFor: "", port: 993, user: "", pw: "", show: false, busy: false, result: null, autostart: true });
+let W = freshWizard();
 const veil = $("#veil");
 function closeVeil() {
   const back = typeof veilFrom !== "undefined" ? veilFrom : null;
@@ -21,7 +74,7 @@ const panel = inner => `<div class="panel" role="dialog" aria-modal="true" aria-
  *  The engine's own words are not used here: it answers `sent: null`, not a sentence. */
 const testedOk = t => `<span class="ok">Connected · ${t.sent ? "Sent folder: " + esc(t.sent) : "no Sent folder found, so replies you send will not close tasks and there are no follow-up reminders"}</span>`;
 /** Draws a dialog's panel under its name (a redraw, such as the next wizard step, must keep it: a screen reader announces the name). */
-function showPanel(name, inner) { veil.innerHTML = panel(inner); veil.querySelector(".panel").setAttribute("aria-label", name); labelControls(veil) }
+function showPanel(name, inner, cls = "") { veil.innerHTML = panel(inner); const p = veil.querySelector(".panel"); p.setAttribute("aria-label", name); if (cls) p.classList.add(cls); labelControls(veil) }
 /** A control is read out by its label, not by the text drawn near it: a label with no `for` names the control after it (the next sibling, or the first
  *  control inside it). Without this the fields and menus of Settings that are drawn as label-then-control are just "edit" and "combo box" to a screen reader. */
 function labelControls(root) {
@@ -36,54 +89,138 @@ function labelControls(root) {
 }
 
 function openWizard() { veil.dataset.kind = "wizard"; veil.classList.add("show"); drawWizard(); dialogOpened("Set up Inbox Agent") }
+/** The first-run screens: welcome, the email address, the provider's page and a place to paste its code, and a last screen. Each is one thing to do.
+ *  A provider the app does not know gets the plain server form instead; Outlook, Hotmail and Live get an honest sentence. */
+const WIZARD_STEP = { welcome: 1, address: 2, guide: 3, other: 3, outlook: 3 }, WIZARD_BACK = { address: "welcome", guide: "address", other: "address", outlook: "address" };
+const pasteKeys = () => /Mac|iPhone|iPad/.test(navigator.platform || "") ? "Command and V" : "Ctrl and V";
 function drawWizard() {
-  const n = W.step; let h = `<div class="step">Step ${n + 1} of 5</div>`, back = n > 0 ? `<button class="btn" data-w="back">Back</button>` : "", next = `<button class="btn pri" data-w="next">Continue</button>`;
-  if (n === 0) h += `<h2>Welcome.</h2><p>Inbox Agent reads your mail and turns it into one list, ranked by how much each message needs you. You get alerted only when something is important.</p>
-      <div class="help"><b>Private by design.</b> Your mail is read on this computer. Your password is kept in your system keychain, never in a file. Nothing in your mailbox is changed unless you switch that on.</div>`;
-  if (n === 1) {
-    const p = PROVIDERS[W.provider];
-    h += `<h2>Connect your mail</h2><label class="f" for="w-provider">Provider</label><select id="w-provider" data-f="provider">${Object.entries(PROVIDERS).map(([k, v]) => `<option value="${k}" ${W.provider === k ? "selected" : ""}>${v.name}</option>`).join("")}</select>
-      <div class="help"><b>Getting an app password</b><ol>${p.help.map(x => `<li>${esc(x)}</li>`).join("")}</ol></div>
-      ${W.provider === "other" ? `<div class="row2"><div><label class="f" for="w-host">IMAP server</label><input id="w-host" type="text" data-f="host" value="${esc(W.host)}" placeholder="imap.example.com"></div><div><label class="f" for="w-port">Port</label><input id="w-port" type="number" data-f="port" value="${W.port}"></div></div>` : ""}
-      <label class="f" for="w-user">Email address</label><input id="w-user" type="text" data-f="user" value="${esc(W.user)}" autocomplete="off" placeholder="you@example.com">
-      <label class="f" for="w-pw">App password</label><input id="w-pw" type="password" data-f="pw" value="${esc(W.pw)}" autocomplete="off">
-      <div class="foot"><button class="btn sm" data-w="test" ${W.testing ? "disabled" : ""}>${W.testing ? "Testing…" : "Test connection"}</button><span id="testres">${W.tested ? (W.tested.ok ? testedOk(W.tested) : `<span class="bad">${esc(W.tested.error)}</span>`) : ""}</span></div>`;
-    next = `<button class="btn pri" data-w="next" ${W.tested?.ok ? "" : "disabled"}>Continue</button>`;
+  const n = W.step, p = PROVIDERS[W.provider] || PROVIDERS.other, no = WIZARD_STEP[n], b = W.busy ? "disabled" : "";
+  const back = `<button class="btn" data-w="back" ${b}>Back</button>`, connect = `<button class="btn pri big" data-w="connect" ${b}>Connect</button>`;
+  let h = no ? `<div class="step">Step ${no} of 3</div>` : "", foot = "";
+  if (n === "welcome") {
+    h += `<h2>Welcome.</h2><p>Inbox Agent reads your email and makes one short list of what needs you.</p><p>It never sends email, and it never changes your mailbox unless you ask it to.</p>
+      <div class="help"><b>Private.</b> Your email is read on this computer only. Your password is kept in your computer's password safe, never in a file.</div>`;
+    foot = `<span class="sp"></span><button class="btn pri big" data-w="next" data-focus>Get started</button>`;
+  } else if (n === "address") {
+    h += `<h2>What is your email address?</h2><p>Type the address of the mailbox you want Inbox Agent to read.</p>
+      <label class="f" for="w-user">Email address</label><input id="w-user" type="text" data-f="user" data-focus value="${esc(W.user)}" inputmode="email" autocapitalize="off" spellcheck="false" autocomplete="off" placeholder="name@example.com">
+      <p id="w-hint" role="status">${esc(addressHint(W.user))}</p>`;
+    foot = `${back}<span class="sp"></span><button class="btn pri big" data-w="next" ${validAddress(W.user) ? "" : "disabled"}>Continue</button>`;
+  } else if (n === "guide") {
+    const prov = signInOffer(W.provider);
+    h += `<h2>${prov ? "Connect your Gmail" : "Make a code for Inbox Agent"}</h2>${prov ? `<button class="btn pri big" data-w="signin" data-provider="${prov}" data-focus>Sign in with ${PROVIDER_NAME[prov]}</button><p>Your web browser opens a page where you sign in. There is nothing to copy.</p><div class="help"><b>Or use a code.</b> That works for everyone.</div>` : ""}<p>${esc(p.maker)} makes a special 16-letter code just for this app. It is safer than using your own password, and you can cancel it any time.</p>
+      <button class="btn ${prov ? "" : "pri"} big" data-w="open" ${prov ? "" : "data-focus"}>Open ${esc(p.maker)}'s page</button>
+      <ol class="steps">${p.steps.map(x => `<li>${esc(x)}</li>`).join("")}</ol>${p.tip ? `<div class="help">${esc(p.tip)}</div>` : ""}
+      <label class="f" for="w-pw">The code</label>
+      <div class="pastebox"><input id="w-pw" type="${W.show ? "text" : "password"}" data-f="pw" value="${esc(W.pw)}" autocapitalize="off" spellcheck="false" autocomplete="off" placeholder="abcd efgh ijkl mnop"><button class="btn" data-w="paste">Paste</button></div>
+      <label class="chk2"><input type="checkbox" data-c="show" ${W.show ? "checked" : ""}> Show the code</label>
+      <div id="w-result" role="status" aria-live="polite">${sayHTML(W.result)}</div>`;
+    foot = `${back}<span class="sp"></span>${connect}`;
+  } else if (n === "other") {
+    h += `<h2>Your mail server</h2><p>${W.provider === "outlook" ? "You chose to set this up by hand." : `Inbox Agent doesn't know ${esc(domainOf(W.user))} yet, so it needs a few details.`} Your email provider's help pages list them under "IMAP settings".</p>
+      <div class="row2"><div><label class="f" for="w-host">Mail server</label><input id="w-host" type="text" data-f="host" value="${esc(W.host)}" placeholder="imap.example.com" autocapitalize="off" spellcheck="false"></div><div><label class="f" for="w-port">Port</label><input id="w-port" type="number" data-f="port" value="${W.port}"></div></div>
+      <label class="f" for="w-pw">App password</label>
+      <div class="pastebox"><input id="w-pw" type="${W.show ? "text" : "password"}" data-f="pw" data-focus value="${esc(W.pw)}" autocapitalize="off" spellcheck="false" autocomplete="off"><button class="btn" data-w="paste">Paste</button></div>
+      <label class="chk2"><input type="checkbox" data-c="show" ${W.show ? "checked" : ""}> Show the password</label>
+      <p>Use an app password if your provider offers one. Your usual password may be refused.</p>
+      <div id="w-result" role="status" aria-live="polite">${sayHTML(W.result)}</div>`;
+    foot = `${back}<span class="sp"></span>${connect}`;
+  } else if (n === "outlook" && signInOffer("outlook")) {
+    h += `<h2>Outlook, Hotmail and Live</h2><p>Sign in with your Microsoft account. A page opens, and Microsoft shows you a short code to type there.</p>
+      <button class="btn pri big" data-w="signin" data-provider="microsoft" data-focus>Sign in with Microsoft</button>
+      <div id="w-result" role="status" aria-live="polite">${sayHTML(W.result)}</div>`;
+    foot = `${back}<span class="sp"></span><button class="btn sm" data-w="manual">I know what I'm doing: set it up by hand</button>`;
+  } else if (n === "outlook") {
+    h += `<h2>Outlook, Hotmail and Live</h2><p>Microsoft does not let an app like this one sign in to these addresses with a code, so Inbox Agent cannot read this mailbox yet.</p>
+      <p>Gmail, iCloud, Yahoo, Fastmail and most other providers work. If you have another address, use that one.</p>`;
+    foot = `${back}<span class="sp"></span><button class="btn sm" data-w="manual">I know what I'm doing: set it up by hand</button>`;
+  } else if (n === "ready") {
+    h += `<h2>You're connected.</h2><p>Inbox Agent is reading your email now. The first time can take a few minutes. Your list fills in by itself.</p>
+      <div class="help"><b>It keeps watching.</b> If you close this window, Inbox Agent keeps running. Its icon near the clock brings it back.</div>
+      <label class="sw"><input type="checkbox" data-c="autostart" ${W.autostart ? "checked" : ""}><div><b>Open Inbox Agent when I turn on this computer</b><span>So new important mail never waits for you to start it.</span></div></label>`;
+    foot = `<span class="sp"></span><button class="btn pri big" data-w="finish" data-focus>Open my list</button>`;
   }
-  if (n === 2) {
-    h += `<h2>How should mail be ranked?</h2><p>You can change this any time in Settings.</p><div role="radiogroup" aria-label="How mail is ranked">
-      <button type="button" class="opt ${W.ai === "rules" ? "sel" : ""}" data-ai="rules" role="radio" aria-checked="${W.ai === "rules"}"><div class="r"></div><div><b>Rules only</b><span>Instant and fully private. Uses who you write to, replies to your mail and bulk-mail headers.</span></div></button>
-      <button type="button" class="opt ${W.ai === "ollama" ? "sel" : ""}" data-ai="ollama" role="radio" aria-checked="${W.ai === "ollama"}"><div class="r"></div><div><b>Local AI (Ollama)</b><span>Runs a model on your computer. Free and private. Needs Ollama installed with a model pulled.</span></div></button>
-      <button type="button" class="opt ${W.ai === "anthropic" ? "sel" : ""}" data-ai="anthropic" role="radio" aria-checked="${W.ai === "anthropic"}"><div class="r"></div><div><b>Claude with your own API key</b><span>Best quality. Email text is sent to Anthropic and billed to your API account.</span></div></button>`;
-    h += "</div>";
-    if (W.ai === "ollama") h += `<label class="f">Model</label>${W.ollamaModels.length ? `<select data-f="model">${W.ollamaModels.map(m => `<option ${W.model === m ? "selected" : ""}>${esc(m)}</option>`).join("")}</select>` : `<div class="help">Ollama wasn’t found on this computer. Install it from ollama.com, run <b>ollama pull llama3.2</b>, then press Detect.</div>`}<div class="foot"><button class="btn sm" data-w="detect">Detect</button></div>`;
-    if (W.ai === "anthropic") h += `<label class="f" for="w-key">API key</label><input id="w-key" type="password" data-f="key" value="${esc(W.key)}" autocomplete="off" placeholder="sk-ant-…"><p>Kept in your system keychain. Signing in with a Claude subscription isn’t offered: Anthropic doesn’t permit it in third-party apps.</p>`;
-    if (W.ai !== "rules") h += `<div class="foot"><button class="btn sm" data-w="aitest">Test</button><span>${W.aiTest ? (W.aiTest.ok ? `<span class="ok">Works · P${W.aiTest.priority} · ${esc(W.aiTest.action)}</span>` : `<span class="bad">${esc(W.aiTest.error)} (rules will be used)</span>`) : ""}</span></div>`;
+  showPanel("Set up Inbox Agent", h + `<div class="foot">${foot}</div>`, "wz");
+  veil.querySelector("[data-focus]")?.focus();
+}
+/** The line under the address box: what the app makes of it, or what is missing. Nothing while the person is still typing the name. */
+function addressHint(a) {
+  a = String(a).trim();
+  if (validAddress(a)) { const k = providerFor(a); return k === "other" ? "I don't know that provider yet, but it may still work." : `That looks like a ${PROVIDERS[k].name.replace(/ \(.*/, "")} address.` }
+  return a.includes("@") ? "An address looks like name@example.com" : "";
+}
+/** Shows an answer under the code box without redrawing the screen, so the keyboard stays where it was and a screen reader reads it out. */
+function wizardSay(r) { W.result = r; const el = $("#w-result"); if (el) { el.innerHTML = sayHTML(r); el.scrollIntoView?.({ block: "center" }) } }
+/** Tests what was typed, saves the mailbox with the safe defaults and moves to the last screen. One button does all of it: nobody should have to find "Test". */
+async function wizardConnect() {
+  if (W.busy) return;
+  const acct = { host: W.host.trim(), port: W.port, user: W.user.trim(), password: W.pw.trim() }, name = PROVIDERS[W.provider]?.name || "your mail server";
+  if (!acct.password.trim()) return wizardSay({ say: W.provider === "other" ? "Type the password first." : "Paste the code first." });
+  W.busy = true; for (const x of veil.querySelectorAll(".foot .btn")) x.disabled = true;
+  wizardSay({ ok: `Connecting to ${name.replace(/ \(.*/, "")}. This can take up to half a minute.` });
+  try {
+    await rpc("test_account", acct);
+    await rpc("save_account", acct);
+    await rpc("save_settings", { patch: SAFE_START });
+    await rpc("finish_setup");
+    W.pw = ""; W.busy = false; W.result = null; W.step = "ready"; drawWizard();
+  } catch (err) {
+    W.busy = false; for (const x of veil.querySelectorAll(".foot .btn")) x.disabled = false;
+    wizardSay(friendly(String(err), W.provider, acct.host));
+    veil.querySelector("#w-pw")?.focus();
   }
-  if (n === 3) {
-    h += `<h2>Alerts</h2><label class="sw"><input type="checkbox" data-c="desktop" ${W.desktop ? "checked" : ""}><div><b>Desktop notifications</b><span>Priority 4–5 and urgent mail, and your reminders, the daily digest and snooze notices.</span></div></label>
-      <label class="sw"><input type="checkbox" data-c="autostart" ${W.autostart ? "checked" : ""}><div><b>Start with this computer</b><span>Keeps watching your inbox from the tray.</span></div></label>
-      <label class="f" for="w-topic">Phone alerts with ntfy (optional)</label><div class="row2" style="grid-template-columns:1fr auto"><input id="w-topic" type="text" data-f="topic" value="${esc(W.topic)}" placeholder="a private topic name"><button class="btn sm" data-w="topic">Generate</button></div>
-      <p>Install the free ntfy app on your phone and subscribe to the same topic. Treat the topic like a password.</p>`;
+}
+/** SIGNIN_POLL: how often the window asks whether the sign-in has finished (a test makes it short). */
+let SIGNIN_POLL = 1500;
+/** Signs in with a Google or Microsoft account, start to finish: starts it, shows what the person has to do (`say`), waits for the answer, and saves the mailbox
+ *  with `finishArgs`. `alive()` goes false when the person has left or cancelled: the sign-in is then called off. Resolves to the mailbox number, or throws the sentence. */
+async function signInFlow(provider, user, finishArgs, say, alive) {
+  const r = await rpc("oauth_start", { provider, user });
+  say(r.kind === "microsoft" ? { ok: "Microsoft's page is open in your web browser. Type this code there, then sign in.", device: { code: r.code, url: r.url } } : { ok: `${PROVIDER_NAME[provider]}'s page is open in your web browser. Sign in there, then come back here.` });
+  for (;;) {
+    await new Promise(res => setTimeout(res, SIGNIN_POLL));
+    if (!alive()) { rpc("oauth_cancel").catch(() => {}); throw ""; }
+    const p = await rpc("oauth_poll");
+    if (p.state === "done") break;
+    if (p.state === "failed") throw new Error(p.error);
+    if (p.state === "idle") throw new Error("The sign-in was cancelled.");
   }
-  if (n === 4) {
-    h += `<h2>Almost done.</h2><label class="sw"><input type="checkbox" data-c="writeback" ${W.writeback ? "checked" : ""}><div><b>Let Inbox Agent file mail for me</b><span>Marking a task done archives the message. Stars become flags, and on Gmail priorities become labels. Left off, your mailbox is untouched, but the changes you make are remembered and applied if you switch this on later.</span></div></label>
-      <label class="sw"><input type="checkbox" data-c="hub" ${W.hub ? "checked" : ""}><div><b>Use on phone or tablet</b><span>Shows a QR code in Settings. Works on your home Wi-Fi (not encrypted) or over a private VPN such as Tailscale.</span></div></label>`;
-    next = `<button class="btn pri" data-w="finish">Finish</button>`;
+  say({ ok: "Signed in. Connecting to your mailbox…" });
+  return rpc("oauth_finish", finishArgs);
+}
+/** The first-run screens: sign in with an account, then finish setup the same way Connect does. */
+async function wizardSignIn(provider) {
+  if (W.busy) return;
+  const my = ++W.flow;
+  W.busy = true; for (const x of veil.querySelectorAll(".foot .btn, [data-w=signin], [data-w=open], [data-w=paste]")) x.disabled = true;
+  const unlock = () => { W.busy = false; for (const x of veil.querySelectorAll("[data-w]")) x.disabled = false };
+  try {
+    await signInFlow(provider, W.user.trim(), {}, r => { if (W.flow === my) wizardSay({ ...r, cancel: true }) }, () => W.flow === my && veil.dataset.kind === "wizard");
+    if (W.flow !== my) return;
+    await rpc("save_settings", { patch: SAFE_START });
+    await rpc("finish_setup");
+    W.busy = false; W.pw = ""; W.result = null; W.step = "ready"; drawWizard();
+  } catch (err) {
+    if (W.flow !== my) return; // cancelled: the screen has already been told
+    unlock();
+    wizardSay(friendly(String(err), provider === "google" ? "gmail" : "outlook", "", "account"));
   }
-  showPanel("Set up Inbox Agent", h + `<div class="foot">${back}<span class="sp"></span>${next}</div>`);
 }
 veil.addEventListener("input", e => {
   const f = e.target.dataset.f; if (!f || veil.dataset.kind !== "wizard") return;
   W[f] = e.target.type === "number" ? +e.target.value : e.target.value;
-  if (["user", "pw", "host", "port"].includes(f)) { W.tested = null; const nx = veil.querySelector("[data-w=next]"); if (nx) nx.disabled = true; const r = $("#testres"); if (r) r.innerHTML = "" }
+  if (f === "user") { const h = $("#w-hint"); if (h) h.textContent = addressHint(W.user); const nx = veil.querySelector("[data-w=next]"); if (nx) nx.disabled = !validAddress(W.user) }
+  if (["user", "pw", "host", "port"].includes(f)) { W.result = null; const r = $("#w-result"); if (r) r.innerHTML = "" }
+});
+veil.addEventListener("keydown", e => {
+  if (veil.dataset.kind !== "wizard" || e.key !== "Enter" || e.target.tagName !== "INPUT" || e.target.type === "checkbox") return;
+  e.preventDefault(); veil.querySelector(".foot .btn.pri:not([disabled])")?.click();
 });
 veil.addEventListener("change", e => {
   const t = e.target;
   if (veil.dataset.kind === "wizard") {
-    if (t.dataset.f === "provider") { W.provider = t.value; W.host = PROVIDERS[t.value].host; W.port = 993; W.tested = null; drawWizard() }
-    if (t.dataset.c) W[t.dataset.c] = t.checked;
-    if (t.dataset.f === "model") W.model = t.value;
+    if (t.dataset.c === "show") { W.show = t.checked; drawWizard(); veil.querySelector("[data-c=show]")?.focus() }
+    else if (t.dataset.c) W[t.dataset.c] = t.checked;
   } else if (veil.dataset.kind === "settings") settingsChange(t);
 });
 veil.addEventListener("click", async e => {
@@ -91,39 +228,42 @@ veil.addEventListener("click", async e => {
   if (veil.dataset.kind === "settings") return settingsClick(e);
   if (veil.dataset.kind === "mailbox") return mailboxClick(e);
   if (veil.dataset.kind === "restore") return restoreClick(e);
-  const ai = e.target.closest("[data-ai]"); if (ai) { W.ai = ai.dataset.ai; W.aiTest = null; if (W.ai === "ollama") { W.ollamaModels = await rpc("detect_ollama").catch(() => []); W.model = W.ollamaModels[0] || "" } drawWizard(); return }
-  const w = e.target.closest("[data-w]")?.dataset.w; if (!w) return;
-  if (w === "back") { W.step--; drawWizard() }
-  if (w === "next") { W.step++; drawWizard() }
-  if (w === "topic") { W.topic = "inbox-" + rand(16); drawWizard() }
-  if (w === "detect") { W.ollamaModels = await rpc("detect_ollama").catch(() => []); W.model = W.ollamaModels[0] || ""; drawWizard() }
-  if (w === "test") {
-    W.testing = true; W.tested = null; drawWizard();
-    try { const r = await rpc("test_account", { host: W.host, port: W.port, user: W.user, password: W.pw }); W.tested = { ok: true, sent: r.sent } }
-    catch (err) { W.tested = { ok: false, error: String(err).replace(/^Error: /, "") } }
-    W.testing = false; drawWizard();
+  const w = e.target.closest("[data-w]")?.dataset.w;
+  if (w === "cancelsignin") { W.flow++; W.busy = false; rpc("oauth_cancel").catch(() => {}); for (const x of veil.querySelectorAll("[data-w]")) x.disabled = false; return wizardSay({ ok: "Cancelled. Nothing was connected." }) }
+  if (w === "opendevice") { try { await rpc("open_page", { url: e.target.closest("[data-url]").dataset.url }) } catch { toast("Couldn't open your web browser. Type the address into it.") } return }
+  if (!w || W.busy) return;
+  if (w === "signin") return wizardSignIn(e.target.closest("[data-provider]").dataset.provider);
+  if (w === "back") { W.step = WIZARD_BACK[W.step] || "welcome"; W.result = null; drawWizard() }
+  if (w === "next" && W.step === "welcome") { W.step = "address"; drawWizard() }
+  else if (w === "next" && W.step === "address" && validAddress(W.user)) {
+    const k = providerFor(W.user), d = domainOf(W.user);
+    W.user = W.user.trim(); W.provider = k; W.port = 993; W.result = null;
+    if (W.hostFor !== d) { W.hostFor = d; W.pw = ""; W.host = PROVIDERS[k].host || "imap." + d }
+    W.step = k === "outlook" ? "outlook" : k === "other" ? "other" : "guide"; drawWizard();
   }
-  if (w === "aitest") {
-    try {
-      if (W.ai === "anthropic" && W.key) await rpc("set_secret", { name: "anthropic-key", value: W.key });
-      await rpc("save_settings", { patch: { ai: { mode: W.ai, ollama_model: W.model } } });
-      W.aiTest = { ok: true, ...(await rpc("test_ai")) };
-    } catch (err) { W.aiTest = { ok: false, error: String(err) } }
-    drawWizard();
+  if (w === "manual") { W.provider = "other"; W.host = W.host || "imap." + domainOf(W.user); W.step = "other"; drawWizard() }
+  if (w === "open") {
+    const p = PROVIDERS[W.provider];
+    try { await rpc("open_page", { url: p.page }); wizardSay({ ok: `${p.maker}'s page should be open in your web browser. Switch to it, make the code, then come back here.` }) }
+    catch (err) { wizardSay({ say: `Couldn't open your web browser. Open it yourself and go to ${p.page.replace(/^https:\/\//, "")}`, detail: String(err).replace(/^Error: /, "") }) }
   }
+  if (w === "paste") {
+    let t = ""; try { t = ((await navigator.clipboard.readText()) || "").trim() } catch { /* the browser may refuse; the box still takes a pasted code */ }
+    if (!t) return wizardSay({ say: `Couldn't read what you copied. Click in the box and press ${pasteKeys()} together.` });
+    W.pw = t; const box = $("#w-pw"); if (box) box.value = t;
+    wizardConnect();
+  }
+  if (w === "connect") wizardConnect();
   if (w === "finish") {
-    try {
-      await rpc("save_account", { host: W.host, port: W.port, user: W.user, password: W.pw });
-      if (W.ai === "anthropic" && W.key) await rpc("set_secret", { name: "anthropic-key", value: W.key });
-      await rpc("save_settings", { patch: { ai: { mode: W.ai, ollama_model: W.model }, alerts: { desktop: W.desktop, ntfy_topic: W.topic }, writeback: W.writeback, hub: { enabled: W.hub } } });
-      if (TA) await TA.core.invoke(W.autostart ? "plugin:autostart|enable" : "plugin:autostart|disable").catch(() => {});
-      await rpc("finish_setup"); W.pw = ""; W.key = ""; closeVeil();
-    } catch (err) { toast("Setup failed: " + err) }
+    if (lookGet("easy") === null) { lookSet("easy", "1"); applyLook(); render() } // a new install starts with the easy view; one already in use is left as it was
+    if (TA) await TA.core.invoke(W.autostart ? "plugin:autostart|enable" : "plugin:autostart|disable").catch(() => {});
+    closeVeil();
   }
 });
 
 const ALERT_CATS = ["work", "personal", "finance", "travel", "notification", "promo", "reading", "other"];
-function openSettings() { rulesDraft = null; rulesDirty = false; veil.dataset.kind = "settings"; veil.classList.add("show"); drawSettings().then(() => dialogOpened("Settings")) }
+let moreSettings = false, resignFlow = 0;
+function openSettings() { moreSettings = false; rulesDraft = null; rulesDirty = false; veil.dataset.kind = "settings"; veil.classList.add("show"); drawSettings().then(() => dialogOpened("Settings")) }
 
 /* ───────── your rules (the edits live in rulesDraft until Save) ───────── */
 let rulesDraft = null, rulesDirty = false;
@@ -182,15 +322,15 @@ function mailStatus(st) {
   st = String(st || "");
   if (st === "idle") return '<span class="ok">Connected</span>';
   if (st === "syncing" || st === "connecting") return "Reading mail…";
-  if (st === "no password") return '<span class="bad">Needs a new app password</span>';
+  if (st === "no password") return `<span class="bad">${easy() ? "Needs a new code. Paste it below." : "Needs a new app password"}</span>`;
   if (st.startsWith("error")) return `<span class="bad">${esc(st.replace(/^error:\s*/, "").slice(0, 90))}</span>`;
   return esc(st);
 }
 function mailboxesHTML(s) {
   const mbs = (S.accounts && S.accounts.length) ? S.accounts : [{ id: 0, user: s.account?.user, host: s.account?.host, status: S.status }];
   return mbs.map(m => `<div class="mbx" data-id="${m.id}"><p><b>${esc(m.user)}</b> · ${esc(m.host)} · ${mailStatus(m.status)}</p>
-    <label class="f" for="s-pw${m.id}">New app password</label><input id="s-pw${m.id}" type="password" data-s="newpw" data-id="${m.id}" autocomplete="off" placeholder="paste a new app password">
-    <div class="foot" style="margin-top:8px"><button class="btn sm" data-s="savepw" data-id="${m.id}">Save password</button><span data-pwres="${m.id}"></span><span class="sp"></span>${mbs.length > 1 ? `<button class="btn sm" data-s="rmacct" data-id="${m.id}">Remove</button>` : ""}</div></div>`).join("");
+    ${m.auth ? `<p>Signed in with ${PROVIDER_NAME[m.auth] || "an account"}. No password is kept.</p>` : `<label class="f" for="s-pw${m.id}">${easy() ? "Paste a new code if the old one stopped working" : "New app password"}</label><input id="s-pw${m.id}" type="password" data-s="newpw" data-id="${m.id}" autocomplete="off" placeholder="${easy() ? "paste the code here" : "paste a new app password"}">`}
+    <div class="foot" style="margin-top:8px">${m.auth ? `<button class="btn sm" data-s="resign" data-id="${m.id}" data-provider="${esc(m.auth)}">Sign in again</button>` : `<button class="btn sm" data-s="savepw" data-id="${m.id}">${easy() ? "Save code" : "Save password"}</button>`}<span data-pwres="${m.id}"></span><span class="sp"></span>${mbs.length > 1 ? `<button class="btn sm" data-s="rmacct" data-id="${m.id}">Remove</button>` : ""}</div></div>`).join("");
 }
 let MB = null;
 function openAddMailbox() {
@@ -204,28 +344,49 @@ function drawMailbox() {
   const p = PROVIDERS[MB.provider], n = (S.accounts || []).length, focused = veil.contains(document.activeElement) ? document.activeElement.id : "";
   showPanel("Add a mailbox", `<h2>Add a mailbox</h2><p>Its mail joins the same list. A small tag on each task says which mailbox it came to. ${n} of 5 in use.</p>
     <label class="f" for="m-provider">Provider</label><select id="m-provider" data-f="provider">${Object.entries(PROVIDERS).map(([k, v]) => `<option value="${k}" ${MB.provider === k ? "selected" : ""}>${v.name}</option>`).join("")}</select>
-    <div class="help"><b>Getting an app password</b><ol>${p.help.map(x => `<li>${esc(x)}</li>`).join("")}</ol></div>
+    ${signInOffer(MB.provider) ? `<button class="btn pri" data-m="signin" data-provider="${signInOffer(MB.provider)}" ${MB.busy ? "disabled" : ""}>Sign in with ${PROVIDER_NAME[signInOffer(MB.provider)]}</button><div id="msignin" role="status" aria-live="polite"></div><p>Or use a code, as below.</p>` : ""}
+    <div class="help"><b>Making a code</b>${p.page ? ` <button class="mini" data-m="open">Open ${esc(p.maker)}'s page</button>` : ""}<ol>${p.steps.map(x => `<li>${esc(x)}</li>`).join("")}</ol></div>
     ${MB.provider === "other" ? `<div class="row2"><div><label class="f" for="m-host">IMAP server</label><input id="m-host" type="text" data-f="host" value="${esc(MB.host)}" placeholder="imap.example.com"></div><div><label class="f" for="m-port">Port</label><input id="m-port" type="number" data-f="port" value="${MB.port}"></div></div>` : ""}
     <label class="f" for="m-user">Email address</label><input id="m-user" type="text" data-f="user" value="${esc(MB.user)}" autocomplete="off" placeholder="you@example.com">
     <label class="f" for="m-pw">App password</label><input id="m-pw" type="password" data-f="pw" value="${esc(MB.pw)}" autocomplete="off">
     <div class="foot"><button class="btn sm" id="m-test" data-m="test" ${MB.testing ? "disabled" : ""}>${MB.testing ? "Testing…" : "Test connection"}</button><span id="mtestres">${MB.tested ? (MB.tested.ok ? testedOk(MB.tested) : `<span class="bad">${esc(MB.tested.error)}</span>`) : ""}</span></div>
+    ${MB.tested && !MB.tested.ok && MB.tested.detail ? `<details class="why"><summary>Details for a helper</summary><code>${esc(MB.tested.detail)}</code></details>` : ""}
     <div class="foot"><span class="sp"></span><button class="btn" data-m="cancel">Cancel</button><button class="btn pri" id="m-add" data-m="add" ${MB.tested?.ok && !MB.busy ? "" : "disabled"}>Add mailbox</button></div>`);
   if (focused) veil.querySelector("#" + focused)?.focus(); // a redraw must not drop the keyboard onto the page
+}
+/** The Add a mailbox dialog: sign in with an account, then add the mailbox. */
+async function mailboxSignIn(mb, prov) {
+  if (mb.busy) return;
+  const out = r => { const o = $("#msignin"); if (o) o.innerHTML = sayHTML(r) };
+  if (!validAddress(mb.user)) return out({ say: "Type your email address first.", detail: "" });
+  const my = mb.flow = (mb.flow || 0) + 1, live = () => MB === mb && mb.flow === my;
+  mb.busy = true; drawMailbox();
+  try {
+    await signInFlow(prov, mb.user.trim(), { add: true }, r => { if (live()) out({ ...r, cancel: true }) }, live);
+    clearReadCaches(); lastSnap = ""; await load(); toast("Mailbox added. Its mail is being read.");
+    if (live()) { MB = null; veil.dataset.kind = "settings"; drawSettings().then(() => veil.querySelector("[data-s=addacct]")?.focus()) }
+  } catch (err) {
+    if (!live()) return;
+    mb.busy = false; drawMailbox(); out(friendly(String(err), prov === "google" ? "gmail" : "outlook", "", "account"));
+  }
 }
 async function mailboxClick(e) {
   const m = e.target.closest("[data-m]")?.dataset.m, mb = MB; if (!m || !mb) return;
   if (m === "cancel") return mailboxBack();
+  if (m === "cancelsignin") { mb.flow = (mb.flow || 0) + 1; mb.busy = false; rpc("oauth_cancel").catch(() => {}); const o = $("#msignin"); if (o) o.innerHTML = '<p class="ok">Cancelled. Nothing was added.</p>'; return drawMailbox() }
+  if (m === "signin") return mailboxSignIn(mb, e.target.closest("[data-provider]").dataset.provider);
+  if (m === "open") { const p = PROVIDERS[mb.provider]; try { await rpc("open_page", { url: p.page }) } catch (err) { toast("Couldn't open your web browser. Go to " + p.page.replace(/^https:\/\//, "")) } return }
   const here = () => MB === mb; // Cancel or Escape while a request is out leaves nothing to draw on when it comes back
   if (m === "test") {
     mb.testing = true; mb.tested = null; drawMailbox();
     try { const r = await rpc("test_account", { host: mb.host, port: mb.port, user: mb.user, password: mb.pw }); mb.tested = { ok: true, sent: r.sent } }
-    catch (err) { mb.tested = { ok: false, error: String(err).replace(/^Error: /, "") } }
+    catch (err) { const r = friendly(String(err), mb.provider, mb.host); mb.tested = { ok: false, error: r.say, detail: r.detail } }
     mb.testing = false; if (here()) drawMailbox();
   }
   if (m === "add") {
     if (mb.busy) return; mb.busy = true; drawMailbox();
     try { await rpc("add_account", { host: mb.host, port: mb.port, user: mb.user, password: mb.pw }) }
-    catch (err) { mb.busy = false; mb.tested = { ok: false, error: String(err).replace(/^Error: /, "") }; if (here()) drawMailbox(); return }
+    catch (err) { mb.busy = false; const r = friendly(String(err), mb.provider, mb.host); mb.tested = { ok: false, error: r.say, detail: r.detail }; if (here()) drawMailbox(); return }
     clearReadCaches(); // a mailbox number may be a removed mailbox's again
     lastSnap = ""; await load(); toast("Mailbox added. Its mail is being read.");
     if (here()) { MB = null; veil.dataset.kind = "settings"; drawSettings().then(() => veil.querySelector("[data-s=addacct]")?.focus()) }
@@ -318,10 +479,31 @@ veil.addEventListener("input", e => {
 veil.addEventListener("change", e => {
   if (veil.dataset.kind === "mailbox" && MB && e.target.dataset.f === "provider") { MB.provider = e.target.value; MB.host = PROVIDERS[e.target.value].host; MB.port = 993; MB.tested = null; drawMailbox() }
 });
+/** "How it looks": the text size, the simple view and the light colours. They belong to this device, so a phone and a laptop can differ. */
+function lookHTML() {
+  const size = textSize();
+  return `<div class="sect">How it looks</div><div class="f" id="sz-l">Text size</div>
+    <div class="szrow" role="group" aria-labelledby="sz-l">${[["normal", "Normal"], ["large", "Large"], ["huge", "Huge"]].map(([k, l]) => `<button class="szb" data-s="size" data-size="${k}" aria-pressed="${size === k}">${l}</button>`).join("")}</div>
+    <label class="sw"><input type="checkbox" data-s="easy" ${easy() ? "checked" : ""}><div><b>Simple view</b><span>Big buttons and plain words. Turn it off to see everything the app can do.</span></div></label>
+    <label class="sw"><input type="checkbox" data-s="light" ${themeOf() === "light" ? "checked" : ""}><div><b>Light colours</b><span>Dark text on a light page. Off is light text on black.</span></div></label>
+    <p>These choices are for this device only.</p>`;
+}
+/** Settings in the simple view: the look, the mailboxes, alerts and starting with the computer; everything else is under "More options". */
+async function basicSettingsHTML(s, a) {
+  const auto = TA ? await TA.core.invoke("plugin:autostart|is_enabled").catch(() => null) : null;
+  return `<h2>Settings</h2>${lookHTML()}
+    <div class="sect">Your mailboxes</div>${mailboxesHTML(s)}
+    <div class="foot" style="margin-top:12px"><button class="btn sm" data-s="addacct" ${(S.accounts || []).length >= 5 ? "disabled" : ""}>Add another mailbox</button></div>
+    <div class="sect">Alerts</div>
+    <label class="sw"><input type="checkbox" data-s="desktop" ${a.desktop ? "checked" : ""}><div><b>Tell me when something important arrives</b><span>A small message appears near the clock.</span></div></label>
+    ${typeof auto === "boolean" ? `<label class="sw"><input type="checkbox" data-s="autostart" ${auto ? "checked" : ""}><div><b>Open Inbox Agent when I turn on this computer</b></div></label>` : ""}
+    <div class="foot" style="margin-top:22px"><button class="btn sm" data-s="moresettings">More options</button><span class="sp"></span><button class="btn pri" data-vc="1">Close</button></div>`;
+}
 async function drawSettings() {
   const s = S.settings, a = s.alerts || {}, ai = s.ai || {}, dr = s.drafts || { auto: false, tone: "friendly", signature: "", min_priority: 3, daily_cap: 25 };
+  if (easy() && !moreSettings) { showPanel("Settings", await basicSettingsHTML(s, a)); return }
   let hub = null; if (s.hub?.enabled) hub = await rpc("hub_info").catch(() => null);
-  showPanel("Settings", `<h2>Settings</h2>
+  showPanel("Settings", `<h2>Settings</h2>${easy() ? '<div class="foot" style="margin:0 0 6px"><button class="btn sm" data-s="moresettings">Back to simple settings</button></div>' : ""}${lookHTML()}
     <div class="sect">Mail</div>
     ${mailboxesHTML(s)}
     <p>Providers cancel app passwords whenever you change your account password. Pasting a new one here keeps your list, notes and tasks.</p>
@@ -371,6 +553,9 @@ async function settingsChange(t) {
   if (t.id === "bk-file") return pickBackup(t);
   if (t.dataset.r) return ruleEdit(t);
   const k = t.dataset.s; if (!k) return;
+  if (k === "easy") { lookSet("easy", t.checked ? "1" : "0"); applyLook(); render(); drawSettings(); return }
+  if (k === "light") { lookSet("theme", t.checked ? "light" : "dark"); applyLook(); drawSettings(); return }
+  if (k === "autostart") { if (TA) await TA.core.invoke(t.checked ? "plugin:autostart|enable" : "plugin:autostart|disable").catch(() => { toast("Couldn't change that"); drawSettings() }); return }
   const patch = { aimode: { ai: { mode: t.value } }, ollama_model: { ai: { ollama_model: t.value } }, desktop: { alerts: { desktop: t.checked } }, topic: { alerts: { ntfy_topic: t.value.trim() } }, writeback: { writeback: t.checked }, hub: { hub: { enabled: t.checked } },
     digest_time: { alerts: { digest_time: t.value } }, draft_auto: { drafts: { auto: t.checked } }, draft_tone: { drafts: { tone: t.value } },
     draft_sig: { drafts: { signature: t.value } }, update_check: { updates: { check: t.checked } }, draft_min: { drafts: { min_priority: +t.value } }, follow_days: { followups: { days: +t.value } }, draft_cap: { drafts: { daily_cap: +t.value || 0 } } }[k];
@@ -387,6 +572,20 @@ async function settingsChange(t) {
 async function settingsClick(e) {
   const rb = e.target.closest("button[data-r]"); if (rb) return ruleClick(rb);
   const k = e.target.closest("[data-s]")?.dataset.s;
+  if (k === "size") { lookSet("size", e.target.closest("[data-size]").dataset.size); applyLook(); drawSettings(); return }
+  if (k === "moresettings") { moreSettings = !moreSettings; drawSettings(); return }
+  if (k === "cancelsignin") { resignFlow++; rpc("oauth_cancel").catch(() => {}); const o = veil.querySelector("[data-pwres]:not(:empty)"); if (o) o.innerHTML = "Cancelled."; for (const b of veil.querySelectorAll("[data-s=resign]")) b.disabled = false; return }
+  if (k === "resign") {
+    const btn = e.target.closest("[data-s]"), id = +btn.dataset.id, prov = btn.dataset.provider, acct = (S.accounts || []).find(m => m.id === id), out = veil.querySelector(`[data-pwres="${id}"]`), my = ++resignFlow;
+    if (!acct || !out) return;
+    btn.disabled = true;
+    try {
+      await signInFlow(prov, acct.user, { id }, r => { if (resignFlow === my) out.innerHTML = sayHTML({ ...r, cancel: true }) }, () => resignFlow === my && veil.dataset.kind === "settings");
+      if (resignFlow === my) { out.innerHTML = '<span class="ok">Signed in. Your list is untouched.</span>'; lastSnap = ""; load() }
+    } catch (err) { if (err !== "" && resignFlow === my) out.innerHTML = sayHTML(friendly(String(err), prov === "google" ? "gmail" : "outlook", "", "account")) }
+    if (resignFlow === my) btn.disabled = false;
+    return;
+  }
   if (k === "aitest") { const r = $("#aitres"); r.textContent = "Testing…"; try { const x = await rpc("test_ai"); r.innerHTML = `<span class="ok">Works · P${x.priority} · ${esc(x.action)}</span>` } catch (err) { r.innerHTML = `<span class="bad">${esc(String(err))}</span>` } }
   if (k === "alertcat") {
     const c = e.target.closest("[data-cat]").dataset.cat, cur = S.settings.alerts?.categories || [];
@@ -425,6 +624,6 @@ async function settingsClick(e) {
   if (k === "diag") { try { await navigator.clipboard.writeText(await rpc("diagnostics")); toast("Diagnostics copied. Read it, then paste it into your bug report.") } catch (err) { toast("Couldn’t copy: " + err) } }
   if (k === "export") { try { await navigator.clipboard.writeText(await rpc("export_markdown")); toast("Copied as Markdown") } catch (err) { toast("Couldn’t copy: " + err) } }
   if (k === "rotate") { await rpc("rotate_hub_token"); toast("New access code. Scan the code again on your phone."); drawSettings() }
-  if (k === "signout" && twice(e.target.closest("[data-s]"), "Click again: removes every saved password and key, and the local list")) { await rpc("sign_out"); clearReadCaches(); W = { ...W, step: 0, tested: null, pw: "" }; closeVeil() }
+  if (k === "signout" && twice(e.target.closest("[data-s]"), "Click again: removes every saved password and key, and the local list")) { await rpc("sign_out"); clearReadCaches(); W = freshWizard(); closeVeil() }
 }
 

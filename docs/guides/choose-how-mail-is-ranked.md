@@ -47,17 +47,14 @@ text goes to that computer.**
 
 ## Steps
 
-1. **At first run:** step 3 of the wizard asks "How should mail be ranked?". Choose one of the three buttons.
-2. **Later:** open **Settings** (or press `,`) and use the dropdown in the **Ranking** section.
-3. For **Local AI (Ollama)**: press **Detect** (wizard) or type the **Ollama model** name (Settings, placeholder `llama3.2`). If Ollama is
-   not found the window says "Ollama wasn’t found on this computer. Install it from ollama.com, run ollama pull llama3.2, then press
-   Detect."
+1. **At first run** nothing is asked: setup starts with **Rules only**, which is instant and fully private.
+2. **To change it:** open **Settings** (or press `,`) and use the dropdown in the **Ranking** section.
+3. For **Local AI (Ollama)**: type the **Ollama model** name (Settings, placeholder `llama3.2`).
 4. For **Claude**: paste the key into **API key** (placeholder `sk-ant-…`). In Settings, once the key is saved, the window says "Key saved to
    keychain" and the label reads "(saved — enter a new one to replace)".
 5. Press **Test**. A green "Works · P… · …" with the sample message's priority and action means the model you chose answered. A red
    message means it did not: "No model is chosen" (**Local AI** with an empty model name), "No API key is saved" (**Claude** with no
-   key in the keychain), or the model's own error. In the wizard it ends "(rules will be used)". Under **Rules only** (the wizard
-   shows no **Test** there; Settings does) the test always passes, with the sample ranked by the rules, so it says nothing about a model.
+   key in the keychain), or the model's own error. Under **Rules only** the test always passes, with the sample ranked by the rules, so it says nothing about a model.
 
 ```mermaid
 flowchart TD

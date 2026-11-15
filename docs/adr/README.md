@@ -23,6 +23,7 @@ what forced it, what was decided, and what it costs. This page lists them and sa
 | 0012 | [The window is tested in a real browser with no new dependency](0012-window-tests-in-a-real-browser.md) | accepted | 2026-11-14 |
 | 0013 | [Documentation lives in the repository, with Mermaid diagrams](0013-documentation-as-code-with-mermaid.md) | accepted | 2026-11-14 |
 | 0014 | [No paid services of any kind](0014-no-paid-services.md) | accepted | 2026-11-13 |
+| 0015 | [Sign in with Google and Microsoft is built, and off until the owner registers the app](0015-sign-in-with-google-and-microsoft-needs-the-owners-client-id.md) | accepted | 2026-11-15 |
 
 The date is when the decision was first recorded in the repository: the first commit (2026-11-12) for the founding choices, the
 design document of the phase for the later ones. Every record was written up in Phase 10 and checked against the code then.

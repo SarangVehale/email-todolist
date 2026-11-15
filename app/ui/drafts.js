@@ -84,6 +84,15 @@ function snoozeHTML(t) {
 /* messages read on demand (kept in memory only, per task id) */
 const bodies = {};
 
+/** Where the message is in Gmail on the web: a search for its Message-ID in the right signed-in account. */
+const gmailLink = t => "https://mail.google.com/mail/u/" + (multi() && acctInfo(t) ? encodeURIComponent(acctInfo(t).user) : "0") + "/#search/" + encodeURIComponent("rfc822msgid:" + String(t.message_id).replace(/^<|>$/g, ""));
+/** The button that reads the message, the buttons that open it in Gmail, and the text once it has been read (desktop only). */
+function readHTML(t) {
+  const gmail = gmailOf(t) && t.message_id ? '<button class="mini" data-act="open-gmail">Open in Gmail</button><button class="mini" data-act="copy-gmail">Copy Gmail link</button>' : "";
+  return !isLocal(t) && !isHub
+    ? `<div class="drow"><button class="mini" data-act="read-body" aria-expanded="${bodies[t.uid] !== undefined}">${bodies[t.uid] !== undefined ? "Hide message" : "Read message"}</button>${gmail}</div>${bodies[t.uid] !== undefined ? `<pre class="bodytext" tabindex="0" aria-label="Message text">${esc(bodies[t.uid] || "No text.")}</pre>` : ""}`
+    : "";
+}
 /* attachments, the unsubscribe link, due date, title, the message text and a free-text note */
 function extraHTML(t) {
   const files = t.attachment_count ? `<div class="spec"><div><span>Files</span><b>${t.attachments.map(esc).join(" · ")}${t.attachment_count > t.attachments.length ? ` · and ${t.attachment_count - t.attachments.length} more` : ""}</b></div></div>` : "";
@@ -91,10 +100,7 @@ function extraHTML(t) {
   const own = find(t.uid) || t; // a conversation row shows the earliest due date; the field edits this message's own
   const due = `<div class="drow"><label class="lbl" for="du${t.uid}">Due</label><input id="du${t.uid}" class="mini dateinp" type="date" data-due="${t.uid}" value="${esc(own.due || "")}" aria-label="Due date">${own.due ? '<button class="mini" data-act="due-clear">Clear</button>' : ""}</div>`;
   const title = isLocal(t) ? `<div class="drow"><label class="lbl" for="ti${t.uid}">Title</label><input id="ti${t.uid}" class="dtext titleinp" type="text" maxlength="200" data-title="${t.uid}" value="${esc(t.subject)}" aria-label="Task title"></div>` : "";
-  const gmail = gmailOf(t) && t.message_id ? '<button class="mini" data-act="copy-gmail">Copy Gmail link</button>' : "";
-  const read = !isLocal(t) && !isHub
-    ? `<div class="drow"><button class="mini" data-act="read-body" aria-expanded="${bodies[t.uid] !== undefined}">${bodies[t.uid] !== undefined ? "Hide message" : "Read message"}</button>${gmail}</div>${bodies[t.uid] !== undefined ? `<pre class="bodytext" tabindex="0" aria-label="Message text">${esc(bodies[t.uid] || "No text.")}</pre>` : ""}`
-    : "";
+  const read = readHTML(t);
   const ev = t.event ? `<div class="spec"><div><span>Event</span><b>${esc(t.event.summary)}${t.event.cancelled ? " · cancelled" : ""}<br>${esc(evWhen(t.event))}${t.event.location ? "<br>" + esc(t.event.location) : ""}${t.event.zone_name ? `<br>Time zone “${esc(t.event.zone_name)}” is not one this app knows, so the time is shown as written` : ""}${t.event.recurring ? "<br>This invitation repeats; only the first time is kept" : ""}</b></div></div>${!t.event.cancelled && !isHub ? '<div class="drow"><button class="mini" data-act="save-ics">Save .ics</button><span class="lbl">into Downloads (or your user folder if there is none); you open it</span></div>' : ""}` : "";
   const remind = isLocal(t) && t.kind !== "followup" ? remindHTML(t) : "";
   const note = `<label class="lbl nl" for="n${t.uid}">Note</label><textarea id="n${t.uid}" class="dtext note" data-note="${t.uid}" rows="2" maxlength="2000" placeholder="Anything to remember about this" aria-label="Note">${esc(t.note || "")}</textarea>`;
@@ -200,7 +206,8 @@ function handleExtra(e, t, act) {
     case "save-ics":
       (async () => { busy++; try { const p = await rpc("save_event", { uid: t.uid }); toast("Saved " + p) } catch (err) { toast(String(err).replace(/^Error: /, "")) } finally { busy-- } })();
       return true;
-    case "copy-gmail": copyText("https://mail.google.com/mail/u/" + (multi() && acctInfo(t) ? encodeURIComponent(acctInfo(t).user) : "0") + "/#search/" + encodeURIComponent("rfc822msgid:" + String(t.message_id).replace(/^<|>$/g, ""))); return true;
+    case "copy-gmail": copyText(gmailLink(t)); return true;
+    case "open-gmail": rpc("open_page", { url: gmailLink(t) }).catch(() => toast("Couldn't open your web browser. Use Copy Gmail link instead.")); return true;
     case "due-clear": setDue(t, ""); return true;
     case "read-body":
       if (bodies[t.uid] !== undefined) { delete bodies[t.uid]; render(); return true }
@@ -218,7 +225,7 @@ function handleExtra(e, t, act) {
       const p = el.dataset.preset, ids = members(t).map(x => x.uid), until = p === "clear" ? 0 : (p === "3h" ? Date.now() / 1000 + 10800 : Date.now() / 1000 + 86400);
       ids.forEach(u => { const x = find(u); if (x) x.snooze_until = until; call("set_snooze", { uid: u, preset: p }) });
       undoStack.push(() => ids.forEach(u => { const x = find(u); if (x) x.snooze_until = 0; call("set_snooze", { uid: u, preset: "clear" }) }));
-      if (p !== "clear") { showUndo("Snoozed"); openUid = null } render(); return true;
+      if (p !== "clear") { showUndo(easy() ? "Put away until tomorrow" : "Snoozed"); openUid = null } render(); return true;
     }
     case "pref": {
       const lvl = el.dataset.level; t.pref = lvl === "normal" ? "" : lvl;

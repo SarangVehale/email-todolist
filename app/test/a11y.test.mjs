@@ -62,13 +62,42 @@ suite("what a screen reader and a pointer meet", it => {
     assert.equal(await page.run(() => document.querySelector("[data-s=aimode]").getAttribute("aria-label")), "Ranking mode");
   });
 
-  it("the wizard, every step", async page => {
-    await page.run(() => { W.step = 0; openWizard() });
-    for (let step = 0; step < 6; step++) {
-      await page.run(st => { W.step = st; W.tested = { ok: true, sent: "Sent" }; drawWizard() }, step);
+  it("the wizard, every screen", async page => {
+    await page.run(() => { W.user = "me@gmail.com"; W.step = "welcome"; openWizard() });
+    const screens = [["welcome", "other"], ["address", "other"], ["guide", "gmail"], ["guide", "gmail", "refused"], ["guide", "gmail", "shown"], ["other", "other"], ["outlook", "outlook"], ["ready", "gmail"]];
+    for (const [step, provider, extra] of screens) {
+      await page.run((st, pr, ex) => {
+        W.step = st; W.provider = pr; W.host = "imap.example.org"; W.show = ex === "shown"; W.pw = ex ? "abcd efgh ijkl mnop" : "";
+        W.result = ex === "refused" ? friendly("sign-in refused: [AUTHENTICATIONFAILED] Invalid credentials (Failure)", pr, "") : null; drawWizard();
+        if (ex === "refused") veil.querySelector("details.why").open = true;
+      }, step, provider, extra);
       await page.settle(100);
-      clean(await page.run(problems), "wizard step " + step);
+      clean(await page.run(problems), "wizard screen " + step + (extra ? " (" + extra + ")" : ""));
     }
+  });
+
+  it("the easy view and the light colours pass the same checks at every text size", async page => {
+    const looks = [["easy", "light", "large"], ["easy", "light", "huge"], ["easy", "dark", "large"], ["dense", "light", "normal"], ["dense", "dark", "huge"]];
+    for (const [mode, theme, size] of looks) {
+      const where = `${mode} view, ${theme} colours, ${size} text`;
+      await page.run((m, t, s) => { localStorage.clear(); if (m === "easy") localStorage.setItem("ia.easy", "1"); localStorage.setItem("ia.theme", t); localStorage.setItem("ia.size", s); applyLook(); lastSnap = ""; render() }, mode, theme, size);
+      await page.settle(250);
+      clean(await page.run(problems), where + ": the list");
+      await page.run(() => { cur = lastList[0].uid; openUid = cur; render() }); await page.settle(300);
+      clean(await page.run(problems), where + ": an opened message");
+      await page.run(() => { openUid = null; render() });
+      await openSettings(page);
+      clean(await page.run(problems), where + ": Settings");
+      if (mode === "easy") { await page.click("[data-s=moresettings]"); await page.settle(200); clean(await page.run(problems), where + ": Settings with More options") }
+      await page.key("Escape"); await page.key("Escape"); await page.settle(150);
+      await page.run(() => { W.user = "me@gmail.com"; W.provider = "gmail"; W.show = false; W.pw = ""; W.result = friendly("sign-in refused: x", "gmail", ""); openWizard() });
+      for (const step of ["welcome", "guide", "ready"]) {
+        await page.run(st => { W.step = st; drawWizard() }, step); await page.settle(120);
+        clean(await page.run(problems), where + ": the " + step + " screen");
+      }
+      await page.run(() => closeVeil());
+    }
+    await page.run(() => localStorage.clear());
   });
 
   it("the Add a mailbox dialog, the add-task dialog and the shortcut card", async page => {

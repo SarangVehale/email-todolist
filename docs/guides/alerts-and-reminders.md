@@ -39,7 +39,7 @@ An alert held back by quiet hours or by the category list is dropped, not delive
 
 ## Desktop notifications
 
-**Settings**, section **Alerts**: tick **Desktop notifications**. It is on by default, and also a choice in step 4 of the wizard. The
+**Settings**, section **Alerts**: tick **Desktop notifications**. It is on by default: setup turns it on and offers no choice. The
 app uses your system's notification service. What your system does with them (do-not-disturb, per-app permission) is outside the app
 and not checked here.
 
@@ -49,8 +49,8 @@ ntfy is a free notification service. The app posts to an address made from the s
 subscribed to the same topic shows it.
 
 1. Install the ntfy app on your phone.
-2. In the wizard (step 4) press **Generate** beside "Phone alerts with ntfy (optional)", or type a name into **ntfy topic** in
-   Settings, section **Alerts**. The generated name looks like `inbox-` followed by 16 characters.
+2. Type a name into **ntfy topic** in Settings, section **Alerts** (the first-run screens no longer ask for it). Choose a long name nobody
+   would guess: it works like a password. A name such as `inbox-` followed by 16 random letters and digits is a good one.
 3. Subscribe to the same topic in the ntfy app.
 
 The topic may use letters, digits, `-` and `_` (up to 64 characters), or the window says "Alert topic can only use letters, digits, - and

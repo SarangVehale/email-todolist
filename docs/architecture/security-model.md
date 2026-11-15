@@ -53,6 +53,8 @@ are desktop-only. A local model reached at a non-local address would be a fourth
 | Secret | Lives in | Reaches | Never in |
 | --- | --- | --- | --- |
 | Mail app password, one per mailbox | OS keychain, service `InboxAgent`, entry `imap-password` or `imap-password-<n>` (`secrets::imap_key`) | Memory of that mailbox's watcher and write-back threads; the TLS login to its own server | `settings.json`, `agent.db`, `state`, a backup, the log |
+| Refresh token of a Google or Microsoft sign-in, one per mailbox that uses it | OS keychain, entry `oauth-refresh-<n>` (`secrets::oauth_key`) | The body of a POST to that provider's token address, only to get an access token | `settings.json` (which holds only that the mailbox signs in this way), `agent.db`, the log, a backup, `state`, an address (never in a URL: revoking sends it in the body) |
+| Access token of that sign-in | Memory only (`oauth.rs`), about an hour | The XOAUTH2 login to `imap.gmail.com` or `outlook.office365.com` only (the mailbox's provider, whatever the settings say) | Disk and every log |
 | Anthropic API key | OS keychain, entry `anthropic-key` | The `x-api-key` header of requests to `https://api.anthropic.com/v1/messages` only | Every file; `state` carries only `has_anthropic_key` (desktop) |
 | Hub access code | `settings.json`, `hub.token`, 32 characters from `rand::rng` (`core::new_token`) | The desktop `state` (settings), the QR code and URL from `hub_info`, the phone's `localStorage`; compared in constant time (`hub::ct_eq`) | A backup; the phone's address bar (removed after the first load) |
 | ntfy topic | `settings.json`, `alerts.ntfy_topic` | The URL of each alert | A backup |

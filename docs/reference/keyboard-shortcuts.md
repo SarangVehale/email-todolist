@@ -12,6 +12,8 @@ Every key the window handles, by mode, as the code handles it (`keydown` listene
   drop-down (search, note, draft, title, due date). The keys then do what the box does.
 * While a dialog is open, the list keys are off (see [Dialogs](#dialogs)).
 * `Enter` or `Space` on a focused button or link presses that button; it does not open the row.
+* The [simple view](../guides/the-simple-view.md) hides the key caps, the circles and the stars, not the keys: every key below still works there
+  (`X` and `E` do what **Done** does, `H` what **Later** does), except that the Starred and Log tabs, search and the filter bar are not drawn.
 
 ## Modes
 

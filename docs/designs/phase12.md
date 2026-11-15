@@ -1,6 +1,6 @@
 # Phase 12: simple enough for a grandmother
 
-> **Status:** draft (Run 10, 2026-11-15) · **Audience:** maintainers · **Last reviewed:** 2026-11-15
+> **Status:** accepted (Run 10, 2026-11-15): steps 1 to 3 are built, step 4 (the gates and the release rehearsal) is next · **Audience:** maintainers · **Last reviewed:** 2026-11-15
 
 The owner's goal: "The entire app should be stupidly simple to use. My grandma should get it up and running." Three council seats
 (Opus, Sonnet, Fable) read the app as an 80-year-old on a Windows laptop with a Gmail, Outlook, Yahoo or iCloud address would meet it, blind to
@@ -41,16 +41,21 @@ each other. They agreed on almost everything; this is what they said and what is
 
 ## What is built, in order
 
-1. **Easy setup.** Welcome (what it does and does not do, in three sentences); the email address; the provider guide (a button that opens the
-   provider's page, three steps, "I have the code" and a large paste box that takes the clipboard); the test runs by itself; **Open my list**.
-   Alerts on, filing off, phone off, rules only, and a sentence about starting with Windows. *Tests:* the whole flow in the window suite;
-   the provider is read from the address (a table test); errors map to sentences (a table test).
-2. **Easy look.** Text size (Normal, Large, Huge; Large by default), a light theme (default in Easy mode), plain section names, a big **Done**
+1. **Easy setup (built).** Welcome (what it does and does not do, in three sentences); the email address; the provider guide (a button that opens the
+   provider's page, three steps, a large paste box and a **Paste** button that takes the clipboard); one **Connect** that tests, saves and finishes; a
+   last screen with **Open my list**. Alerts on, filing off, phone off, rules only, and a sentence about starting with Windows and about the app
+   running when the window is closed. *Tests:* the whole flow in the window suite; the provider is read from the address (a table test); errors map to
+   sentences (a table test); the pages the window opens are checked against the engine's list (an engine test).
+   *What differs from the first plan:* there is no separate "Test" step and no auto-test on typing (Connect, or Paste, is the test); the Add a mailbox
+   dialog in Settings keeps its single form and gains the same button and sentences, not the three screens (a second mailbox is rare); the one-time
+   sentence about the window closing is on the last setup screen, not on the first real close (the shell would have to show it: that is left for a
+   later change).
+2. **Easy look (built; the guide is `guides/the-simple-view.md`).** Text size (Normal, Large, Huge; Large by default), a light theme (default in Easy mode), plain section names, a big **Done**
    and **Later** on every card, the dense page's dots, rail, counters and key hints hidden, an **Undo** that stays until the next action, a
    first-run card, "Open this email" in the mail's own website, a sentence on the first close of the window, a "last checked" line, and a
    Settings page of five rows with "More options" under it. *Tests:* the accessibility checks (contrast, names, targets) run in both
    themes and every size; the hostile-text test runs in Easy mode too.
-3. **Sign in with Google and with Microsoft.** XOAUTH2 in the IMAP client, a token store with one refresher, the loopback (Google) and
+3. **Sign in with Google and with Microsoft (built, and off until the owner registers the app: [ADR-0015](../adr/0015-sign-in-with-google-and-microsoft-needs-the-owners-client-id.md), [the runbook](../runbooks/register-sign-in.md)).** XOAUTH2 in the IMAP client, a token store with one refresher, the loopback (Google) and
    device-code (Microsoft) flows, a mailbox that says how it signs in, sign-out that removes the right keychain entries. *Tests:* a scripted
    token server and a scripted IMAP server that accepts XOAUTH2 (success, a rejected token that is refreshed once, a revoked grant, a flow
    with the wrong state, a hostile redirect), and the Phase 3 checklist item by item.

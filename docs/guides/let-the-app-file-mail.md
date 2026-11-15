@@ -26,8 +26,7 @@ The app never sends mail, with write-back on or off.
 | New mail is ranked | Adds a category label such as `AI/Work`, for mail that arrives while it is on | Nothing |
 | **Save to Drafts** on a reply draft | Appends the draft to the Drafts folder, flagged as a draft | The same, to the folder the server flags as Drafts, else `Drafts` |
 
-The Settings text says the same in short: "Done archives, star flags, priorities label (Gmail)." The wizard says: "Marking a task done
-archives the message. Stars become flags, and on Gmail priorities become labels." Both agree with the table: a priority becomes a
+The Settings text says the same in short: "Done archives, star flags, priorities label (Gmail)." It agrees with the table: a priority becomes a
 label on Gmail and nothing elsewhere.
 
 What it never does: send mail, delete a message you have not archived (if the server cannot move a message, the app copies it to
@@ -59,8 +58,7 @@ by something else) and "could not reach mailbox for updates: …".
 
 ## Switch it on
 
-1. At first run: the last wizard step, **Let Inbox Agent file mail for me**. Later: **Settings**, section **Mailbox**, tick **Let Inbox
-   Agent file mail**. It shows "N change(s) waiting" while changes are queued.
+1. **Settings**, section **Mailbox**, tick **Let Inbox Agent file mail**. It is off after setup, which no longer asks. It shows "N change(s) waiting" while changes are queued.
 2. The queued changes start applying within seconds. This includes changes made by your rules (a rule that files mail marks it done; a
    rule that sets a priority queues its label).
 

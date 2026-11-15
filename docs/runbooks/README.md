@@ -39,6 +39,7 @@ flowchart TD
 | [Damaged database and recovery](damaged-database-and-recovery.md) | The Log says the database was set aside and rebuilt, or the status says the data is from a newer version | A user |
 | [Phone hub unreachable](phone-hub-unreachable.md) | The phone cannot load the list, or shows "Not connected" | A user |
 | [A password, key or code may have leaked](leaked-secret.md) | You pasted an app password, your Anthropic key, the phone access code or the ntfy topic where others could see it, or a computer was lost | A user |
+| [Register the app for sign-in](register-sign-in.md) | You want "Sign in with Google" and "Sign in with Microsoft" to appear | The owner |
 | [Cut a release](cut-a-release.md) | You are publishing a version | A release manager |
 | [CI failure](ci-failure.md) | A check on a push or pull request is red | A maintainer |
 | [Documentation maintenance](documentation-maintenance.md) | You changed code and need to know which documents to update, or `scripts/check_docs.py` fails | A maintainer |

@@ -49,11 +49,13 @@ or not at all.
 | `status` | string | The sync status, the worst of all mailboxes: an `error: ...` first, then `no password`, `connecting`, `syncing`, any other value, else `idle`. `starting` before any mailbox reports; `setup` before setup is finished | same |
 | `pending` | integer | Mailbox changes waiting to be written back, at most 1,000 counted. Grows while write-back is off | same |
 | `has_anthropic_key` | boolean | An Anthropic key is in the keychain | always `false` |
-| `gmail` | boolean | At least one mailbox is on Gmail (offers "Copy Gmail link") | same |
+| `gmail` | boolean | At least one mailbox is on Gmail (offers "Open in Gmail" and "Copy Gmail link") | same |
 | `update_feature` | boolean | The build names a repository to check for updates (`updates::UPDATE_REPO`). It is empty today, so `false` | same |
 | `update` | object or `null` | `{"version", "url"}` of a newer release when one was found and the check is on; `null` otherwise (always `null` today) | always `null` |
 | `rules` | array of rule | Your rules, in order (shape in [the command reference](../api/rpc.md#rules_save)) | absent |
-| `accounts` | array | One `{"id", "user", "host", "gmail", "status"}` per mailbox: its number 0 to 4, login, server, whether it is Gmail, and its own status | absent |
+| `sign_in` | `{google, microsoft}` | Whether this build offers "Sign in with Google" and "Sign in with Microsoft" (it has a client ID for each: [the runbook](../runbooks/register-sign-in.md)). Both are `false` today | absent |
+| `checked_at` | integer | When, in Unix seconds, a mailbox last finished reading its mail (the status last became `idle`); 0 until that has happened in this launch. The easy list says "last read at" with it | absent |
+| `accounts` | array | One `{"id", "user", "host", "gmail", "status", "auth"}` per mailbox: its number 0 to 4, login, server, whether it is Gmail, its own status, and `auth` (`""` for an app password, `google` or `microsoft` for a sign-in with that account) | absent |
 
 ## The task object
 
@@ -137,7 +139,9 @@ Invented data, cut to two tasks and two log lines.
   "update_feature": false,
   "update": null,
   "rules": [],
-  "accounts": [{"id": 0, "user": "you@example.com", "host": "imap.example.com", "gmail": false, "status": "idle"}]
+  "checked_at": 1794650400,
+  "sign_in": {"google": false, "microsoft": false},
+  "accounts": [{"id": 0, "user": "you@example.com", "host": "imap.example.com", "gmail": false, "status": "idle", "auth": ""}]
 }
 ```
 

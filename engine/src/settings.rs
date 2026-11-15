@@ -150,6 +150,9 @@ pub struct Settings {
     pub account: AccountCfg,
     /// Up to four more, numbered 1 to 4. Their passwords are in the keychain, never here.
     pub more_accounts: Vec<AccountCfg>,
+    /// The mailboxes that sign in with a Google or Microsoft account instead of an app password: mailbox number to `google` or `microsoft`. A mailbox
+    /// that is not listed uses its app password. The tokens are in the keychain, never here. Changed only by the sign-in commands, like the accounts.
+    pub oauth: std::collections::BTreeMap<u32, String>,
     pub ai: AiCfg,
     pub alerts: AlertCfg,
     pub hub: HubCfg,
@@ -166,6 +169,7 @@ impl Default for Settings {
             onboarded: false,
             account: AccountCfg::default(),
             more_accounts: vec![],
+            oauth: std::collections::BTreeMap::new(),
             ai: AiCfg::default(),
             alerts: AlertCfg::default(),
             hub: HubCfg::default(),
@@ -332,6 +336,19 @@ impl Settings {
             a.check()?;
             if !seen_pairs.insert(key(a)) {
                 bail!("That mailbox is already in the app");
+            }
+        }
+        // a sign-in with an account is for the one server of that provider, whatever else is said: its token is never sent anywhere else
+        let all = self.mailboxes();
+        for (id, kind) in &self.oauth {
+            let Some(m) = all.iter().find(|m| m.id == *id) else {
+                bail!("A sign-in belongs to a mailbox that is not set up");
+            };
+            let Some(p) = crate::oauth::Provider::parse(kind) else {
+                bail!("That kind of sign-in isn't known");
+            };
+            if m.host != p.host() || m.port != 993 {
+                bail!("A sign-in with {} is only for {}", p.label(), p.host());
             }
         }
         Ok(())

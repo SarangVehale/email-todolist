@@ -57,7 +57,7 @@ sequenceDiagram
 ```
 
 The window also calls two Tauri plugin commands directly, not through `rpc`: `plugin:autostart|enable` and
-`plugin:autostart|disable`, when the setup wizard finishes ("Start with this computer"). Desktop notifications go the other
+`plugin:autostart|disable`, when the last first-run screen is closed with **Open my list** ("Open Inbox Agent when I turn on this computer"). Desktop notifications go the other
 way: the engine calls the shell's notify callback, which uses the notification plugin. The capability file
 `app/src-tauri/capabilities/default.json` grants `core:default`, `notification:default` and the three autostart permissions.
 

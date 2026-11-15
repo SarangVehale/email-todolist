@@ -37,6 +37,23 @@ let view = "todo", cur = null, openUid = null, undoStack = [], lastSnap = "", bu
 let flt = { cat: "all", only: "", acct: "", q: "", sort: "priority", hits: new Set(), hitsFor: "" }; // category / reply / draft filters, search text, sort order
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+/* ───────── how it looks: per device ───────── */
+/* A phone and a laptop can look different, so the look is kept in the device's own storage. The easy view (big buttons, plain words, light colours,
+   large text) is turned on when setup finishes on a new install; an install that was already in use keeps the dense view until its owner turns the easy one on. */
+const lookGet = k => { try { return localStorage.getItem("ia." + k) } catch { return null } };
+const lookSet = (k, v) => { try { localStorage.setItem("ia." + k, v) } catch { /* storage refused: the look lasts until the window closes */ } };
+const SIZES = { normal: 1, large: 1.2, huge: 1.45 };
+const easy = () => lookGet("easy") === "1";
+const textSize = () => SIZES[lookGet("size")] ? lookGet("size") : easy() ? "large" : "normal";
+const themeOf = () => ["light", "dark"].includes(lookGet("theme")) ? lookGet("theme") : easy() ? "light" : "dark";
+function applyLook() {
+  const root = document.documentElement;
+  root.style.zoom = SIZES[textSize()];
+  root.classList.toggle("easy", easy());
+  root.classList.toggle("light", themeOf() === "light");
+  document.querySelector("meta[name=theme-color]")?.setAttribute("content", themeOf() === "light" ? "#ffffff" : "#000000");
+  if (easy() && (view === "star" || view === "log")) view = "todo"; // the easy view has neither tab
+}
 /* Nothing-style dot-matrix numerals: 5x7 glyphs drawn as dots (lit = on, unlit = faint) */
 const DM = { 0: "01110 10001 10011 10101 11001 10001 01110", 1: "00100 01100 00100 00100 00100 00100 01110", 2: "01110 10001 00001 00010 00100 01000 11111", 3: "11110 00001 00001 01110 00001 00001 11110", 4: "00010 00110 01010 10010 11111 00010 00010", 5: "11111 10000 11110 00001 00001 10001 01110", 6: "00110 01000 10000 11110 10001 10001 01110", 7: "11111 00001 00010 00100 01000 01000 01000", 8: "01110 10001 10001 01110 10001 10001 01110", 9: "01110 10001 10001 01111 00001 00010 01100" };
 const dm = (n, cls = "") => {
@@ -45,6 +62,8 @@ const dm = (n, cls = "") => {
   return `<svg class="dm ${cls}" viewBox="0 0 ${s.length * 6 - 1} 7" role="img" aria-label="${s}">${dots}</svg>`;
 };
 const ago = t => { const h = (Date.now() / 1000 - t) / 3600; return h < 1 ? Math.max(1, Math.round(h * 60)) + "m" : h < 24 ? Math.round(h) + "h" : Math.round(h / 24) + "d" };
+/** How long ago, in words, for the easy list. */
+const agoWords = t => { const m = Math.max(1, Math.round((Date.now() / 1000 - t) / 60)); if (m < 60) return m === 1 ? "a minute ago" : m + " minutes ago"; const h = Math.round(m / 60); if (h < 24) return h === 1 ? "an hour ago" : h + " hours ago"; const d = Math.round(h / 24); return d === 1 ? "yesterday" : d + " days ago" };
 const label = t => t.action || t.subject;
 /* search: what the list can see itself, and what the engine found inside the stored message text (desktop only) */
 const textMatch = (t, q) => {
@@ -57,6 +76,7 @@ function toast(msg) { const e = document.createElement("div"); e.className = "to
 
 /* ───────── list model ───────── */
 const SECT = [["Now", "now"], ["Today", ""], ["This week", ""], ["Later", ""]];
+const SECT_EASY = ["Needs you now", "Needs you today", "Can wait", "Not important"];
 const sect = p => p >= 5 ? 0 : p === 4 ? 1 : p === 3 ? 2 : 3;
 /* what the task is worth when ordering: due today or overdue lifts it to at least 4 */
 const maxp = t => t._max ?? t.priority;
@@ -146,10 +166,33 @@ function listFor() { const p = parts(); return [...p.main, ...(autoOpen ? p.auto
 /* ───────── render ───────── */
 /* what an open row shows below its title: drawn only for the open row (the other rows' panels are hidden anyway, and they were most of the page) */
 function moreHTML(t) {
+  if (easy()) return easyMoreHTML(t);
   const sg = t.signals || {}, why = [sg.known && "Someone you write to", sg.reply && "Replying to you", sg.bulk && "Automated or bulk"].filter(Boolean).join(" · ") || "Unknown sender";
   return `${t.closed_by === "replied" ? `<div class="note">Closed automatically because ${t.kind === "followup" ? "they replied" : "you replied"}. Press X or the circle to reopen it if it still needs you.</div>` : ""}${t.gone && t.status !== "done" ? '<div class="note">This message is no longer in your inbox. You may have archived or moved it somewhere else.</div>' : ""}<p>${esc(t.excerpt) || "No text."}</p>${t._thread ? `<div class="thread"><span class="lbl">Earlier in this conversation</span>${t._thread.slice(1, 9).map(x => `<div>${esc(x.sender)} · ${esc(x.subject)} · ${ago(x.received)}</div>`).join("")}${t._thread.length > 9 ? `<div>and ${t._thread.length - 9} more</div>` : ""}</div>` : ""}<div class="spec">${isLocal(t) ? "" : `<div><span>From</span><b>${esc(t.sender)} · ${esc(t.addr)}</b></div><div><span>Signals</span><b>${esc(why)}</b></div><div><span>Why</span><b>${esc(t.why)}</b></div><div><span>Mailbox</span><b>${S.settings.writeback ? "Done files it away" : "Write-back off · changes stay here"}</b></div>`}</div>${replyHTML(t)}`;
 }
+/** What an open row shows in the easy view: why it is here, the start of the message, a button to read all of it and to open it in Gmail. Nothing else. */
+function easyMoreHTML(t) {
+  const notes = (t.closed_by === "replied" ? `<div class="note">Closed by itself because ${t.kind === "followup" ? "they replied" : "you replied"}. Press Put back (in Done) if it still needs you.</div>` : "") + (t.gone && t.status !== "done" ? '<div class="note">This message is no longer in your inbox. You may have moved it somewhere else.</div>' : "");
+  return `${notes}<p>${esc(t.excerpt) || "No text."}</p>${isLocal(t) ? "" : `<div class="spec"><div><span>From</span><b>${esc(t.sender)}</b></div><div><span>Why it is here</span><b>${esc(t.why)}</b></div></div>${readHTML(t)}`}`;
+}
+/** A message in the easy view: what it is, who from and when, and two big buttons. Done hides it from the list; Later puts it away until tomorrow. */
+function easyRowHTML(t) {
+  const done = t.status === "done", name = esc(label(t));
+  const buttons = done ? `<button class="big" data-act="done" aria-label="Put back: ${name}">Put back</button>`
+    : `<button class="big" data-act="done" aria-label="Done: ${name}">Done</button>${isSnoozed(t) ? "" : `<button class="big ghost" data-act="later" aria-label="Later: ${name}">Later</button>`}`;
+  return `<div class="row ${t.uid === cur ? "cur" : ""} ${t.uid === openUid ? "open" : ""} ${done ? "isdone" : ""}" data-uid="${t.uid}">
+    <div class="mid" data-act="open" role="button" tabindex="0" aria-expanded="${t.uid === openUid}"><div class="t">${name}</div><div class="s">${t.urgent ? "<b>Urgent</b> · " : ""}${esc(t.sender)} · ${agoWords(t.received)}</div></div>
+    <div class="ea">${buttons}</div>
+    <div class="more">${t.uid === openUid ? moreHTML(t) : ""}</div>
+  </div>`;
+}
+/** The card at the top of the easy list until it is dismissed once. */
+const welcomeCard = () => `<div class="welcomecard" role="region" aria-label="How this works"><b>How this works</b>
+  <p>Inbox Agent only reads your email. It never sends anything, and nothing in your mailbox changes.</p>
+  <p><b>Done</b> hides a message from this list. <b>Later</b> puts it away until tomorrow. If you press the wrong one, <b>Undo</b> appears at the bottom of the window.</p>
+  <button class="big" data-act="welcomed">Got it</button></div>`;
 function rowHTML(t) {
+  if (easy() && !selMode) return easyRowHTML(t);
   const chosen = selMode && sel.has(t.uid);
   return `<div class="row ${t.uid === cur ? "cur" : ""} ${t.uid === openUid && !selMode ? "open" : ""} ${t.status === "done" ? "isdone" : ""} ${selMode ? "selmode" : ""} ${chosen ? "chosen" : ""}" data-uid="${t.uid}">
     <button class="chk" data-act="${selMode ? "sel" : "done"}" ${selMode ? `role="checkbox" aria-checked="${chosen}" aria-label="Select"` : `aria-label="${t.status === "done" ? "Reopen" : "Mark done"}"`}><b>${selMode ? "" : "X"}</b>${CHECK}</button>
@@ -164,11 +207,12 @@ function render() {
   const open = S.tasks.filter(t => t.status !== "done" && !isSnoozed(t)), snoozed = S.tasks.filter(t => t.status !== "done" && isSnoozed(t)), st = S.status || "";
   const ok = st === "idle" || st === "syncing", err = st.startsWith("error") || st === "no password";
   const rows = list => groupThreads(list).length;
-  const tabs = [["todo", "To-do", rows(open)], ["star", "Starred", rows(open.filter(t => t.star))], ["snoozed", "Snoozed", rows(snoozed)], ["done", "Done", doneTotal()], ["log", "Log", ""]];
+  const tabs = easy() ? [["todo", "Your list", rows(open)], ["snoozed", "Later", rows(snoozed)], ["done", "Done", doneTotal()]]
+    : [["todo", "To-do", rows(open)], ["star", "Starred", rows(open.filter(t => t.star))], ["snoozed", "Snoozed", rows(snoozed)], ["done", "Done", doneTotal()], ["log", "Log", ""]];
   $("#bar").innerHTML = `<div class="brand"><span class="mark">要</span><span class="dot ${ok ? "" : err ? "err" : "off"}" title="${esc(statusTitle(st))}"></span></div>
     <nav>${tabs.map(([k, n, c]) => `<button class="${view === k ? "on" : ""}" data-view="${k}">${n}${c !== "" && c !== 0 ? `<i>${c}</i>` : ""}</button>`).join("")}</nav><span class="sp"></span>${view === "log" ? "" : `<button class="gear ${selMode ? "on" : ""}" data-act="selectmode" aria-pressed="${selMode}">Select</button>`}<button class="gear" data-act="addtask">Add task</button>${isHub ? "" : '<button class="gear" data-act="settings">Settings</button>'}`;
-  const names = { todo: "To<em>-do</em>", star: "Starred", snoozed: "Snoozed", done: "Done", log: "Log" };
-  const d = new Date(), kick = `${{ todo: "Inbox", star: "Marked", snoozed: "Resting", done: "Filed", log: "Record" }[view]} · ${d.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" })}`;
+  const names = easy() ? { todo: "Your list", star: "Starred", snoozed: "Put away until later", done: "Done", log: "Log" } : { todo: "To<em>-do</em>", star: "Starred", snoozed: "Snoozed", done: "Done", log: "Log" };
+  const d = new Date(), kick = easy() ? d.toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" }) : `${{ todo: "Inbox", star: "Marked", snoozed: "Resting", done: "Filed", log: "Record" }[view]} · ${d.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" })}`;
   let h = `<div class="kick">${kick}</div><h1>${names[view]}</h1>`;
   if (S.update && S.update.version !== updateDismissed && !isHub) h += `<div class="notice" role="status"><span>Version ${esc(S.update.version)} is available.</span><button class="mini" data-act="copy-update">Copy download link</button><button class="mini" data-act="dismiss-update">Not now</button></div>`;
   if (view !== "done") doneWanted = 200; // the poll asks for more finished tasks only while the Done tab is open
@@ -197,13 +241,15 @@ function render() {
     drawMore(curIdx); // the cursor is always on a drawn row
     const nAuto = P.auto.length, nGone = P.gone.length, shown = P.main;
     const hi = shown.filter(t => maxp(t) >= 4).length, ur = shown.filter(t => t.urgent).length, dr = shown.filter(t => t.draft).length;
+    if (easy() && view === "todo" && shown.length) h += `<p class="sub2 ez">${hi ? `${hi} ${hi === 1 ? "message needs" : "messages need"} you.` : "Nothing is urgent. The rest can wait."}</p>`;
     h += shown.length ? `<div class="stats"><div class="stat">${dm(shown.length)}<em>${view === "done" ? "done" : view === "snoozed" ? "resting" : "open"}</em></div>${view === "done" || view === "snoozed" ? "" : `<div class="stat">${dm(hi, hi ? "r" : "")}<em>high</em></div><div class="stat">${dm(ur, ur ? "r" : "")}<em>urgent</em></div><div class="stat">${dm(dr)}<em>drafts</em></div>`}${S.pending ? `<div class="stat">${dm(S.pending)}<em>to file</em></div>` : ""}</div>` : "";
     if (selMode) h += selbarHTML();
-    if ((view === "todo" || view === "star") && (baseList().length || flt.q)) h += filterHTML();
+    if (!easy() && (view === "todo" || view === "star") && (baseList().length || flt.q)) h += filterHTML();
+    if (easy() && view === "todo" && lookGet("welcomed") !== "1") h += welcomeCard();
     let last = -1;
     for (const t of shown.slice(0, lim.main)) {
       const s = view === "todo" && flt.sort === "priority" ? sect(ep(t)) : -2;
-      if (s >= 0 && s !== last) h += `<div class="sec ${SECT[s][1]}"><span>0${s + 1} // ${SECT[s][0]}</span><i>${shown.filter(x => sect(ep(x)) === s).length}</i></div>`;
+      if (s >= 0 && s !== last) h += `<div class="sec ${SECT[s][1]}"><span>${easy() ? SECT_EASY[s] : `0${s + 1} // ${SECT[s][0]}`}</span><i>${shown.filter(x => sect(ep(x)) === s).length}</i></div>`;
       last = s; h += rowHTML(t);
     }
     h += moreRows(shown.length - lim.main, "main");
@@ -216,13 +262,13 @@ function render() {
       if (goneOpen) { for (const t of P.gone.slice(0, lim.gone)) h += rowHTML(t); h += moreRows(P.gone.length - lim.gone, "gone") }
     }
     const reading = st === "syncing" || st === "connecting";
-    if (!l.length && !nAuto && !nGone) h += `<div class="empty">${view === "done" ? "Nothing done yet" : view === "snoozed" ? "Nothing resting" : flt.q || flt.cat !== "all" || flt.only || flt.acct ? "No matches" : reading ? "Reading your latest mail…" : ok ? "All clear" : "Waiting for mail"}<small>${reading && view === "todo" ? "The first sync can take a minute." : view === "todo" && ok ? "The agent is still watching your inbox." : ""}</small></div>`;
+    if (!l.length && !nAuto && !nGone) h += `<div class="empty">${view === "done" ? "Nothing done yet" : view === "snoozed" ? "Nothing resting" : flt.q || flt.cat !== "all" || flt.only || flt.acct ? "No matches" : reading ? "Reading your latest mail…" : ok ? "All clear" : "Waiting for mail"}<small>${reading && view === "todo" ? (easy() ? "The first time it can take a few minutes. Your list fills in by itself." : "The first sync can take a minute.") : view === "todo" && ok ? "The agent is still watching your inbox." : ""}</small></div>`;
   }
   lastList = l; // the list the cursor moves through (empty on the Log tab)
   const wasSearching = document.activeElement?.id === "q", caret = wasSearching ? document.activeElement.selectionStart : 0;
   $("#view").innerHTML = h;
   if (wasSearching) { const q = $("#q"); q.focus(); q.setSelectionRange(caret, caret) }
-  const msg = err ? `<span class="e">${esc(st === "no password" ? (isHub ? "Open the desktop app to sign in again" : "Sign in again in Settings") : st)}</span>` : ok ? "Watching your inbox" : st === "connecting" ? "Connecting…" : st === "setup" ? "Setup needed" : esc(st);
+  const msg = err ? `<span class="e">${esc(st === "no password" ? (isHub ? "Open the desktop app to sign in again" : "Sign in again in Settings") : st)}</span>` : ok ? (easy() ? easyWatching() : "Watching your inbox") : st === "connecting" ? "Connecting…" : st === "setup" ? "Setup needed" : esc(st);
   const rl = view === "log" ? [] : l.slice(0, 80), ch = Math.max(5, Math.min(18, Math.floor((innerHeight - 40) / Math.max(rl.length, 1))));
   $("#rail").style.setProperty("--ch", ch + "px");
   $("#rail").innerHTML = rl.map(t => `<div class="rc ${t.uid === cur ? "cur" : ""}" data-rail="${t.uid}" title="${esc(label(t))}">${ch >= 10 ? [5, 4, 3, 2, 1].map(n => `<i class="${t.priority >= n ? "h" : ""}"></i>`).join("") : `<i class="${t.priority >= 4 ? "h" : ""}"></i>`}</div>`).join("");
@@ -240,7 +286,11 @@ function twice(btn, label) {
   return false;
 }
 async function call(cmd, args) { busy++; try { await rpc(cmd, args) } catch (e) { toast("Couldn't save: " + e) } finally { busy-- } }
-function showUndo(msg) { $("#undoMsg").textContent = msg; $("#undo").style.display = "flex"; clearTimeout(window.ut); window.ut = setTimeout(() => $("#undo").style.display = "none", 5000) }
+function showUndo(msg) { $("#undoMsg").textContent = msg; $("#undo").style.display = "flex"; clearTimeout(window.ut); if (!easy()) window.ut = setTimeout(() => $("#undo").style.display = "none", 5000) /* the easy view keeps it until the next thing is done, so nobody has to be quick */ }
+/** The status line of the easy view: what the app is doing, and when it last finished reading. */
+const easyWatching = () => S.checked_at ? `Watching your mailbox. Last read at ${new Date(S.checked_at * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}.` : "Watching your mailbox.";
+/** Later: put it away until tomorrow, the same as pressing H. */
+const laterTap = t => handleExtra({ target: { closest: () => ({ dataset: { preset: "tomorrow" } }) } }, t, "snooze");
 /* A repeating task of yours does not go to Done: the engine moves it to its next time. There is no undo for that. */
 const repeating = new Set(); // ids being finished right now
 async function repeatDone(list) {
@@ -298,6 +348,7 @@ document.addEventListener("click", e => {
   if (a === "gonefold") { goneOpen = !goneOpen; render(); return }
   if (a === "copy-update" && S.update) { copyText(S.update.url); return }
   if (a === "dismiss-update" && S.update) { updateDismissed = S.update.version; render(); return }
+  if (a === "welcomed") { lookSet("welcomed", "1"); render(); return }
   const row = e.target.closest(".row"); if (!row) return;
   const t = find(+row.dataset.uid); if (!t) return; cur = t.uid;
   if (selMode) { selectClick(e, t); return }
@@ -307,6 +358,7 @@ document.addEventListener("click", e => {
   if (pb) setPri(t, +pb.dataset.p);
   else if (a === "done") setDone(t);
   else if (a === "star") toggleStar(t);
+  else if (a === "later") laterTap(t);
   else if (!e.target.closest(".more")) { openUid = openUid === t.uid ? null : t.uid; render() }
 });
 document.addEventListener("keydown", e => {
@@ -344,3 +396,5 @@ async function load() {
   } catch (e) { S.status = "error: " + e; if (!$("#veil").classList.contains("show") && !editing()) render() }
 }
 
+
+applyLook(); // the look of this device, before the first draw

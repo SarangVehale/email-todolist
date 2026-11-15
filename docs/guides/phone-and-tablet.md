@@ -14,8 +14,7 @@ computer through the **phone hub**. It takes about five minutes.
 
 ## Steps
 
-1. Open **Settings** (press `,`) and go to **Phone and tablet**. Tick **Phone hub**. (At first run the same switch is "Use on phone or
-   tablet", the last step of the wizard.)
+1. Open **Settings** (press `,`) and go to **Phone and tablet**. Tick **Phone hub**. It is off after setup.
 2. The window shows a QR code and, under it, the address it stands for. The address looks like
    `http://192.168.1.20:8787/?token=…`: your computer's address on its network, port 8787, and a 32-character access code.
 3. Scan the QR code with the phone's camera and open the link. The list appears. The page keeps the access code in the browser's own

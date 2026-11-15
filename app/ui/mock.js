@@ -45,7 +45,15 @@ for (const x of M.tasks) x.mailbox = x.uid >= 2000000000 ? (x.kind === "followup
 for (const u of [15, 18]) { const x = M.tasks.find(y => y.uid === u); x.uid += 400000000; x.mailbox = 1; if (BODIES[u]) { BODIES[u + 400000000] = BODIES[u]; delete BODIES[u] } }
 // A mail server port that is given must be a whole number from 1 to 65535 (the engine refuses anything else; none means 993).
 const portBad = a => a.port !== undefined && a.port !== null && !(Number.isInteger(a.port) && a.port >= 1 && a.port <= 65535);
-const syncAccounts = () => { M.accounts = [M.settings.account, ...M.settings.more_accounts].filter(m => m.host).map(m => ({ id: m.id, user: m.user, host: m.host, gmail: /(^|\.)gmail\.com$/.test(m.host), status: "idle" })) };
+// The pages the app may open in the person's browser: the engine's webpage.rs rule (https, a named host, no user name or port, plain characters only).
+// An engine test reads every address written in setup.js and checks the engine accepts it, so this list cannot drift from the real one unseen.
+const OPEN_HOSTS = ["myaccount.google.com", "accounts.google.com", "mail.google.com", "login.yahoo.com", "mail.yahoo.com", "account.apple.com", "appleid.apple.com", "www.icloud.com", "app.fastmail.com", "login.microsoftonline.com", "login.live.com", "account.live.com", "account.microsoft.com", "microsoft.com", "www.microsoft.com", "outlook.live.com", "outlook.office.com", "outlook.office365.com"];
+const openable = u => typeof u === "string" && u.length <= 2048 && /^https:\/\/[A-Za-z0-9.-]+([/?#][^\s\\\u0000-\u001f\u007f-\u009f]*)?$/.test(u) && OPEN_HOSTS.includes(u.slice(8).split(/[/?#]/)[0].toLowerCase());
+const syncAccounts = () => { M.accounts = [M.settings.account, ...M.settings.more_accounts].filter(m => m.host).map(m => ({ id: m.id, user: m.user, host: m.host, gmail: /(^|\.)gmail\.com$/.test(m.host), status: "idle", auth: (M.settings.oauth || {})[m.id] || "" })) };
+// Sign in with Google or Microsoft: offered only when the address has ?signin=google,microsoft (the real app offers it when the build has a client ID).
+const SIGNIN = (new URLSearchParams(location.search).get("signin") || "").split(",");
+M.sign_in = { google: SIGNIN.includes("google"), microsoft: SIGNIN.includes("microsoft") };
+const flow = { state: "idle", provider: "", user: "", polls: 0 }; // the sign-in that is waiting: it is done on the second poll, so a test can see it waiting
 syncAccounts();
 M.settings.drafts = { auto: false, tone: "friendly", signature: "Best,\nSam", min_priority: 3, daily_cap: 25 };
 Object.assign(M.settings.alerts, { quiet_start: "", quiet_end: "", digest_time: "", categories: [] });
@@ -57,7 +65,7 @@ function mock(cmd, a) {
     case "state": {
       // like the engine: every task that is not finished, and the newest 200 finished ones with their total
       const done = M.tasks.filter(x => x.status === "done").sort((x, y) => (y.done_at || y.received) - (x.done_at || x.received)), shown = Math.min(20000, Math.max(200, Number.isFinite(+(a && a.done)) ? +a.done : 200));
-      return Promise.resolve(JSON.parse(JSON.stringify({ ...M, tasks: [...M.tasks.filter(x => x.status !== "done"), ...done.slice(0, shown)], done_total: done.length, has_anthropic_key: !!M.hasKey, rules: M.rules })));
+      return Promise.resolve(JSON.parse(JSON.stringify({ ...M, tasks: [...M.tasks.filter(x => x.status !== "done"), ...done.slice(0, shown)], done_total: done.length, has_anthropic_key: !!M.hasKey, rules: M.rules, checked_at: Math.floor(Date.now() / 1000) - 125 })));
     }
     case "set_done": if (t().repeat && a.done && t().uid >= 2000000000) { const nx = (t().remind || t().due || "2026-11-17").slice(0, 10); const d = new Date(nx + "T12:00:00"); d.setDate(d.getDate() + (t().repeat === "daily" ? 1 : t().repeat === "weekly" ? 7 : 30)); const iso = d.toISOString().slice(0, 10); if (t().remind) t().remind = iso + t().remind.slice(10); if (t().due) t().due = iso; return Promise.resolve(true) } t().status = a.done ? "done" : "open"; t().done_at = a.done ? Date.now() / 1000 : 0; log((a.done ? "archived “" : "reopened “") + (t().action || t().subject) + "”"); return Promise.resolve(true);
     case "set_snooze": if (a.date) { if (!/^\d{4}-\d{2}-\d{2}$/.test(a.date) || new Date(a.date + "T09:00:00") <= new Date()) return Promise.reject("Pick a day from today (only before 09:00) to a year ahead"); t().snooze_until = new Date(a.date + "T09:00:00").getTime() / 1000; return Promise.resolve(true) } { const p = a.preset; if (!["3h", "tomorrow", "nextweek", "clear"].includes(p)) return Promise.reject("unknown snooze option"); t().snooze_until = p === "clear" ? 0 : Date.now() / 1000 + (p === "3h" ? 10800 : p === "tomorrow" ? 86400 : 604800); log((p === "clear" ? "unsnoozed “" : "snoozed “") + (t().action || t().subject) + "”"); return Promise.resolve(true) }
@@ -109,6 +117,37 @@ function mock(cmd, a) {
     case "export_markdown": return Promise.resolve("# To-do\n" + M.tasks.filter(x => x.status === "open" && !(x.snooze_until > Date.now() / 1000)).map(x => `\n- [ ] **P${x.priority}** ${x.action || x.subject} — ${x.sender} (${x.category})`).join("") + "\n");
     case "set_star": t().star = a.star; return Promise.resolve(true);
     case "set_priority": log(`P${t().priority}→P${a.priority} saved as a correction`); t().priority = a.priority; return Promise.resolve(true);
+    case "oauth_start": {
+      if (!["google", "microsoft"].includes(a.provider)) return Promise.reject("That kind of sign-in isn't known");
+      if (!M.sign_in[a.provider]) return Promise.reject(`Signing in with ${a.provider === "google" ? "Google" : "Microsoft"} is not set up in this build`);
+      if (!/@/.test(a.user || "")) return Promise.reject("That email address isn't valid");
+      Object.assign(flow, { state: "waiting", provider: a.provider, user: a.user, polls: 0 });
+      if (a.provider === "google") { (window.__opened ||= []).push("https://accounts.google.com/o/oauth2/v2/auth?login_hint=" + encodeURIComponent(a.user)); return Promise.resolve({ kind: "google" }) }
+      (window.__opened ||= []).push("https://www.microsoft.com/link");
+      return Promise.resolve({ kind: "microsoft", code: "ABCD-EFGH", url: "https://www.microsoft.com/link" });
+    }
+    case "oauth_poll": {
+      if (flow.state === "waiting" && ++flow.polls >= 2) flow.state = "done";
+      if (flow.state === "waiting") return Promise.resolve(flow.provider === "microsoft" ? { state: "waiting", code: "ABCD-EFGH", url: "https://www.microsoft.com/link" } : { state: "waiting" });
+      if (flow.state === "done") return Promise.resolve({ state: "done", user: flow.user, provider: flow.provider });
+      return Promise.resolve({ state: "idle" });
+    }
+    case "oauth_cancel": flow.state = "idle"; return Promise.resolve(true);
+    case "oauth_finish": {
+      if (flow.state !== "done") return Promise.reject("There is no finished sign-in to use. Sign in again.");
+      const host = flow.provider === "google" ? "imap.gmail.com" : "outlook.office365.com", cfg = { host, port: 993, user: flow.user };
+      let id = a.id || 0;
+      if (a.add) {
+        if (!M.settings.onboarded || !M.accounts.length) return Promise.reject("Set up your first mailbox before adding another");
+        const used = new Set(M.accounts.map(m => m.id)); id = 0; while (used.has(id)) id++;
+        if (id >= 5) return Promise.reject("You can read at most five mailboxes at once");
+      }
+      if (id === 0) M.settings.account = { id: 0, ...cfg }; else if (a.add) M.settings.more_accounts.push({ id, ...cfg }); else { const m = M.settings.more_accounts.find(x => x.id === id); if (!m) return Promise.reject("There is no such mailbox"); Object.assign(m, cfg) }
+      (M.settings.oauth ||= {})[id] = flow.provider; flow.state = "idle"; syncAccounts(); return Promise.resolve(id);
+    }
+    case "open_page":
+      if (!openable(a.url)) return Promise.reject("That page can't be opened from here");
+      (window.__opened ||= []).push(a.url); return Promise.resolve(true); // a test reads what would have been opened; nothing is
     case "test_account": {
       // the same checks, in the same order, as the engine: nothing connects until they pass
       if (portBad(a)) return Promise.reject("That mail server port isn't valid");
@@ -141,7 +180,7 @@ function mock(cmd, a) {
       const id = a.id, had = M.accounts.some(m => m.id === id); if (!had) return Promise.reject("There is no such mailbox");
       M.tasks = M.tasks.filter(x => x.mailbox !== id);
       if (id === 0) M.settings.account = { id: 0, host: "", user: "", port: 993 }; else M.settings.more_accounts = M.settings.more_accounts.filter(m => m.id !== id);
-      syncAccounts(); if (!M.accounts.length) M.settings.onboarded = false; return Promise.resolve(true);
+      delete (M.settings.oauth || {})[id]; syncAccounts(); if (!M.accounts.length) M.settings.onboarded = false; return Promise.resolve(true);
     }
     case "save_settings": { const mg = (x, y) => { for (const k in y) { if (y[k] && typeof y[k] === "object") mg(x[k] ??= {}, y[k]); else x[k] = y[k] } }; mg(M.settings, a.patch); if (M.settings.hub.enabled && !M.settings.hub.token) M.settings.hub.token = "demo"; return Promise.resolve(M.settings) }
     case "set_reminder": {
@@ -180,7 +219,7 @@ function mock(cmd, a) {
     case "test_ai": { const ai = M.settings.ai || {}; if (ai.mode === "ollama" && !String(ai.ollama_model || "").trim()) return Promise.reject("No model is chosen"); if (ai.mode === "anthropic" && !M.hasKey) return Promise.reject("No API key is saved"); } return new Promise(r => setTimeout(() => r({ priority: 5, category: "work", action: "Sign the contract", why: "deadline today" }), 700));
     case "rotate_hub_token": return Promise.resolve(true);
     case "finish_setup": if (!M.settings.account.host || !M.settings.account.user) return Promise.reject("Add your first mailbox before finishing setup"); M.settings.onboarded = true; return Promise.resolve(true);
-    case "sign_out": M.settings.onboarded = false; M.settings.account = { id: 0, host: "", user: "", port: 993 }; M.settings.more_accounts = []; syncAccounts(); return Promise.resolve(true);
+    case "sign_out": M.settings.onboarded = false; M.settings.account = { id: 0, host: "", user: "", port: 993 }; M.settings.more_accounts = []; M.settings.oauth = {}; syncAccounts(); return Promise.resolve(true);
     case "hub_info": { let c = ""; for (let y = 0; y < 21; y++) for (let x = 0; x < 21; x++) if ((x * 7 + y * 13 + x * y) % 3 === 0) c += `<rect x="${x}" y="${y}" width="1" height="1"/>`; return Promise.resolve({ url: "http://192.168.1.20:8787/?token=demo", enabled: true, svg: `<svg viewBox="0 0 21 21" shape-rendering="crispEdges"><rect width="21" height="21" fill="#fff"/>${c}</svg>` }) }
   }
   return Promise.reject("unknown command");

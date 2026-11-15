@@ -44,6 +44,10 @@ flowchart LR
 - **Several mailboxes, one list.** Add up to five mailboxes (any IMAP provider with an app password) in Settings. Their mail
   merges into one list with a small tag on each task and a filter chip per mailbox; each is read, filed and followed up in
   its own account, and removing one deletes its tasks, drafts, follow-up records and saved password and leaves the mailbox itself untouched.
+- **Simple enough for anyone to set up.** Type your email address and the app opens the right page at your provider, you paste the 16-letter code, and one button
+  connects. The list can be shown as big cards with **Done** and **Later**, plain headings, large text and light colours
+  ([the simple view](docs/guides/the-simple-view.md)). "Sign in with Google" and "Sign in with Microsoft" are built and appear once the person who builds the app
+  has registered it ([the runbook](docs/runbooks/register-sign-in.md)); Google limits an unverified app to 100 people, so a code stays the way for most.
 - **Backup and restore.** One file with your rules, sender choices, corrections, tasks, notes and what you did with mail, for a new
   computer or a fresh start. No password goes in it, and no message bodies. Restoring adds what is missing, never removes anything, and shows a preview first.
   See [backup and restore](docs/guides/backup-and-restore.md).
@@ -145,7 +149,7 @@ cd engine && IMAP_HOST=imap.example.com IMAP_USER=you@example.com IMAP_PASS=... 
 
 ## Status
 
-Built and tested: engine (480 tests, including protocol tests against a scripted mock IMAP server and a dedicated edge-case suite), the window (65 tests in a real browser), UI in a browser, phone hub, installer build.
+Built and tested: engine (503 tests, including protocol tests against a scripted mock IMAP server and a dedicated edge-case suite), the window (113 tests in a real browser), UI in a browser, phone hub, installer build.
 The IMAP sync and write-back are tested against a scripted mock server, which proves what the client sends and how it parses
 standard responses, but a real Gmail or other server may differ. Not yet exercised against a live mailbox, and releases are unsigned.
 See [SECURITY.md](SECURITY.md) for the full list of limits, and the [version history](docs/VERSION_HISTORY.md) for how the project got here.

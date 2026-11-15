@@ -15,7 +15,7 @@ through `rpc(cmd, args)` (see [the overview](README.md)); the code is `Core::rpc
 * [Reply drafts](#reply-drafts): `draft_generate`, `draft_update`, `draft_discard`, `draft_to_mailbox`
 * [Message text, search and files](#message-text-search-and-files): `read_body`, `search`, `save_event`, `export_markdown`
 * [Your rules](#your-rules): `rules_save`, `rules_apply`
-* [Mailboxes and setup](#mailboxes-and-setup): `test_account`, `save_account`, `add_account`, `remove_account`, `finish_setup`, `sign_out`
+* [Mailboxes and setup](#mailboxes-and-setup): `open_page`, `oauth_start`, `oauth_poll`, `oauth_cancel`, `oauth_finish`, `test_account`, `save_account`, `add_account`, `remove_account`, `finish_setup`, `sign_out`
 * [Settings, keys and ranking](#settings-keys-and-ranking): `save_settings`, `set_secret`, `detect_ollama`, `test_ai`
 * [Phone hub](#phone-hub): `hub_info`, `rotate_hub_token`
 * [Backup and support](#backup-and-support): `backup_export`, `backup_import`, `diagnostics`
@@ -71,6 +71,11 @@ through `rpc(cmd, args)` (see [the overview](README.md)); the code is `Core::rpc
 | [`export_markdown`](#export_markdown) | Text and files | no | string |
 | [`rules_save`](#rules_save) | Rules | no | `true` |
 | [`rules_apply`](#rules_apply) | Rules | no | object |
+| [`open_page`](#open_page) | Mailboxes | no | `true` |
+| [`oauth_start`](#oauth_start) | Mailboxes | no | object |
+| [`oauth_poll`](#oauth_poll) | Mailboxes | no | object |
+| [`oauth_cancel`](#oauth_cancel) | Mailboxes | no | `true` |
+| [`oauth_finish`](#oauth_finish) | Mailboxes | no | mailbox number |
 | [`test_account`](#test_account) | Mailboxes | no | object |
 | [`save_account`](#save_account) | Mailboxes | no | `true` |
 | [`add_account`](#add_account) | Mailboxes | no | mailbox number |
@@ -99,11 +104,10 @@ Everything the window draws: settings, tasks, log, status. Polled every 3 second
 
 * **Arguments:** `done` (integer, optional): how many finished tasks to include, newest first. Clamped to 200…20,000; a
   value that is not a non-negative integer means 200.
-* **Answer:** an object; every field is described in [the state shape](../reference/state-shape.md).
+* **Answer:** an object; every field is described in [the state shape](../reference/state-shape.md). `sign_in` says which of "Sign in with Google / Microsoft" this build offers.
 * **Errors:** database errors only.
 * **Side effects:** none. Reads the settings file, the database, and the keychain (whether an Anthropic key exists).
-* **Hub:** yes, with a reduced answer: `settings` holds only `onboarded` and `writeback`; there is no `rules` or
-  `accounts`; `has_anthropic_key` is `false`; `update` is `null`; a log line `connected as <login>; ...` loses the login.
+* **Hub:** yes, with a reduced answer: `settings` holds only `onboarded` and `writeback`; there is no `rules`, `accounts` or `checked_at`; `has_anthropic_key` is `false`; `update` is `null`; a log line `connected as <login>; ...` loses the login.
 
 ## Changing a task
 
@@ -361,6 +365,78 @@ Runs the saved rules over the open mail already in the list.
 
 ## Mailboxes and setup
 
+### `open_page`
+
+Opens a page in the person's own web browser: the provider's page where a mail code (app password) is made, or a message in its website.
+The window cannot open a link by itself, and a command that opened any address it was given would let a bug or a hostile mail send a person anywhere,
+so only the addresses the rule below allows are opened (`webpage::allowed`).
+
+* **Arguments:** `url` (string, required).
+* **Answer:** `true`.
+* **Errors:** `That page can't be opened from here` for any address the rule refuses; `Couldn't open your browser: <reason>` when the system has no
+  browser to hand it to.
+* **The rule:** the address starts with `https://`; it is at most 2,048 characters, with no control character, space or backslash; the host (up to the
+  first `/`, `?` or `#`) is made of letters, digits, `.` and `-` only, so no user name, no port and no encoded character, and is, in lower case, one of:
+  `myaccount.google.com`, `accounts.google.com`, `mail.google.com`, `login.yahoo.com`, `mail.yahoo.com`, `account.apple.com`, `appleid.apple.com`,
+  `www.icloud.com`, `app.fastmail.com`, `login.microsoftonline.com`, `login.live.com`, `account.live.com`, `account.microsoft.com`, `microsoft.com`,
+  `www.microsoft.com`, `outlook.live.com`, `outlook.office.com`, `outlook.office365.com`. A sub-domain of a listed host is not listed.
+* **Side effects:** hands the address to the system's default browser and does not wait for it. While `INBOX_AGENT_OPEN=record` is set, and always in this
+  crate's own tests, nothing is opened: the address is only remembered (`webpage::opened`).
+* **Hub:** no. A phone, or anyone holding its access code, cannot make the computer open a browser.
+
+### `oauth_start`
+
+Starts signing in with a Google or Microsoft account instead of an app password ([ADR-0015](../adr/0015-sign-in-with-google-and-microsoft-needs-the-owners-client-id.md)).
+One sign-in waits at a time: starting another ends the first. The window then asks `oauth_poll` until it is `done`, and calls `oauth_finish`.
+
+* **Arguments:** `provider` (`google` or `microsoft`); `user` (the email address: it is the login hint, and the user name the mail server is given).
+* **Answer:** `{"kind": "google"}` (Google's page has been opened in the browser) or `{"kind": "microsoft", "code": "ABCD-EFGH", "url": "https://www.microsoft.com/link"}`
+  (the code to type, and the page to type it on; the page is also opened when it may be).
+* **Errors:** `That kind of sign-in isn't known`; `Signing in with Google is not set up in this build` (the build has no client ID: `state.sign_in` says
+  so beforehand); `That email address isn't valid` (empty, over 320 bytes, no `@`, or a control character); `Couldn't open your web browser`;
+  `Couldn't start the sign-in on this computer` (no local port); for Microsoft, the sentence for why its server could not be asked, such as
+  `Couldn't reach Microsoft. Check that this computer is online, then try again.`
+* **Side effects:** Google: a listener on `127.0.0.1` and a port the system picks (never `localhost`), open for five minutes at most; it answers
+  `404` to anything but `GET /` with the right `state`, reads at most 8 KB and waits at most 5 seconds for each connection, keeps accepting until
+  the right request arrives, and shows a fixed page. The code is exchanged with PKCE (S256). Microsoft: the device code is asked for, then polled for
+  as often as Microsoft says (more slowly after "slow down"). The browser is opened to a page on the list of [`open_page`](#open_page).
+* **Hub:** no.
+
+### `oauth_poll`
+
+Where the sign-in stands.
+
+* **Arguments:** none.
+* **Answer:** `{"state": "idle"}` (none waiting, or it was cancelled); `{"state": "waiting"}`, with `code` and `url` for Microsoft; `{"state": "done",
+  "user": "...", "provider": "google"}`; `{"state": "failed", "error": "<a sentence>"}`. Never a token. A failure is one of a fixed list of sentences,
+  for example `You chose not to allow Inbox Agent, so nothing was connected.`, `The sign-in took too long. Try again.` or `Mail access was not allowed. Sign
+  in again and keep the box that lets Inbox Agent read your email ticked.`; what the provider said is not kept.
+* **Errors:** none.
+* **Side effects:** none.
+* **Hub:** no.
+
+### `oauth_cancel`
+
+* **Arguments:** none.
+* **Answer:** `true`.
+* **Side effects:** ends a sign-in that is waiting (its listener closes) and forgets how the last one ended.
+* **Hub:** no.
+
+### `oauth_finish`
+
+Saves the mailbox of a sign-in that is `done`, once.
+
+* **Arguments:** `add` (boolean, default false): add a new mailbox with the lowest free number (setup must be finished); otherwise `id` (integer, default 0): the
+  first mailbox during setup, or a mailbox that is signing in again.
+* **Answer:** the mailbox number.
+* **Errors:** `There is no finished sign-in to use. Sign in again.`; `That sign-in was too long ago to use. Sign in again.` (a finished sign-in that is not saved within ten minutes is forgotten, so tokens do not wait in memory); `Set up your first mailbox before adding another`; `You can read at most five mailboxes at
+  once`; `There is no such mailbox` (an `id` that is not set up); the settings validation messages; and, before anything is saved, the mail server's refusal of the token
+  (`sign-in refused: …`), or any connection error. Nothing is saved for a token the server does not accept.
+* **Side effects:** signs in to `imap.gmail.com` (Google) or `outlook.office365.com` (Microsoft) with the token (XOAUTH2) and out again, then saves the mailbox with
+  `oauth` set, the refresh token in the keychain (`oauth-refresh-<n>`) and no password (an app password the mailbox had is deleted). A new mailbox starts from
+  nothing; a changed address resets that mailbox's data as `save_account` does. Restarts the background threads if setup is finished.
+* **Hub:** no.
+
 ### `test_account`
 
 Signs in to an IMAP server to check the details. Stores nothing.
@@ -390,7 +466,7 @@ Saves a new app password, server or address for a mailbox that exists (or for th
   default 993 when missing or `null`); `user`; `password` (required).
 * **Answer:** `true`.
 * **Errors:** `Enter the app password for this mailbox` (the password is empty once spaces are removed; checked first, so
-  nothing is saved); `That mail server port isn't valid` (a port that is given but is not a whole number from 1 to 65535, which includes a number in quotes);
+  nothing is saved); a password for a mailbox that signed in with an account ends that sign-in (its refresh token is revoked at Google and deleted); `That mail server port isn't valid` (a port that is given but is not a whole number from 1 to 65535, which includes a number in quotes);
   `Enter the mail server and the email address` (either is empty, for any mailbox);
   `There is no such mailbox` (an `id` from 1 to 4 that is not set up); any [settings validation](../reference/settings.md#validation)
   message, such as `That mail server name isn't valid` or `That mailbox is already in the app`.

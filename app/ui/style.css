@@ -231,3 +231,72 @@ input::placeholder,textarea::placeholder{color:var(--mute)}
 .rrow .lbl{min-width:0}
 /* a finger needs more than a pointer: this comes last so that it wins over the rule above (the earlier coarse-pointer rule never applied) */
 @media(pointer:coarse){.pri button{padding:14px 9px}}
+
+/* ───── the first-run screens: large, one thing on each, no jargon ───── */
+.panel.wz{width:min(640px,100%)}
+.wz .step{font-size:14px;letter-spacing:.04em;text-transform:none;font-family:var(--font)}
+.wz h2{font-size:40px;margin:10px 0 14px}
+.wz p,.wz li{font-size:19px;line-height:1.5;color:var(--soft)}
+.wz .help{font-size:17px;line-height:1.5;padding-left:16px}.wz .help b{color:var(--ink)}
+.wz .f{font:500 17px/1.3 var(--font);letter-spacing:0;text-transform:none;color:var(--soft);margin:22px 0 6px}
+.wz input[type=text],.wz input[type=password],.wz input[type=number]{font-size:24px;padding:14px 0;min-height:52px}
+.wz .btn{font:500 17px/1.2 var(--font);letter-spacing:0;text-transform:none;padding:15px 26px;min-height:52px}
+.wz .btn.sm{font-size:15px;padding:10px 18px;min-height:44px}
+.wz .btn.big{font-size:19px;padding:17px 32px}
+.wz .steps{margin:18px 0 6px;padding-left:26px}.wz .steps li{margin:8px 0}
+.wz .pastebox{display:flex;gap:14px;align-items:flex-end}.wz .pastebox input{flex:1;min-width:0}
+.wz .chk2{display:flex;gap:10px;align-items:center;margin:10px 0 0;font-size:16px;color:var(--soft);cursor:pointer}
+.wz .chk2 input{width:22px;height:22px;margin:0}
+.wz #w-result{min-height:28px;margin-top:6px}
+.wz .sw b{font-size:18px}.wz .sw span{font-size:16px}
+details.why{margin:6px 0 0;color:var(--mute);font-size:14px}
+details.why summary{cursor:pointer;display:inline-block;padding:6px 0;min-height:24px}
+details.why code{display:block;margin-top:6px;padding:10px;border:1px solid var(--line2);word-break:break-word;font-family:var(--mono);font-size:13px;color:var(--soft)}
+/* the button that finishes a screen stays in view however long the screen is */
+.wz .foot{position:sticky;bottom:-32px;margin:22px -32px -32px;padding:16px 32px;background:var(--surface);border-top:1px solid var(--line2)}
+
+/* ───── light colours: chosen per device, and on by default in the easy view ───── */
+html.light{--bg:#ffffff;--surface:#f6f4ef;--line:#e7e3dc;--line2:#c9c3b8;--dim:#6b655c;--mute:#524c44;--soft:#363029;--ink:#14110d;--red:#b3261e;color-scheme:light}
+html.light .veil{background:#ffffffe6}
+html.light .chk,html.light .mini{background:var(--surface);box-shadow:none}
+html.light .mini.on,html.light .mini.pri{background:var(--ink)}
+html.light .dtext,html.light .bodytext{background:#fff}
+html.light #view:before{display:none}
+html.light .row.chosen{background:#0000000d}
+html.light .cap{box-shadow:none}
+html.light .panel input[type=date]{color-scheme:light}
+
+/* ───── text size and the look, in Settings (both views) ───── */
+.szrow{display:flex;gap:10px;margin:6px 0 4px}
+.szb{flex:1;min-height:44px;padding:8px 12px;border:2px solid var(--line2);border-radius:10px;color:var(--ink);font:500 16px var(--font)}
+.szb[aria-pressed=true]{border-color:var(--ink);background:var(--ink);color:var(--bg)}
+
+/* ───── the easy view: plain words, big buttons, one thing to do on each card ───── */
+html.easy .row .chk,html.easy .row .star,html.easy .row .pri,html.easy #rail,html.easy #foot .keys,html.easy .stats,html.easy .fbar,html.easy #bar [data-act=selectmode],html.easy #bar [data-act=addtask]{display:none}
+html.easy #bar nav button,html.easy #bar .gear,html.easy #foot,html.easy .sec,html.easy .kick,html.easy .toast,html.easy .undo,html.easy .undo button,html.easy .s,html.easy .empty small,html.easy .sect,html.easy .f{font-family:var(--font);letter-spacing:0;text-transform:none}
+html.easy #bar nav button,html.easy #bar .gear{font-size:16px;min-height:44px;padding:10px 4px}
+html.easy .kick{font-size:16px;margin-top:26px}
+html.easy h1{font-size:46px;margin:6px 0 8px}
+html.easy .sub2{font:400 20px/1.4 var(--font);color:var(--soft)}
+html.easy .sec{font-size:18px;font-weight:600;color:var(--ink);margin:34px 0 8px}
+html.easy .sec.now{color:var(--red)}
+html.easy .row{display:block;margin:14px 0;padding:18px 18px 16px;border:1px solid var(--line2);border-radius:14px;background:var(--surface)}
+html.easy .row.cur{border-color:var(--ink);box-shadow:0 0 0 1px var(--ink)}
+html.easy .row.isdone{opacity:1}
+html.easy .row .t{font:600 21px/1.3 var(--font)}
+html.easy .row .s{font-size:16px;color:var(--mute);margin-top:4px}
+html.easy .ea{display:flex;gap:12px;margin-top:14px;flex-wrap:wrap}
+html.easy .big,.welcomecard .big{min-height:52px;min-width:120px;padding:12px 26px;border:2px solid var(--ink);border-radius:12px;background:var(--ink);color:var(--bg);font:600 19px var(--font);letter-spacing:0;text-transform:none}
+html.easy .big.ghost{background:none;color:var(--ink)}
+html.easy .more p{font-size:17px;line-height:1.5}
+html.easy .mini{font:500 16px var(--font);letter-spacing:0;text-transform:none;padding:10px 16px;min-height:44px;border-radius:10px}
+html.easy .spec b{font-size:16px}
+.welcomecard{border:2px solid var(--ink);border-radius:14px;padding:20px;margin:18px 0;background:var(--surface)}
+.welcomecard b{color:var(--ink)}
+.welcomecard p{font-size:18px;line-height:1.5;margin:10px 0;color:var(--soft)}
+html.easy .undo{font:600 18px var(--font);padding:12px 12px 12px 22px;border-radius:12px;bottom:60px}
+html.easy .undo button{font:600 18px var(--font);padding:12px 22px;border-radius:8px;min-height:48px}
+html.easy .toast{font-size:17px;border-radius:10px;padding:12px 20px}
+html.easy .empty{font-size:28px}html.easy .empty small{font-size:18px}
+html.easy #foot{font-size:15px}
+html.easy .sect{font-size:17px;font-weight:600;color:var(--ink)}

@@ -97,7 +97,7 @@ Window:
 - what changed, one line each
 
 Docs: design (docs/designs/phaseN.md), CHANGELOG, README, review record, version history.
-480 engine tests, 65 window tests.
+503 engine tests, 113 window tests.
 
 Co-Authored-By: Name <address>
 ```

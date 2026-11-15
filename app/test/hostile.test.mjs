@@ -81,6 +81,32 @@ suite("hostile text in a message", it => {
     await clean(page, "the shortcut card");
   });
 
+  it("the easy view draws every field as text too: the cards, an opened card, its tabs and both Settings pages", async page => {
+    await page.run(() => { localStorage.clear(); localStorage.setItem("ia.easy", "1"); applyLook() });
+    await page.run(plant);
+    await page.settle(400);
+    const list = await clean(page, "the easy list");
+    assert.ok(list.text.includes('<img id="pwn_action0"') && list.text.includes('<img id="pwn_sender0"'), "the title and the sender are on the page as text, not dropped");
+    assert.ok(await page.run(() => !!document.querySelector(".row .ea")), "these are the easy cards");
+    for (let k = 0; k < 3; k++) {
+      await page.run(uid => { document.querySelector(`.row[data-uid="${uid}"] .mid`)?.click() }, 70001 + k);
+      await page.settle(250);
+      await clean(page, `the opened easy card ${k}`);
+      await page.run(uid => { document.querySelector(`.row[data-uid="${uid}"] .mid`)?.click() }, 70001 + k);
+    }
+    for (const tab of ["later", "done"]) {
+      await page.run(name => { [...document.querySelectorAll("#bar nav button")].find(b => b.textContent.trim().toLowerCase().startsWith(name))?.click() }, tab);
+      await page.settle(250);
+      await clean(page, `the easy ${tab} tab`);
+    }
+    await openSettings(page); await page.settle(300);
+    const basic = await clean(page, "simple Settings");
+    assert.ok(basic.text.includes("pwn_mbuser"), "the mailbox's address is shown as text in simple Settings");
+    await page.click("[data-s=moresettings]"); await page.settle(300);
+    await clean(page, "Settings with More options");
+    await page.run(() => localStorage.clear());
+  });
+
   // A check that cannot fail proves nothing: the detectors must notice markup that was built from text.
   it("the checks notice an element made from text and a script that ran", async page => {
     await page.run(() => {

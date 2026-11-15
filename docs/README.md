@@ -41,6 +41,7 @@ flowchart TD
 | [Rules and sender choices](guides/rules-and-sender-choices.md) | Teach the list what matters |
 | [Let the app file mail](guides/let-the-app-file-mail.md) | Optional changes to your mailbox |
 | [Calendar invitations](guides/calendar-invitations.md) | What happens to an invitation |
+| [The simple view](guides/the-simple-view.md) | Big buttons, plain words, large text and light colours |
 | [FAQ](faq.md) | Short answers to common questions |
 | [Keyboard shortcuts](reference/keyboard-shortcuts.md) | Every key the window handles |
 | [Privacy](../PRIVACY.md) | What is stored and what leaves your computer |

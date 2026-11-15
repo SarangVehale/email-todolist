@@ -28,6 +28,9 @@ pub struct Account {
     pub port: u16,
     pub user: String,
     pub password: String,
+    /// A mailbox that signs in with a Google or Microsoft account: its number and which one. The password is then empty and a short-lived token is
+    /// asked for each time a connection is made (see `oauth::access_token`).
+    pub oauth: Option<(u32, crate::oauth::Provider)>,
 }
 
 /// The server refused the user name or password. Retrying this every half minute would hammer the provider (and can
@@ -56,24 +59,130 @@ pub fn connect(a: &Account) -> Result<Sess> {
 /// after an IDLE would hang the thread for good.
 pub fn connect_with_socket(a: &Account) -> Result<(Sess, TcpStream)> {
     use std::net::ToSocketAddrs;
-    let addr = (a.host.as_str(), a.port)
-        .to_socket_addrs()?
-        .next()
-        .ok_or_else(|| anyhow!("could not find the server {}", a.host))?;
-    let tcp = TcpStream::connect_timeout(&addr, Duration::from_secs(15))?;
-    tcp.set_read_timeout(Some(Duration::from_secs(60)))?;
-    tcp.set_write_timeout(Some(Duration::from_secs(60)))?;
-    let socket = tcp.try_clone()?;
-    let tls = TlsConnector::builder().build()?;
-    let stream = tls
-        .connect(&a.host, tcp)
-        .map_err(|e| anyhow!("secure connection failed: {e}"))?;
-    let mut client = imap::Client::new(stream);
-    client.read_greeting()?;
-    let session = client
-        .login(&a.user, &a.password)
-        .map_err(|e| anyhow::Error::new(SignInRefused(e.0.to_string())))?;
-    Ok((session, socket))
+    with_credential(a, |secret| {
+        let addr = (a.host.as_str(), a.port)
+            .to_socket_addrs()?
+            .next()
+            .ok_or_else(|| anyhow!("could not find the server {}", a.host))?;
+        let tcp = TcpStream::connect_timeout(&addr, Duration::from_secs(15))?;
+        tcp.set_read_timeout(Some(Duration::from_secs(60)))?;
+        tcp.set_write_timeout(Some(Duration::from_secs(60)))?;
+        let socket = tcp.try_clone()?;
+        let tls = TlsConnector::builder().build()?;
+        let stream = tls
+            .connect(&a.host, tcp)
+            .map_err(|e| anyhow!("secure connection failed: {e}"))?;
+        let mut client = imap::Client::new(stream);
+        client.read_greeting()?;
+        Ok((sign_in(client, &a.user, secret)?, socket))
+    })
+}
+
+/// What a connection signs in with: the password, or the token of a Google or Microsoft sign-in (XOAUTH2).
+pub enum Secret<'a> {
+    Password(&'a str),
+    Token(&'a str),
+}
+
+/// The XOAUTH2 exchange (the format Google and Microsoft document): the first response carries the user name and the token. If the server answers
+/// with an error challenge, the empty reply that ends the exchange is sent and the server's refusal comes back as the error.
+struct XOAuth2<'a> {
+    user: &'a str,
+    token: &'a str,
+    calls: std::cell::Cell<u32>,
+}
+impl imap::Authenticator for XOAuth2<'_> {
+    type Response = String;
+    fn process(&self, _challenge: &[u8]) -> String {
+        let n = self.calls.get();
+        self.calls.set(n + 1);
+        if n == 0 {
+            crate::oauth::xoauth2_response(self.user, self.token)
+        } else {
+            String::new()
+        }
+    }
+}
+
+fn sign_in<T: Read + Write>(
+    client: imap::Client<T>,
+    user: &str,
+    secret: &Secret,
+) -> Result<Session<T>> {
+    match secret {
+        Secret::Password(p) => client
+            .login(user, p)
+            .map_err(|e| anyhow::Error::new(SignInRefused(e.0.to_string()))),
+        Secret::Token(t) => client
+            .authenticate(
+                "XOAUTH2",
+                &XOAuth2 {
+                    user,
+                    token: t,
+                    calls: std::cell::Cell::new(0),
+                },
+            )
+            .map_err(|e| anyhow::Error::new(SignInRefused(e.0.to_string()))),
+    }
+}
+
+/// Runs `attempt` with the account's credential. For a Google or Microsoft sign-in that is a token from `oauth::access_token`; if the server
+/// refuses it, the token is dropped and one more attempt is made with a new one (a token can be revoked or run out between asking and using it).
+fn with_credential<R>(a: &Account, mut attempt: impl FnMut(&Secret) -> Result<R>) -> Result<R> {
+    let Some((id, p)) = a.oauth else {
+        return attempt(&Secret::Password(&a.password));
+    };
+    let token = crate::oauth::access_token(id, p)?;
+    match attempt(&Secret::Token(&token)) {
+        Err(e) if is_sign_in_problem(&e) => {
+            crate::oauth::drop_cached(id);
+            let fresh = crate::oauth::access_token(id, p)?;
+            attempt(&Secret::Token(&fresh))
+        }
+        other => other,
+    }
+}
+
+/// Where a test says the mail server is, as a plain connection (the sign-in is then checked against a scripted server without TLS). `None` in the app.
+static PLAIN_SERVER: std::sync::Mutex<Option<std::net::SocketAddr>> = std::sync::Mutex::new(None);
+
+/// Sends `check_sign_in` to a scripted server on `addr` without TLS, or back to the real one. Only a test of this crate can: anywhere else this does
+/// nothing and says so.
+#[doc(hidden)]
+pub fn use_plain_server(addr: Option<std::net::SocketAddr>) -> bool {
+    if !crate::secrets::under_cargo_test() {
+        return false;
+    }
+    *PLAIN_SERVER.lock().unwrap_or_else(|e| e.into_inner()) = addr;
+    true
+}
+
+/// Signs in to the mailbox and signs out again, to prove that the server accepts what the account signs in with. Nothing is read.
+pub fn check_sign_in(a: &Account) -> Result<()> {
+    let plain = *PLAIN_SERVER.lock().unwrap_or_else(|e| e.into_inner());
+    match plain {
+        Some(addr) => connect_plain_account(addr, a).map(|mut s| {
+            let _ = s.logout();
+        }),
+        None => connect(a).map(|mut s| {
+            let _ = s.logout();
+        }),
+    }
+}
+
+/// Like `connect_plain`, for an account that may sign in with a token. Tests only.
+#[doc(hidden)]
+pub fn connect_plain_account(
+    addr: std::net::SocketAddr,
+    a: &Account,
+) -> Result<Session<TcpStream>> {
+    with_credential(a, |secret| {
+        let tcp = TcpStream::connect_timeout(&addr, Duration::from_secs(5))?;
+        tcp.set_read_timeout(Some(Duration::from_secs(10)))?;
+        let mut client = imap::Client::new(tcp);
+        client.read_greeting()?;
+        sign_in(client, &a.user, secret)
+    })
 }
 
 /// Plain-TCP connection for tests against a local mock server. Never used with a real mailbox.

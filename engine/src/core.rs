@@ -11,7 +11,7 @@ use anyhow::{anyhow, Result};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -28,6 +28,8 @@ pub struct Core {
     notify: Notify,
     /// One status per mailbox (by number); the one the app shows is the worst of them.
     status: Arc<Mutex<BTreeMap<u32, String>>>,
+    /// When, in seconds since 1970, a mailbox last finished reading its mail (0 until the first time in this launch). The window says "last read at".
+    checked: AtomicI64,
     stop: Mutex<Arc<AtomicBool>>,
 }
 
@@ -68,6 +70,7 @@ impl Core {
             dir,
             notify,
             status: Arc::new(Mutex::new(BTreeMap::new())),
+            checked: AtomicI64::new(0),
             stop: Mutex::new(Arc::new(AtomicBool::new(true))),
         })
     }
@@ -105,6 +108,12 @@ impl Core {
     }
 
     fn set_status(&self, mailbox: u32, s: &str) {
+        if s == "idle" {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(0));
+            self.checked.store(now, Ordering::Relaxed);
+        }
         self.status
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -122,12 +131,34 @@ impl Core {
 
     /// `Ok(None)`: no saved password. `Err(status)`: the system keychain could not be read.
     fn mailbox_account(&self, m: &AccountCfg) -> std::result::Result<Option<Account>, String> {
+        // a mailbox that signs in with a Google or Microsoft account has a refresh token where the others have a password
+        if let Some(p) = self
+            .settings()
+            .oauth
+            .get(&m.id)
+            .and_then(|k| crate::oauth::Provider::parse(k))
+        {
+            return match secrets::lookup(&secrets::oauth_key(m.id)) {
+                Ok(Some(_)) => Ok(Some(Account {
+                    host: m.host.clone(),
+                    port: m.port,
+                    user: m.user.clone(),
+                    password: String::new(),
+                    oauth: Some((m.id, p)),
+                })),
+                Ok(None) => Ok(None),
+                Err(e) => Err(format!(
+                    "error: your system keychain is not available ({e}). Unlock it and restart the app"
+                )),
+            };
+        }
         match secrets::lookup(&secrets::imap_key(m.id)) {
             Ok(Some(password)) => Ok(Some(Account {
                 host: m.host.clone(),
                 port: m.port,
                 user: m.user.clone(),
                 password,
+                oauth: None,
             })),
             Ok(None) => Ok(None),
             Err(e) => Err(format!(
@@ -387,6 +418,12 @@ impl Core {
         // what the user told the app to look for is private to this computer: the phone never sees it
         if !public {
             state["rules"] = serde_json::to_value(store.rules())?;
+            state["checked_at"] = json!(self.checked.load(Ordering::Relaxed));
+            // which sign-ins this build offers (it needs a client ID for each)
+            state["sign_in"] = json!({
+                "google": crate::oauth::available(crate::oauth::Provider::Google),
+                "microsoft": crate::oauth::available(crate::oauth::Provider::Microsoft),
+            });
             // the mailboxes (names, addresses, how each is doing) are for the desktop window only
             state["accounts"] = json!(s
                 .mailboxes()
@@ -394,6 +431,7 @@ impl Core {
                 .map(|m| json!({
                     "id": m.id, "user": m.user, "host": m.host, "gmail": is_gmail(&m.host),
                     "status": self.status_of(m.id),
+                    "auth": s.oauth.get(&m.id).cloned().unwrap_or_default(),
                 }))
                 .collect::<Vec<_>>());
         }
@@ -417,12 +455,32 @@ impl Core {
         }
         match cmd {
             "state" => self.state(false, done_asked(a)),
+            "open_page" => {
+                // a page on a short list of hosts (the provider's page where a mail password is made, a message in its webmail), in the
+                // person's own browser; the window cannot open a link by itself, and this is not a way to send it anywhere else
+                crate::webpage::open(&s_arg(a, "url"))?;
+                Ok(json!(true))
+            }
+            "oauth_start" => {
+                // the window asks for a sign-in with a Google or Microsoft account; the browser (or a code) does the rest, and `oauth_poll` says how it went
+                let Some(p) = crate::oauth::Provider::parse(&s_arg(a, "provider")) else {
+                    return Err(anyhow!("That kind of sign-in isn't known"));
+                };
+                crate::oauth::start(p, &s_arg(a, "user"))
+            }
+            "oauth_poll" => Ok(crate::oauth::poll()),
+            "oauth_cancel" => {
+                crate::oauth::cancel();
+                Ok(json!(true))
+            }
+            "oauth_finish" => self.oauth_finish(a),
             "test_account" => {
                 let acct = Account {
                     host: s_arg(a, "host"),
                     port: port_arg(a)?,
                     user: s_arg(a, "user"),
                     password: s_arg(a, "password").replace(' ', ""),
+                    oauth: None,
                 };
                 // the same checks as for saving a mailbox, before anything connects
                 if acct.host.is_empty() || acct.user.is_empty() {
@@ -463,7 +521,13 @@ impl Core {
                     return Err(anyhow!("Enter the mail server and the email address"));
                 }
                 let old = s.mailboxes().into_iter().find(|m| m.id == id);
+                // a password for a mailbox that signed in with an account ends that sign-in
+                let was = s
+                    .oauth
+                    .get(&id)
+                    .and_then(|k| crate::oauth::Provider::parse(k));
                 let mut candidate = s.clone();
+                candidate.oauth.remove(&id);
                 if id == 0 {
                     candidate.account = new.clone();
                 } else {
@@ -493,6 +557,9 @@ impl Core {
                         &secrets::imap_key(id),
                         &s_arg(a, "password").replace(' ', ""),
                     )?;
+                    if was.is_some() {
+                        crate::oauth::sign_out_mailbox(id, was);
+                    }
                     candidate.save(&self.dir)
                 })();
                 // the syncs hold the old password (or were stopped above): start them again, whatever happened
@@ -556,6 +623,13 @@ impl Core {
                 let removed = (|| -> Result<()> {
                     self.store()?.remove_mailbox(id)?;
                     secrets::delete(&secrets::imap_key(id));
+                    crate::oauth::sign_out_mailbox(
+                        id,
+                        s.oauth
+                            .get(&id)
+                            .and_then(|k| crate::oauth::Provider::parse(k)),
+                    );
+                    s.oauth.remove(&id);
                     if id == 0 {
                         s.account = AccountCfg::default();
                     } else {
@@ -602,6 +676,7 @@ impl Core {
                     || serde_json::to_value(&s.more_accounts)?
                         != serde_json::to_value(&now.more_accounts)?
                     || s.onboarded != now.onboarded
+                    || s.oauth != now.oauth
                 {
                     return Err(anyhow!(
                         "The account is changed with save_account, not with settings"
@@ -679,7 +754,12 @@ impl Core {
                 // setup is finished when the first mailbox is there, with its password
                 if s.account.host.is_empty()
                     || s.account.user.is_empty()
-                    || secrets::lookup(&secrets::imap_key(0))?.is_none()
+                    || secrets::lookup(&if s.oauth.contains_key(&0) {
+                        secrets::oauth_key(0)
+                    } else {
+                        secrets::imap_key(0)
+                    })?
+                    .is_none()
                 {
                     return Err(anyhow!("Add your first mailbox before finishing setup"));
                 }
@@ -697,10 +777,15 @@ impl Core {
                 let signed_out = (|| -> Result<()> {
                     self.store()?.wipe_all()?;
                     crate::store::remove_leftover_files(&self.dir);
-                    secrets::delete_all();
                     let mut s = self.settings();
+                    for (id, kind) in &s.oauth {
+                        crate::oauth::sign_out_mailbox(*id, crate::oauth::Provider::parse(kind));
+                    }
+                    secrets::delete_all();
+                    crate::oauth::forget_all();
                     s.account = AccountCfg::default();
                     s.more_accounts.clear();
+                    s.oauth.clear();
                     s.onboarded = false;
                     s.hub.enabled = false;
                     s.hub.token.clear();
@@ -725,6 +810,88 @@ impl Core {
             }
             _ => Err(anyhow!("unknown command: {cmd}")),
         }
+    }
+}
+
+impl Core {
+    /// Saves the mailbox of a sign-in that has just worked (`oauth::take_done`): the first mailbox or the one named by `id` (setup, or signing in again),
+    /// or with `add` the lowest free number. Nothing is saved unless the mail server accepts what the sign-in gave.
+    fn oauth_finish(self: &Arc<Self>, a: &Value) -> Result<Value> {
+        let add = a["add"].as_bool().unwrap_or(false);
+        let s = self.settings();
+        let id = if add {
+            if !s.onboarded || s.mailboxes().is_empty() {
+                return Err(anyhow!("Set up your first mailbox before adding another"));
+            }
+            let used: std::collections::HashSet<u32> = s.mailboxes().iter().map(|m| m.id).collect();
+            let Some(id) = (0..crate::store::MAX_MAILBOXES).find(|n| !used.contains(n)) else {
+                return Err(anyhow!("You can read at most five mailboxes at once"));
+            };
+            id
+        } else {
+            match a.get("id") {
+                None | Some(Value::Null) => 0,
+                Some(v) => u32::try_from(v.as_u64().unwrap_or(u64::MAX)).unwrap_or(u32::MAX),
+            }
+        };
+        let done = crate::oauth::take_done()?;
+        let new = AccountCfg {
+            id,
+            host: done.provider.host().to_string(),
+            port: 993,
+            user: done.user.clone(),
+        };
+        let old = s.mailboxes().into_iter().find(|m| m.id == id);
+        let mut candidate = s.clone();
+        if id == 0 {
+            candidate.account = new.clone();
+        } else if add {
+            candidate.more_accounts.push(new.clone());
+        } else if let Some(slot) = candidate.more_accounts.iter_mut().find(|m| m.id == id) {
+            *slot = new.clone();
+        } else {
+            return Err(anyhow!("There is no such mailbox"));
+        }
+        candidate.oauth.insert(id, done.provider.name().to_string());
+        candidate.validate()?;
+        // prove it first: sign in to the mail server with the token, so that nothing is saved for a token the server does not accept
+        crate::oauth::prime(id, &done.access, done.expires_in);
+        let acct = Account {
+            host: new.host.clone(),
+            port: 993,
+            user: new.user.clone(),
+            password: String::new(),
+            oauth: Some((id, done.provider)),
+        };
+        if let Err(e) = watcher::check_sign_in(&acct) {
+            crate::oauth::drop_cached(id);
+            return Err(e);
+        }
+        let changed = old.is_some_and(|o| {
+            (o.host.as_str(), o.user.as_str()) != (new.host.as_str(), new.user.as_str())
+        });
+        if changed {
+            // stop the syncs first: one that is mid-batch would write the old mailbox's mail back after the reset
+            self.stop
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .store(true, Ordering::Relaxed);
+        }
+        let saved = (|| -> Result<()> {
+            if add {
+                self.store()?.clear_mailbox(id)?;
+            } else if changed {
+                self.store_for(id)?.reset_for_new_account()?;
+            }
+            secrets::set(&secrets::oauth_key(id), &done.refresh)?;
+            secrets::delete(&secrets::imap_key(id)); // a sign-in replaces any password the mailbox had
+            candidate.save(&self.dir)
+        })();
+        if s.onboarded && (changed || saved.is_ok()) {
+            self.start();
+        }
+        saved?;
+        Ok(json!(id))
     }
 }
 
@@ -772,4 +939,41 @@ pub fn new_token() -> String {
     (0..32)
         .map(|_| A[r.random_range(0..A.len())] as char)
         .collect()
+}
+
+#[cfg(test)]
+mod checked_tests {
+    use super::*;
+
+    /// "Last read at": set when a mailbox reports `idle` (it has just finished reading), by nothing else, and shown to the window and not to the phone.
+    #[test]
+    fn the_time_of_the_last_read_is_set_by_idle_only_and_is_for_the_window() {
+        let dir = std::env::temp_dir().join(format!("ia-checked-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let c = Core::new(dir.clone(), Arc::new(|_, _| {}));
+        let at = |c: &Arc<Core>| c.rpc("state", &json!({})).unwrap()["checked_at"].as_i64();
+        assert_eq!(at(&c), Some(0), "nothing has been read yet");
+        for s in ["connecting", "syncing", "error: x", "no password"] {
+            c.set_status(0, s);
+            assert_eq!(at(&c), Some(0), "{s} is not a finished read");
+        }
+        c.set_status(0, "idle");
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let got = at(&c).unwrap();
+        assert!(
+            (now - 5..=now + 5).contains(&got),
+            "{got} is about now ({now})"
+        );
+        assert!(
+            c.rpc_public("state", &json!({}))
+                .unwrap()
+                .get("checked_at")
+                .is_none(),
+            "the phone's view does not carry it"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }
