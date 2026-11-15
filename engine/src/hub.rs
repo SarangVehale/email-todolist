@@ -201,6 +201,7 @@ fn respond(stream: &mut TcpStream, code: u16, ctype: &str, body: &[u8]) {
     let head = format!(
         "HTTP/1.1 {code} {}\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\nConnection: close\r\nCache-Control: no-store\r\n\
 X-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\nCross-Origin-Resource-Policy: same-origin\r\n\
+Cross-Origin-Opener-Policy: same-origin\r\nPermissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()\r\n\
 Content-Security-Policy: {CSP}\r\n\r\n",
         reason(code),
         body.len()

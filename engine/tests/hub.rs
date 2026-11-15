@@ -80,21 +80,39 @@ fn head(r: &str) -> &str {
 #[test]
 fn responses_carry_hardening_headers() {
     let h = hub("headers");
-    let r = raw(h.port, "GET / HTTP/1.1\r\nHost: x\r\n\r\n").to_lowercase();
-    for want in [
-        "x-frame-options: deny",
-        "referrer-policy: no-referrer",
-        "x-content-type-options: nosniff",
-        "content-security-policy:",
-        "frame-ancestors 'none'",
-        "cache-control: no-store",
-    ] {
-        assert!(r.contains(want), "missing {want}:\n{r}");
+    // every way the hub can answer goes through one function, and each must carry the headers: a page, a missing page, a refusal, a wrong method,
+    // a malformed request. (A new error path that wrote its own reply would be caught here.)
+    let requests = [
+        "GET / HTTP/1.1\r\nHost: x\r\n\r\n".to_string(),
+        "GET /nothing-here HTTP/1.1\r\nHost: x\r\n\r\n".to_string(),
+        "POST /api/rpc HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer wrong\r\nContent-Length: 2\r\n\r\n{}".to_string(),
+        "PUT /api/rpc HTTP/1.1\r\nHost: x\r\n\r\n".to_string(),
+        "GET / HTTP/1.1\r\nHost: x\r\nContent-Length: nine\r\n\r\n".to_string(),
+    ];
+    for request in requests {
+        let r = raw(h.port, &request).to_lowercase();
+        assert!(r.starts_with("http/1.1 "), "no reply to {request:?}");
+        for want in [
+            "x-frame-options: deny",
+            "referrer-policy: no-referrer",
+            "x-content-type-options: nosniff",
+            "content-security-policy:",
+            "frame-ancestors 'none'",
+            "cache-control: no-store",
+            "cross-origin-opener-policy: same-origin",
+            "cross-origin-resource-policy: same-origin",
+            "permissions-policy: camera=()",
+        ] {
+            assert!(
+                r.contains(want),
+                "missing {want} in the reply to {request:?}:\n{r}"
+            );
+        }
+        assert!(
+            !r.contains("script-src 'self' 'unsafe-inline'"),
+            "inline scripts must not be allowed"
+        );
     }
-    assert!(
-        !r.contains("script-src 'self' 'unsafe-inline'"),
-        "inline scripts must not be allowed"
-    );
 }
 
 #[test]
