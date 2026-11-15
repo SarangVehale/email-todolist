@@ -76,6 +76,10 @@ export class Page {
   /** Opens a path of the served window and waits until it has drawn. */
   async goto(p = "/demo.html?demo=1") {
     await this.send("Page.enable"); await this.send("Runtime.enable");
+    // A tab the harness opens is a background tab of a window nobody is looking at. Mouse clicks and focus sent to such a page were lost now and then on a slow macOS
+    // runner (three different tests in three runs), so the page is told to behave as the focused, active one.
+    await this.send("Page.bringToFront").catch(() => {});
+    await this.send("Emulation.setFocusEmulationEnabled", { enabled: true }).catch(() => {});
     const loaded = this.once("Page.loadEventFired");
     await this.send("Page.navigate", { url: this.harness.url + p });
     await within(loaded, 30000, "the page to load");

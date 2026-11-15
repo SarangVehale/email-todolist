@@ -212,8 +212,9 @@ A test that fails once in a hundred runs is a defect in the test or in the code,
    happen.
 4. **Inject the clock.** Engine code that depends on the time takes it as an argument, so a test sets it. The few bounded sleeps left
    in the engine tests (eight, mostly in the hub tests) wait for a thread to start.
-5. **A fresh page for each test, one browser for each file**, and two files at a time (`--test-concurrency=2`): four at once was
-   too many on the author's machine.
+5. **A fresh page for each test, one browser for each file**, and two files at a time on a developer's machine (`--test-concurrency=2`): four at once was
+   too many on the author's machine. CI runs one file at a time (`--test-concurrency=1`), and each page is told to act as the focused, active one
+   (`Emulation.setFocusEmulationEnabled`): on a slow macOS runner two browsers lost mouse clicks and focus now and then, a different test each time.
 6. **Never touch real state.** Temporary folders, the in-memory keychain (`secrets::in_memory()` in any cargo test binary), the
    loopback address and a free port (port 0).
 7. **Clean up, with limits.** The browser is asked for its own process number, asked to quit and ended by number; its profile

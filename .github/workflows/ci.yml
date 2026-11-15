@@ -103,7 +103,8 @@ jobs:
           INBOX_AGENT_UI_TESTS: require
         run: |
           set -o pipefail
-          cd app && npm test 2>&1 | tee "$RUNNER_TEMP/window-tests.log"
+          # One file at a time here (the same command as `npm test`, with --test-concurrency=1): two browsers at once on a three-core macOS runner lost mouse clicks and focus now and then
+          cd app && node --test --test-reporter=spec --test-concurrency=1 test/*.test.mjs 2>&1 | tee "$RUNNER_TEMP/window-tests.log"
       - name: Say which window tests failed
         if: failure()
         shell: bash
