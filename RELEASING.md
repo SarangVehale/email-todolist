@@ -77,11 +77,12 @@ machine, and the builds are unsigned. *Rehearsal 4:* the same, with `tauri-apps/
 change this workflow); it passed in 22 minutes, the macOS archive now carries the version in its name, and the attestation step's Node 20 notice
 is gone. Both are taken.
 
-*Rehearsal 5* ran on the tree as it stood after the first review of this work, with the licence files in the installers: it passed in 27
+*Rehearsal 5* ran on the tree of commit `41595fd` (after the first review of this work, with the licence files in the installers): it passed in 27
 minutes, and the `checksums` job's new step, which looks inside the `.deb`, the `.app.tar.gz` and the AppImage for `LICENSE`,
 `THIRD_PARTY_NOTICES.md` and `THIRD_PARTY_LICENSES.txt`, reported "missing: none" (an annotation, "Licence files inside the packages").
 What no rehearsal can show: the signed paths (Apple notarization, the Windows certificate), a real tag, a published release, and anything
-about installing or running the macOS and Linux packages. Rehearse again after any later change to the workflow.
+about installing or running the macOS and Linux packages. Two small changes came after it (the AppImage step now says when extraction fails, and the scale check runs the app with its keychain in
+memory); the first touches `release.yml` and has not been through a rehearsal. Rehearse again after any later change to the workflow.
 
 To rehearse again: `python scripts/bump_version.py 0.1.0-rc.6` on a branch, a dated `## [0.1.0-rc.6]` changelog heading and a row in
 `docs/RELEASE_HISTORY.md`, then tag `v0.1.0-rc.6`. It becomes a pre-release draft. Afterwards delete the draft (on the Releases page: it

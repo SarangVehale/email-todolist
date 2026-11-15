@@ -112,3 +112,4 @@ The [design documents](designs/README.md) say what each phase set out to do. Eac
 | [Phase 9 review](2026-11-14_PHASE9_REVIEW.md) | Tests for the window |
 | [Phase 10 review](2026-11-14_PHASE10_REVIEW.md) | Documentation as code |
 | [Phase 11 review](2026-11-14_PHASE11_REVIEW.md) | Gaps closed that the documentation and the first CI run found |
+| [Review of everything after Phase 11](2026-11-15_POST_PHASE11_REVIEW.md) | The council, drift passes and review loop over the upkeep, accessibility, release and licence work |

@@ -389,6 +389,21 @@ Not closed at the time: one run of the window's tests failed on Linux in CI and 
 now puts the last lines of the log in an annotation). Two more failures followed, and the annotation showed the cause: a browser that was slow
 to start on a busy runner (fixed in Phase 12).
 
+## Review 13 (everything after Phase 11: three-seat council, two drift passes and an Opus review loop, 2026-11-15)
+
+Opus, Sonnet and Fable seats each said **ship with fixes** (nothing blocks the product itself); a Sonnet and a Haiku pass over the documents found
+ten drifts; an Opus reviewer asked for changes in round 1 and approved in round 2. Full ledger: `docs/2026-11-15_POST_PHASE11_REVIEW.md`.
+
+| Finding | Fix |
+| --- | --- |
+| The developer scripts that start the built app (the packaged-app check, the scale check) used the real system keychain: with a mailbox seeded in the settings the app would read the real mailbox password and try to log in with it at a placeholder host, and the check could overwrite and delete it | The app runs with its keychain in memory (`INBOX_AGENT_KEYCHAIN=memory`) in all three scripts; the checks clean up in a `finally`; the access code of the hub they start is made for each run, not a public constant |
+| The install check would install over and then uninstall a real install, and kill any process called `app` | It refuses to run if Inbox Agent is installed or has a data folder, and stops only what runs from its temporary folder |
+| A release could have been signed with half the Apple secrets, which reach the build as empty strings and fail it | A step stops the build when some but not all six are set; the two Tauri-action steps are checked to be identical |
+| The damaged-input test of the mail parser could not see a panic | It looks for the parser's "panicked" error and checks that its samples parse |
+| The installer carried no licence notices for the 565 Rust crates it contains | `THIRD_PARTY_LICENSES.txt` is installed with the program; CI refuses a licence that is not on a reviewed list (MPL-2.0 for five named crates only); the release looks inside the packages for the files |
+
+Not closed: the signed release paths have never run; the macOS and Linux packages were built and listed by a rehearsal, never installed.
+
 ## Reporting a vulnerability
 
 Please report privately to the maintainer rather than opening a public issue. Add a contact address
