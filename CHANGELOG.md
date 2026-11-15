@@ -13,6 +13,9 @@ work goes under `[0.1.0] - Unreleased`; after it, new work goes under `## [Unrel
 First public build.
 
 ### Added
+- A first close of the window says so. Closing the window hides it and the app goes on watching from its icon; a person who has not seen that may think it quit. The first time the window is
+  closed, a notification says "Inbox Agent is still running. It keeps watching your mail. Its icon near the clock (in the menu bar on a Mac) opens it again." Once only (a small file,
+  `tray-told`, in the app's data folder, remembers: `engine::tray::told_once`), and not at all if desktop notifications are off. One engine test; the shell's part is covered by the manual cases MT-144 and MT-157.
 - Plain status messages in the simple view. What the engine says is wrong with a mailbox (the status line at the bottom and the mailbox rows in Settings) was shown as the engine's own text
   (`error: No such host is known. (os error 11001)`); the simple view now shows a sentence: what to do ("Your mail server did not accept the saved code. Open Settings and paste a new
   one.", "Your account's sign-in was refused. Open Settings and press Sign in again.") or that it will go away ("Couldn't reach Gmail. Check that this computer is online, then try again. Inbox Agent will

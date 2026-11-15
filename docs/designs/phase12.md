@@ -16,7 +16,7 @@ each other. They agreed on almost everything; this is what they said and what is
 | Outlook and Hotmail: "(not supported yet)" | `setup.js` | Microsoft sign-in (free for personal accounts), shown when the owner has set a client ID; until then a friendly full sentence before she has spent any effort |
 | Steps 3 to 5 ask about Ollama, a Claude key, ntfy, a phone hub | `setup.js` | Gone from the first-run screens; setup makes sure that filing and the phone hub are off, and leaves ranking and alerts as they are (rules and desktop alerts in a new install) |
 | A dense black page of 11-pixel uppercase labels, five dots, a rail and a footer of key caps | `style.css`, `main.js` | Easy mode: large text, light theme, plain headings, a big **Done** and **Later** on each card; the dense look is one switch away ("Simple view" in Settings) |
-| Closing the window seems to quit the app | `app/src-tauri/src/lib.rs` | A sentence on the last setup screen: it keeps watching, the icon near the clock opens it (a sentence on the first real close is not built: the shell would have to show it) |
+| Closing the window seems to quit the app | `app/src-tauri/src/lib.rs` | A sentence on the last setup screen, and a notification the first time the window is closed (the shell shows it once; `engine::tray::told_once` remembers): it keeps watching, the icon near the clock opens it |
 
 ## Decisions
 

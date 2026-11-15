@@ -42,7 +42,7 @@ flowchart TB
 
 | Thread | Started by | Does |
 | --- | --- | --- |
-| Main | Tauri | The window, the tray menu, hiding the window on close. |
+| Main | Tauri | The window, the tray menu, hiding the window on close (and, the first time, one notification that the app is still running: `engine::tray::told_once`). |
 | Async runtime | `#[tauri::command(async)] fn rpc` | Runs `Core::rpc` off the main thread, so a slow command (testing an account, writing a draft) does not freeze the window. |
 | Watcher, one per mailbox | `Core::spawn_mailbox` | `watcher::run`: connect, read new mail, then IDLE in 60-second turns; the "replied", "left the inbox" and follow-up checks at most every 20 seconds while mail arrives and every 2 minutes when idle. |
 | Write-back, one per mailbox | `Core::spawn_mailbox` | Every 2 seconds, if write-back is on and its outbox has items, `writeback::drain` over a fresh connection; 15 seconds after a failure. |

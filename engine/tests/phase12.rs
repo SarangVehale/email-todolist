@@ -115,3 +115,20 @@ fn every_page_the_window_asks_to_open_is_one_the_engine_allows() {
         );
     }
 }
+
+/// Closing the window keeps the app running, and the shell says so once: the record that it did is made once and never again, and a disk that cannot be written
+/// to does not turn into a notice on every close.
+#[test]
+fn the_notice_that_closing_the_window_keeps_the_app_running_is_given_once() {
+    let dir = std::env::temp_dir().join(format!("ia-p12-tray-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    assert!(engine::tray::told_once(&dir), "the first close");
+    assert!(!engine::tray::told_once(&dir), "the second");
+    assert!(!engine::tray::told_once(&dir), "and every later one");
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(
+        !engine::tray::told_once(&dir.join("no-such-folder")),
+        "a folder that cannot be written to is not a reason to say it every time"
+    );
+}

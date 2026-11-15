@@ -186,8 +186,8 @@ Priority below 4, quiet hours, the category list, or mail from a mailbox's first
 
 ### Does it keep running when I close the window?
 
-Yes. Closing the window hides it to the tray and the engine keeps reading mail; choose **Quit** in the tray menu to stop it. See
-[the runtime](architecture/runtime.md).
+Yes. Closing the window hides it to the tray and the engine keeps reading mail; choose **Quit** in the tray menu to stop it. The first time you close the window, a notification says
+"Inbox Agent is still running" (once, and only if desktop notifications are on). See [the runtime](architecture/runtime.md).
 
 ### How do I stop it starting with my computer?
 

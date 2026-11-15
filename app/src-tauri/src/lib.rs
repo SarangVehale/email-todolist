@@ -64,11 +64,22 @@ pub fn run() {
             }
             Ok(())
         })
-        // closing the window keeps the watcher running in the tray
+        // closing the window keeps the watcher running in the tray; the first time, a notification says so (unless desktop notifications are off)
         .on_window_event(|w, e| {
             if let WindowEvent::CloseRequested { api, .. } = e {
                 api.prevent_close();
                 let _ = w.hide();
+                let app = w.app_handle();
+                let desktop_alerts = app.try_state::<Arc<Core>>().is_some_and(|c| c.settings().alerts.desktop);
+                if desktop_alerts && app.path().app_local_data_dir().is_ok_and(|dir| engine::tray::told_once(&dir)) {
+                    let icon = if cfg!(target_os = "macos") { "Its icon in the menu bar" } else { "Its icon near the clock" };
+                    let _ = app
+                        .notification()
+                        .builder()
+                        .title("Inbox Agent is still running")
+                        .body(format!("It keeps watching your mail. {icon} opens it again."))
+                        .show();
+                }
             }
         })
         .run(tauri::generate_context!())

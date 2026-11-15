@@ -198,7 +198,8 @@ a case changes mail. Record the result and, for any failure, the **Log** tab tex
 | MT-141 | Do the same with a wrong code (change one letter) | "That code didn't work. Make a new one with the button above and paste it here." and nothing is saved; Details for a helper shows the server's own words |
 | MT-142 | Repeat MT-139 to MT-140 with Yahoo, iCloud and Fastmail addresses | The button opens that provider's page; the steps written beside it match what the page shows (note any that have drifted) |
 | MT-143 | In a build with no Microsoft client ID, type an Outlook or Hotmail address | The screen says it cannot be connected yet, and offers a way back |
-| MT-144 | After setup close the window with its X | The app keeps running (its icon is near the clock); clicking the icon brings the list back. The last setup screen said so |
+| MT-144 | After setup close the window with its X | The app keeps running (its icon is near the clock); clicking the icon brings the list back. The last setup screen said so, and a notification says "Inbox Agent is still running" |
+| MT-157 | Close the window a second time, after opening it from the icon | No notification this time. With desktop notifications turned off in Settings, a first close gives none either |
 | MT-145 | In the simple view press Done on a message, wait ten seconds, then press Undo | Undo is still there and brings the message back |
 | MT-146 | In the simple view press Later on a message | It leaves the list, is in the Later tab, and returns at nine the next morning |
 | MT-147 | On a Gmail message in the simple view open it and press Open in Gmail | The browser opens that message in the right Google account |

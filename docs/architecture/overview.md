@@ -77,7 +77,7 @@ flowchart TB
 
 * **Shell** (`app/src-tauri/src/lib.rs`): registers one command, `rpc`, which hands every call to `Core::rpc`. It also owns the
   tray icon (Open, Quit), desktop notifications, start at login (`--minimized`) and the single-instance guard. Closing the
-  window hides it; the engine keeps running in the tray.
+  window hides it; the engine keeps running in the tray (the first close says so in a notification, once).
 * **Engine** (`engine/`): everything else. `Core` owns the settings, starts the background threads and answers commands. The
   command set is described in the [RPC reference](../api/rpc.md).
 * **Hub** (`engine/src/hub.rs`): off by default. When on, it serves a fixed list of the window's files, compiled into the
