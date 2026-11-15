@@ -24,11 +24,11 @@ and a phone can differ. The phone hub always shows the dense view for now.
 | A circle, a star, five priority dots and small print on each row | A card: what it is, who it is from and how long ago, and two big buttons **Done** and **Later** |
 | An opened row with signals, priority, snooze, sender choices and reply drafts | Who it is from, why it is in the list, the start of the message, and buttons to read all of it and (Gmail) to open it in Gmail |
 | Undo shows for five seconds | Undo stays until you do the next thing |
-| "Watching your inbox" | "Watching your mailbox. Last read at 2:32 PM." |
+| "Watching your inbox" | "Watching your mailbox. Last read at 2:32 PM." (the time is when the mailbox last answered: it is renewed about once a minute while the connection is up) |
 | White text on black, 15-pixel text | Dark text on a light page, large text |
 
 Nothing is removed from the app. The keyboard shortcuts still work in the simple view (they are listed in
-[keyboard shortcuts](../reference/keyboard-shortcuts.md)), and everything the view hides is back when you turn it off.
+[keyboard shortcuts](../reference/keyboard-shortcuts.md)), except `/`, whose search box is hidden there, and everything the view hides is back when you turn it off.
 
 ## Steps
 
@@ -36,10 +36,10 @@ Nothing is removed from the app. The keyboard shortcuts still work in the simple
 
 1. **Done** hides the message from your list. With "Let Inbox Agent file mail" off (the default) your mailbox is not touched; see
    [let the app file mail](let-the-app-file-mail.md). In the **Done** tab the same button says **Put back**.
-2. **Later** puts the message away until nine o'clock tomorrow morning (the same as the snooze preset "Tomorrow"). It is in the **Later** tab and comes back by itself.
+2. **Later** puts the message away until nine o'clock tomorrow morning (the same as the snooze preset "Tomorrow"). It is in the **Later** tab and comes back by itself; there its card has **Bring back now**.
 3. If you press the wrong one, **Undo** is at the bottom of the window. It stays there until you do the next thing.
 
-The first time, a card at the top of the list says this in four sentences. **Got it** closes it for good on this device.
+The first time, a card at the top of the list says this in five short sentences. **Got it** closes it for good on this device.
 
 ### Make the text bigger
 

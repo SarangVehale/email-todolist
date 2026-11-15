@@ -1,6 +1,6 @@
 # Security model
 
-> **Status:** current · **Audience:** developers and reviewers checking a change for security impact · **Last reviewed:** 2026-11-14
+> **Status:** current · **Audience:** developers and reviewers checking a change for security impact · **Last reviewed:** 2026-11-15
 
 This page is the map of who is trusted, where each secret lives, what leaves the computer and how untrusted input is bounded.
 The findings, fixes and residual risks are recorded in [SECURITY.md](../../SECURITY.md); the statement for users is
@@ -53,8 +53,8 @@ are desktop-only. A local model reached at a non-local address would be a fourth
 | Secret | Lives in | Reaches | Never in |
 | --- | --- | --- | --- |
 | Mail app password, one per mailbox | OS keychain, service `InboxAgent`, entry `imap-password` or `imap-password-<n>` (`secrets::imap_key`) | Memory of that mailbox's watcher and write-back threads; the TLS login to its own server | `settings.json`, `agent.db`, `state`, a backup, the log |
-| Refresh token of a Google or Microsoft sign-in, one per mailbox that uses it | OS keychain, entry `oauth-refresh-<n>` (`secrets::oauth_key`) | The body of a POST to that provider's token address, only to get an access token | `settings.json` (which holds only that the mailbox signs in this way), `agent.db`, the log, a backup, `state`, an address (never in a URL: revoking sends it in the body) |
-| Access token of that sign-in | Memory only (`oauth.rs`), about an hour | The XOAUTH2 login to `imap.gmail.com` or `outlook.office365.com` only (the mailbox's provider, whatever the settings say) | Disk and every log |
+| Refresh token of a Google or Microsoft sign-in, one per mailbox that uses it | OS keychain, entry `oauth-refresh-<n>` (`secrets::oauth_key`) | The body of a POST to that provider's token address, to get an access token, and (Google only) to its revoke address when the sign-in is ended | `settings.json` (which holds only that the mailbox signs in this way), `agent.db`, the log, a backup, `state`, an address (never in a URL: revoking sends it in the body) |
+| Access token of that sign-in | Memory only (`oauth.rs`), about an hour | The XOAUTH2 login to `imap.gmail.com` or `outlook.office365.com` only: the host is checked whenever settings are saved, and again at every connection (a settings file edited to name another host makes the login refuse and send nothing) | Disk and every log |
 | Anthropic API key | OS keychain, entry `anthropic-key` | The `x-api-key` header of requests to `https://api.anthropic.com/v1/messages` only | Every file; `state` carries only `has_anthropic_key` (desktop) |
 | Hub access code | `settings.json`, `hub.token`, 32 characters from `rand::rng` (`core::new_token`) | The desktop `state` (settings), the QR code and URL from `hub_info`, the phone's `localStorage`; compared in constant time (`hub::ct_eq`) | A backup; the phone's address bar (removed after the first load) |
 | ntfy topic | `settings.json`, `alerts.ntfy_topic` | The URL of each alert | A backup |
@@ -80,7 +80,7 @@ it points at this computer. A restore never changes it, and never turns on the A
 In every mode: IMAP to each mailbox's own server; follow-up searches carrying a Message-ID and your own address, to that
 server only; ntfy alerts when a topic is set (sender name and action text for alerts, counts for the digest, titles for
 snooze and reminder notices). The update check makes no call while `UPDATE_REPO` is empty. Model calls and alerts never follow
-redirects (`ai::http_agent`).
+redirects (`ai::http_agent`). If you sign in with a Google or Microsoft account: the token and device-code requests to that provider's own address, and Google's revoke address when the sign-in is ended; the sign-in's loopback listener on `127.0.0.1` (Google) is open only while a sign-in waits, for five minutes at most.
 
 ## Untrusted inputs and their bounds
 
@@ -91,7 +91,7 @@ redirects (`ai::http_agent`).
 | **Write-back targets** (`writeback.rs`) | A message is acted on only when a Message-ID search returns at most 50 hits and its own header matches exactly, at most 3 messages; labels must be `AI/` plus up to 24 letters or digits. |
 | **A backup file** (`backup.rs`, `store/transfer.rs`) | 8 MB before parsing; this app's format and no newer version; per-list limits (50 rules, 5,000 sender choices, 2,000 corrections, 2,000 own tasks, 5,000 mail entries, 5 mailboxes); every value checked as if typed; one transaction, so one bad value changes nothing. The hub, write-back, ntfy, the Ollama address and the paid ranking are never read from it. A mailbox's server is the one network name it can supply, so the preview lists it. |
 | **The hub's callers** (`hub.rs`) | Answers only loopback, private, link-local, `100.64.0.0/10` and IPv6 local peers; at most 32 connections; one request per connection; a 5-second limit on each read and each write (not on the whole request); 16 KB of headers, 64 KB of body; 10 bad codes in a minute lock an address out; exact routes, files from a compiled-in list only; `PUBLIC` commands only; a reduced `state`; hardening headers and a CSP on every response. It speaks plain HTTP ([ADR-0009](../adr/0009-phone-hub-plain-http-with-token.md)). |
-| **Settings typed in the window** (`settings.rs`) | Validated before every save: host names, ports, URLs, the ntfy topic, the ranking mode, model names, clock times. `save_settings` cannot change a mailbox, `onboarded` or the hub's access code (`hub.token`). `test_account` checks the host name and the port, and `detect_ollama` the address, before they connect; a number too big for its type is refused, not cut to fit. |
+| **Settings typed in the window** (`settings.rs`) | Validated before every save: host names, ports, URLs, the ntfy topic, the ranking mode, model names, clock times. `save_settings` cannot change a mailbox, which mailboxes sign in with an account (`oauth`), `onboarded` or the hub's access code (`hub.token`). `webpage::allowed` holds every address the app opens in the browser to `https`, a short list of provider hosts, no user name, no port and no encoded character. `test_account` checks the host name and the port, and `detect_ollama` the address, before they connect; a number too big for its type is refused, not cut to fit. |
 
 The app has no code that sends mail ([ADR-0003](../adr/0003-imap-only-never-send-mail.md)): a draft reaches only the Drafts
 folder, by an explicit click, with write-back on.

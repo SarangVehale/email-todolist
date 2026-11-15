@@ -109,7 +109,7 @@ left: use **Sign out and reset** instead.
 
 ## Check that it worked
 
-In **Settings**, under **Mail**, the mailbox says **Connected**, and the bottom bar of the window says "Watching your inbox". Mail
+In **Settings**, under **Mail**, the mailbox says **Connected**, and the bottom bar of the window says "Watching your inbox" (in the simple view: "Watching your mailbox. Last read at 2:32 PM."). Mail
 arrives in the list within seconds of reaching your provider.
 
 ## What Connect and "Test connection" check
@@ -132,7 +132,7 @@ The password goes to the system keychain (Windows Credential Manager, macOS Keyc
 ## Change a password later
 
 Providers cancel app passwords when you change your account password. Open **Settings**, find the mailbox in the **Mail** section,
-paste the new password into **New app password** and press **Save password**. The app checks it first ("Checking…"), then says "Saved.
+paste the new password into **New app password** and press **Save password** (in the simple view the box says "Paste a new code if the old one stopped working" and the button **Save code**). The app checks it first ("Checking…"), then says "Saved.
 Your list is untouched." and reconnects every mailbox. Your list, notes and tasks stay.
 
 ## What is not supported
@@ -140,7 +140,8 @@ Your list is untouched." and reconnects every mailbox. Your list, notes and task
 **Outlook, Hotmail, Live and Microsoft 365 mailboxes.** Type such an address and the window shows a screen of its own: "Microsoft does not let an
 app like this one sign in to these addresses with a code, so Inbox Agent cannot read this mailbox yet." It offers a way back, and a small button
 for the rare mailbox that still takes a password (it opens the server form with `outlook.office365.com`). The reason in the code is that the app signs
-in only with an address and a password over IMAP; it has no "Sign in with Microsoft" (OAuth) flow yet. If you try by hand, the server is expected to
+in with an address and a password over IMAP unless the build has been registered with Microsoft, when the Outlook screen offers **Sign in with Microsoft** instead
+(see [Sign in with Google or Microsoft instead of a code](#sign-in-with-google-or-microsoft-instead-of-a-code)). If you try by hand, the server is expected to
 refuse the password (not tested against a live Microsoft server). The [Phase 12 design](../designs/phase12.md) plans that sign-in, and one for
 Google, as buttons that appear only when the person who builds the app has registered the app with Microsoft or Google.
 
@@ -182,7 +183,7 @@ Codes and the rest:
 | `Enter the mail server and the email address` | The server or the address was empty when you pressed **Test connection** | Fill in both and test again |
 | `That mail server name isn't valid` | The server name has a space or a character other than letters, digits, `.` and `-` (for example a pasted web address) | Type the name only, such as `imap.example.com` |
 | `That mail server port isn't valid` | The **Port** box is empty, 0, above 65535 or not a whole number. The app refuses it and does not shorten it to fit | Type the port your provider names for IMAP over TLS (usually 993) |
-| "Paste the code first." (**Connect**), `Enter the app password` (**Test connection**), or "Setup failed: Enter the app password for this mailbox" | The code box was empty. Nothing was saved | Paste the code and try again |
+| "Paste the code first." (**Connect**; on the **Your mail server** screen: "Type the password first."), `Enter the app password` (**Test connection**), or "Setup failed: Enter the app password for this mailbox" | The code box was empty. Nothing was saved | Paste the code and try again |
 | `Paste the new password first` | **Save password** in Settings with the box empty. Nothing was sent | Paste the new app password and press **Save password** |
 | `Enter the mail server and the email address` after **Connect** | The server form was left without a server | Fill in the **Mail server** and press **Connect** again |
 

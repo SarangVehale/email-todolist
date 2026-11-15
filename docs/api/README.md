@@ -1,6 +1,6 @@
 # Engine interfaces
 
-> **Status:** current · **Audience:** developers who change the window, the engine or the phone hub · **Last reviewed:** 2026-11-14
+> **Status:** current · **Audience:** developers who change the window, the engine or the phone hub · **Last reviewed:** 2026-11-15
 
 The window has one way into the engine: a named command with a JSON argument object, answered with JSON. This page says
 how a command gets there from the desktop window and from a phone, which commands a phone may not use, and where the
@@ -56,8 +56,8 @@ sequenceDiagram
     T-->>W: resolves with JSON, or rejects with the error text
 ```
 
-The window also calls two Tauri plugin commands directly, not through `rpc`: `plugin:autostart|enable` and
-`plugin:autostart|disable`, when the last first-run screen is closed with **Open my list** ("Open Inbox Agent when I turn on this computer"). Desktop notifications go the other
+The window also calls Tauri plugin commands directly, not through `rpc`: `plugin:autostart|enable` and `plugin:autostart|disable`, when setup connects the first mailbox
+and when "Open Inbox Agent when I turn on this computer" is ticked or unticked (the last first-run screen and the simple Settings page), and `plugin:autostart|is_enabled`, to show that switch. Desktop notifications go the other
 way: the engine calls the shell's notify callback, which uses the notification plugin. The capability file
 `app/src-tauri/capabilities/default.json` grants `core:default`, `notification:default` and the three autostart permissions.
 

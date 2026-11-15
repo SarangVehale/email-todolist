@@ -437,6 +437,12 @@ pub fn access_token(id: u32, p: Provider) -> Result<String> {
         &[("grant_type", "refresh_token"), ("refresh_token", &refresh)],
     ) {
         Ok(t) => {
+            // the mailbox may have been removed while the provider was being asked: then nothing is written back
+            if secrets::lookup(&secrets::oauth_key(id))?.is_none() {
+                return Err(anyhow::Error::new(SignInRefused(
+                    "this sign-in was removed".into(),
+                )));
+            }
             if let Some(new_refresh) = t.refresh.as_deref().filter(|n| *n != refresh) {
                 secrets::set(&secrets::oauth_key(id), new_refresh)?; // Microsoft hands out a new one each time
             }
@@ -451,8 +457,26 @@ pub fn access_token(id: u32, p: Provider) -> Result<String> {
     }
 }
 
+/// Tells Google to cancel a refresh token (best effort; the token is in the body of the request, never in an address). Microsoft has no such call for personal accounts.
+pub fn revoke(p: Provider, refresh: &str) {
+    if p == Provider::Google {
+        let (e, _) = endpoints();
+        let _ = crate::ai::http_agent(5)
+            .post(&e.google_revoke)
+            .send_form(&[("token", refresh)]);
+    }
+}
+
+/// Throws away a sign-in that was finished but not used (the mail server refused it, or the mailbox could not be saved): Google is told, and nothing is kept.
+pub fn discard(id: u32, d: &Done) {
+    revoke(d.provider, &d.refresh);
+    drop_cached(id);
+}
+
 /// Forgets every token held in memory and ends any sign-in that is waiting (signing out).
 pub fn forget_all() {
+    // not while a refresh is in flight: it would write a new token back after this
+    let _one_at_a_time = REFRESHING.lock().unwrap_or_else(|e| e.into_inner());
     let mut s = lock_store();
     s.cache.clear();
     s.dead.clear();
@@ -463,13 +487,10 @@ pub fn forget_all() {
 /// Takes a mailbox's sign-in away: tells Google to revoke it (best effort, with the token in the body of the request), then deletes it from the
 /// keychain and from memory.
 pub fn sign_out_mailbox(id: u32, p: Option<Provider>) {
-    if let (Some(Provider::Google), Ok(Some(refresh))) =
-        (p, secrets::lookup(&secrets::oauth_key(id)))
-    {
-        let (e, _) = endpoints();
-        let _ = crate::ai::http_agent(5)
-            .post(&e.google_revoke)
-            .send_form(&[("token", refresh.as_str())]);
+    // not while a refresh is in flight: it would write a rotated token back after this
+    let _one_at_a_time = REFRESHING.lock().unwrap_or_else(|e| e.into_inner());
+    if let (Some(p), Ok(Some(refresh))) = (p, secrets::lookup(&secrets::oauth_key(id))) {
+        revoke(p, &refresh);
     }
     secrets::delete(&secrets::oauth_key(id));
     let mut s = lock_store();
@@ -551,6 +572,19 @@ pub fn cancel() {
     let mut f = lock_flow();
     f.cancel.store(true, Ordering::Relaxed);
     f.st = St::Idle;
+}
+
+/// Who the finished sign-in is for, without using it up (so that what is wrong with the mailbox can be refused before the tokens are spent).
+pub fn peek() -> Result<(Provider, String)> {
+    match &lock_flow().st {
+        St::Done(d) if d.at.elapsed() <= keep() => Ok((d.provider, d.user.clone())),
+        St::Done(_) => Err(anyhow!(
+            "That sign-in was too long ago to use. Sign in again."
+        )),
+        _ => Err(anyhow!(
+            "There is no finished sign-in to use. Sign in again."
+        )),
+    }
 }
 
 /// The finished sign-in, once: the caller now owns the tokens.
@@ -804,9 +838,16 @@ fn start_microsoft(
         v["interval"].as_u64().unwrap_or(5).clamp(1, 30),
         v["expires_in"].as_u64().unwrap_or(FLOW_SECS).clamp(30, 900),
     );
-    lock_flow().st = St::Waiting {
-        device: Some((code.clone(), url.clone())),
-    };
+    {
+        // a sign-in that was cancelled or replaced while Microsoft was being asked for the code does not come back to life
+        let mut f = lock_flow();
+        if f.gen != gen || cancel.load(Ordering::Relaxed) {
+            return Err(anyhow!("The sign-in was cancelled."));
+        }
+        f.st = St::Waiting {
+            device: Some((code.clone(), url.clone())),
+        };
+    }
     let _ = open_page(&url, test); // if the address is not one that may be opened, the window shows it to be typed
     let user = user.to_string();
     std::thread::Builder::new()

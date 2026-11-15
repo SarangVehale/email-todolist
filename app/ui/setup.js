@@ -12,10 +12,12 @@ const PROVIDERS = {
     steps: ["Press the button above and sign in to Yahoo.", "Look for “Generate app password” (or “App passwords”) on that page. Type Inbox Agent as the name and press Generate.", "Copy the code Yahoo shows, then come back to this window."] },
   fastmail: { name: "Fastmail", maker: "Fastmail", host: "imap.fastmail.com", match: d => ["fastmail.com", "fastmail.fm", "messagingengine.com"].includes(d), page: "https://app.fastmail.com/settings/security/integrations",
     steps: ["Press the button above and sign in to Fastmail.", "Press “New app password”, type Inbox Agent as the name, and choose “Mail (IMAP/SMTP)”.", "Copy the code Fastmail shows, then come back to this window."] },
-  outlook: { name: "Outlook, Hotmail or Live (not supported yet)", maker: "Microsoft", host: "outlook.office365.com", match: d => /^(outlook|hotmail|live)\.[a-z]{2,3}(\.[a-z]{2})?$/.test(d) || d === "msn.com", page: null,
+  outlook: { name: "Outlook, Hotmail or Live", maker: "Microsoft", host: "outlook.office365.com", match: d => /^(outlook|hotmail|live)\.[a-z]{2,3}(\.[a-z]{2})?$/.test(d) || d === "msn.com", page: null,
     steps: ["Microsoft has turned off password sign-in for IMAP, so a password or app password will be refused. Sign-in with Microsoft is not supported in this version.", "Gmail, iCloud, Yahoo, Fastmail and most other IMAP providers work with an app password."] },
   other: { name: "Other IMAP server", maker: "", host: "", match: null, page: null, steps: ["Enter your server and an app password if your provider offers one."] },
 };
+/** What the provider is called in the menu of the Add a mailbox dialog: Outlook says it is not supported unless this build can sign in with Microsoft. */
+const providerLabel = k => k === "outlook" && !(S.sign_in && S.sign_in.microsoft) ? PROVIDERS[k].name + " (not supported yet)" : PROVIDERS[k].name;
 /** Which provider an email address belongs to: a key of PROVIDERS, or "other" when it is not one the app knows. */
 function providerFor(address) {
   const d = domainOf(address);
@@ -53,9 +55,9 @@ function friendly(raw, providerKey, host, how) {
   return say("Something went wrong while connecting. Wait a minute and try again.");
 }
 /** A person's answer as markup: a sentence, and the engine's own words behind "Details for a helper". */
-const sayHTML = r => !r ? "" : r.ok ? `<p class="ok">${esc(r.ok)}</p>${r.device ? `<p class="devcode">Your code: <b>${esc(r.device.code)}</b></p><p>Type it on Microsoft's page: <b>${esc(String(r.device.url).replace(/^https:\/\//, ""))}</b> <button class="btn sm" data-w="opendevice" data-url="${esc(r.device.url)}">Open that page</button></p>` : ""}${r.cancel ? '<button class="btn sm" data-w="cancelsignin" data-m="cancelsignin" data-s="cancelsignin">Cancel</button>' : ""}` : `<p class="bad">${esc(r.say)}</p>${r.detail ? `<details class="why"><summary>Details for a helper</summary><code>${esc(r.detail)}</code></details>` : ""}`;
-/** What a first run starts with: ranked by rules, desktop alerts on, the mailbox left untouched, no phone hub. */
-const SAFE_START = { ai: { mode: "rules" }, alerts: { desktop: true }, writeback: false, hub: { enabled: false } };
+const sayHTML = r => !r ? "" : r.ok ? `<p class="ok">${esc(r.ok)}</p>${r.device ? `<p class="devcode">Your code: <b>${esc(r.device.code)}</b></p><p>Type it on Microsoft's page: <b>${esc(String(r.device.url).replace(/^https:\/\//, ""))}</b> <button class="btn sm" data-w="opendevice" data-m="opendevice" data-s="opendevice" data-url="${esc(r.device.url)}">Open that page</button></p>` : ""}${r.cancel ? '<button class="btn sm" data-w="cancelsignin" data-m="cancelsignin" data-s="cancelsignin">Cancel</button>' : ""}` : `<p class="bad">${esc(r.say)}</p>${r.detail ? `<details class="why"><summary>Details for a helper</summary><code>${esc(r.detail)}</code></details>` : ""}`;
+/** What setup makes sure of: the mailbox is not changed (no filing) and the phone hub is off. Ranking and alerts are left as they are: a new install already has rules and desktop alerts, and a person who set them up again after removing a mailbox keeps their choices. */
+const SAFE_START = { writeback: false, hub: { enabled: false } };
 /** Which account sign-in this provider of the first-run screens has and this build offers: "google", "microsoft" or "". */
 const signInOffer = k => { const p = k === "gmail" ? "google" : k === "outlook" ? "microsoft" : ""; return p && S.sign_in && S.sign_in[p] ? p : "" };
 const PROVIDER_NAME = { google: "Google", microsoft: "Microsoft" };
@@ -163,6 +165,7 @@ async function wizardConnect() {
     await rpc("save_account", acct);
     await rpc("save_settings", { patch: SAFE_START });
     await rpc("finish_setup");
+    await setupDone();
     W.pw = ""; W.busy = false; W.result = null; W.step = "ready"; drawWizard();
   } catch (err) {
     W.busy = false; for (const x of veil.querySelectorAll(".foot .btn")) x.disabled = false;
@@ -170,22 +173,30 @@ async function wizardConnect() {
     veil.querySelector("#w-pw")?.focus();
   }
 }
+/** The first mailbox is connected: setup is over. A new install gets the simple view now (not only when the last screen is closed: the app may be closed before that),
+ *  and starts with the computer unless that is unticked. */
+async function setupDone() {
+  if (lookGet("easy") === null) { lookSet("easy", "1"); applyLook(); render() }
+  if (TA) await TA.core.invoke(W.autostart ? "plugin:autostart|enable" : "plugin:autostart|disable").catch(() => {});
+}
+async function openDevicePage(btn) { try { await rpc("open_page", { url: btn.closest("[data-url]").dataset.url }) } catch { toast("Couldn't open your web browser. Type the address into it.") } }
 /** SIGNIN_POLL: how often the window asks whether the sign-in has finished (a test makes it short). */
-let SIGNIN_POLL = 1500;
+let SIGNIN_POLL = 1500, signInSeq = 0;
 /** Signs in with a Google or Microsoft account, start to finish: starts it, shows what the person has to do (`say`), waits for the answer, and saves the mailbox
  *  with `finishArgs`. `alive()` goes false when the person has left or cancelled: the sign-in is then called off. Resolves to the mailbox number, or throws the sentence. */
 async function signInFlow(provider, user, finishArgs, say, alive) {
+  const mine = ++signInSeq;
   const r = await rpc("oauth_start", { provider, user });
   say(r.kind === "microsoft" ? { ok: "Microsoft's page is open in your web browser. Type this code there, then sign in.", device: { code: r.code, url: r.url } } : { ok: `${PROVIDER_NAME[provider]}'s page is open in your web browser. Sign in there, then come back here.` });
   for (;;) {
     await new Promise(res => setTimeout(res, SIGNIN_POLL));
-    if (!alive()) { rpc("oauth_cancel").catch(() => {}); throw ""; }
+    if (!alive()) { if (signInSeq === mine) rpc("oauth_cancel").catch(() => {}); throw ""; } // (a newer sign-in is not to be cancelled by this one giving up)
     const p = await rpc("oauth_poll");
     if (p.state === "done") break;
     if (p.state === "failed") throw new Error(p.error);
     if (p.state === "idle") throw new Error("The sign-in was cancelled.");
   }
-  say({ ok: "Signed in. Connecting to your mailbox…" });
+  say({ ok: "Signed in. Connecting to your mailbox…", final: true }); // too late to cancel: the mailbox is being saved
   return rpc("oauth_finish", finishArgs);
 }
 /** The first-run screens: sign in with an account, then finish setup the same way Connect does. */
@@ -195,10 +206,11 @@ async function wizardSignIn(provider) {
   W.busy = true; for (const x of veil.querySelectorAll(".foot .btn, [data-w=signin], [data-w=open], [data-w=paste]")) x.disabled = true;
   const unlock = () => { W.busy = false; for (const x of veil.querySelectorAll("[data-w]")) x.disabled = false };
   try {
-    await signInFlow(provider, W.user.trim(), {}, r => { if (W.flow === my) wizardSay({ ...r, cancel: true }) }, () => W.flow === my && veil.dataset.kind === "wizard");
+    await signInFlow(provider, W.user.trim(), {}, r => { if (W.flow === my) wizardSay({ ...r, cancel: !r.final }) }, () => W.flow === my && veil.dataset.kind === "wizard");
     if (W.flow !== my) return;
     await rpc("save_settings", { patch: SAFE_START });
     await rpc("finish_setup");
+    await setupDone();
     W.busy = false; W.pw = ""; W.result = null; W.step = "ready"; drawWizard();
   } catch (err) {
     if (W.flow !== my) return; // cancelled: the screen has already been told
@@ -220,7 +232,7 @@ veil.addEventListener("change", e => {
   const t = e.target;
   if (veil.dataset.kind === "wizard") {
     if (t.dataset.c === "show") { W.show = t.checked; drawWizard(); veil.querySelector("[data-c=show]")?.focus() }
-    else if (t.dataset.c) W[t.dataset.c] = t.checked;
+    else if (t.dataset.c) { W[t.dataset.c] = t.checked; if (t.dataset.c === "autostart" && TA) TA.core.invoke(t.checked ? "plugin:autostart|enable" : "plugin:autostart|disable").catch(() => {}) }
   } else if (veil.dataset.kind === "settings") settingsChange(t);
 });
 veil.addEventListener("click", async e => {
@@ -230,7 +242,7 @@ veil.addEventListener("click", async e => {
   if (veil.dataset.kind === "restore") return restoreClick(e);
   const w = e.target.closest("[data-w]")?.dataset.w;
   if (w === "cancelsignin") { W.flow++; W.busy = false; rpc("oauth_cancel").catch(() => {}); for (const x of veil.querySelectorAll("[data-w]")) x.disabled = false; return wizardSay({ ok: "Cancelled. Nothing was connected." }) }
-  if (w === "opendevice") { try { await rpc("open_page", { url: e.target.closest("[data-url]").dataset.url }) } catch { toast("Couldn't open your web browser. Type the address into it.") } return }
+  if (w === "opendevice") return openDevicePage(e.target.closest("[data-w]"));
   if (!w || W.busy) return;
   if (w === "signin") return wizardSignIn(e.target.closest("[data-provider]").dataset.provider);
   if (w === "back") { W.step = WIZARD_BACK[W.step] || "welcome"; W.result = null; drawWizard() }
@@ -254,11 +266,7 @@ veil.addEventListener("click", async e => {
     wizardConnect();
   }
   if (w === "connect") wizardConnect();
-  if (w === "finish") {
-    if (lookGet("easy") === null) { lookSet("easy", "1"); applyLook(); render() } // a new install starts with the easy view; one already in use is left as it was
-    if (TA) await TA.core.invoke(W.autostart ? "plugin:autostart|enable" : "plugin:autostart|disable").catch(() => {});
-    closeVeil();
-  }
+  if (w === "finish") closeVeil();
 });
 
 const ALERT_CATS = ["work", "personal", "finance", "travel", "notification", "promo", "reading", "other"];
@@ -318,19 +326,20 @@ async function ruleClick(b) {
 }
 veil.addEventListener("input", e => { if (veil.dataset.kind === "settings" && e.target.dataset?.r === "text") ruleEdit(e.target) });
 /* ───────── several mailboxes ───────── */
-function mailStatus(st) {
+function mailStatus(st, auth) {
   st = String(st || "");
   if (st === "idle") return '<span class="ok">Connected</span>';
   if (st === "syncing" || st === "connecting") return "Reading mail…";
-  if (st === "no password") return `<span class="bad">${easy() ? "Needs a new code. Paste it below." : "Needs a new app password"}</span>`;
+  if (st === "no password") return `<span class="bad">${auth ? "Needs you to sign in again" : easy() ? "Needs a new code. Paste it below." : "Needs a new app password"}</span>`;
   if (st.startsWith("error")) return `<span class="bad">${esc(st.replace(/^error:\s*/, "").slice(0, 90))}</span>`;
   return esc(st);
 }
 function mailboxesHTML(s) {
   const mbs = (S.accounts && S.accounts.length) ? S.accounts : [{ id: 0, user: s.account?.user, host: s.account?.host, status: S.status }];
-  return mbs.map(m => `<div class="mbx" data-id="${m.id}"><p><b>${esc(m.user)}</b> · ${esc(m.host)} · ${mailStatus(m.status)}</p>
+  return mbs.map(m => `<div class="mbx" data-id="${m.id}"><p><b>${esc(m.user)}</b> · ${esc(m.host)} · ${mailStatus(m.status, m.auth)}</p>
     ${m.auth ? `<p>Signed in with ${PROVIDER_NAME[m.auth] || "an account"}. No password is kept.</p>` : `<label class="f" for="s-pw${m.id}">${easy() ? "Paste a new code if the old one stopped working" : "New app password"}</label><input id="s-pw${m.id}" type="password" data-s="newpw" data-id="${m.id}" autocomplete="off" placeholder="${easy() ? "paste the code here" : "paste a new app password"}">`}
-    <div class="foot" style="margin-top:8px">${m.auth ? `<button class="btn sm" data-s="resign" data-id="${m.id}" data-provider="${esc(m.auth)}">Sign in again</button>` : `<button class="btn sm" data-s="savepw" data-id="${m.id}">${easy() ? "Save code" : "Save password"}</button>`}<span data-pwres="${m.id}"></span><span class="sp"></span>${mbs.length > 1 ? `<button class="btn sm" data-s="rmacct" data-id="${m.id}">Remove</button>` : ""}</div></div>`).join("");
+    <div class="foot" style="margin-top:8px">${m.auth ? `<button class="btn sm" data-s="resign" data-id="${m.id}" data-provider="${esc(m.auth)}">Sign in again</button>` : `<button class="btn sm" data-s="savepw" data-id="${m.id}">${easy() ? "Save code" : "Save password"}</button>`}<span data-pwres="${m.id}"></span><span class="sp"></span>${mbs.length > 1 ? `<button class="btn sm" data-s="rmacct" data-id="${m.id}">Remove</button>` : ""}</div>
+    ${m.auth ? `<details class="why"><summary>Use a code instead of signing in</summary><label class="f" for="s-pw${m.id}">${easy() ? "Paste the code" : "App password"}</label><input id="s-pw${m.id}" type="password" data-s="newpw" data-id="${m.id}" autocomplete="off" placeholder="${easy() ? "paste the code here" : "paste an app password"}"><div class="foot" style="margin-top:8px"><button class="btn sm" data-s="savepw" data-id="${m.id}">${easy() ? "Save code" : "Save password"}</button></div></details>` : ""}</div>`).join("");
 }
 let MB = null;
 function openAddMailbox() {
@@ -343,9 +352,9 @@ function mailboxBack() { MB = null; veil.dataset.kind = "settings"; drawSettings
 function drawMailbox() {
   const p = PROVIDERS[MB.provider], n = (S.accounts || []).length, focused = veil.contains(document.activeElement) ? document.activeElement.id : "";
   showPanel("Add a mailbox", `<h2>Add a mailbox</h2><p>Its mail joins the same list. A small tag on each task says which mailbox it came to. ${n} of 5 in use.</p>
-    <label class="f" for="m-provider">Provider</label><select id="m-provider" data-f="provider">${Object.entries(PROVIDERS).map(([k, v]) => `<option value="${k}" ${MB.provider === k ? "selected" : ""}>${v.name}</option>`).join("")}</select>
+    <label class="f" for="m-provider">Provider</label><select id="m-provider" data-f="provider">${Object.entries(PROVIDERS).map(([k]) => `<option value="${k}" ${MB.provider === k ? "selected" : ""}>${providerLabel(k)}</option>`).join("")}</select>
     ${signInOffer(MB.provider) ? `<button class="btn pri" data-m="signin" data-provider="${signInOffer(MB.provider)}" ${MB.busy ? "disabled" : ""}>Sign in with ${PROVIDER_NAME[signInOffer(MB.provider)]}</button><div id="msignin" role="status" aria-live="polite"></div><p>Or use a code, as below.</p>` : ""}
-    <div class="help"><b>Making a code</b>${p.page ? ` <button class="mini" data-m="open">Open ${esc(p.maker)}'s page</button>` : ""}<ol>${p.steps.map(x => `<li>${esc(x)}</li>`).join("")}</ol></div>
+    <div class="help"><b>Making a code</b>${p.page ? ` <button class="mini" data-m="open">Open ${esc(p.maker)}'s page</button>` : ""}<ol>${(MB.provider === "outlook" && signInOffer("outlook") ? ["Press the button above. Your web browser opens Microsoft's page, and this window shows a code to type there."] : p.steps).map(x => `<li>${esc(x)}</li>`).join("")}</ol></div>
     ${MB.provider === "other" ? `<div class="row2"><div><label class="f" for="m-host">IMAP server</label><input id="m-host" type="text" data-f="host" value="${esc(MB.host)}" placeholder="imap.example.com"></div><div><label class="f" for="m-port">Port</label><input id="m-port" type="number" data-f="port" value="${MB.port}"></div></div>` : ""}
     <label class="f" for="m-user">Email address</label><input id="m-user" type="text" data-f="user" value="${esc(MB.user)}" autocomplete="off" placeholder="you@example.com">
     <label class="f" for="m-pw">App password</label><input id="m-pw" type="password" data-f="pw" value="${esc(MB.pw)}" autocomplete="off">
@@ -362,7 +371,7 @@ async function mailboxSignIn(mb, prov) {
   const my = mb.flow = (mb.flow || 0) + 1, live = () => MB === mb && mb.flow === my;
   mb.busy = true; drawMailbox();
   try {
-    await signInFlow(prov, mb.user.trim(), { add: true }, r => { if (live()) out({ ...r, cancel: true }) }, live);
+    await signInFlow(prov, mb.user.trim(), { add: true }, r => { if (live()) out({ ...r, cancel: !r.final }) }, live);
     clearReadCaches(); lastSnap = ""; await load(); toast("Mailbox added. Its mail is being read.");
     if (live()) { MB = null; veil.dataset.kind = "settings"; drawSettings().then(() => veil.querySelector("[data-s=addacct]")?.focus()) }
   } catch (err) {
@@ -373,6 +382,7 @@ async function mailboxSignIn(mb, prov) {
 async function mailboxClick(e) {
   const m = e.target.closest("[data-m]")?.dataset.m, mb = MB; if (!m || !mb) return;
   if (m === "cancel") return mailboxBack();
+  if (m === "opendevice") return openDevicePage(e.target.closest("[data-m]"));
   if (m === "cancelsignin") { mb.flow = (mb.flow || 0) + 1; mb.busy = false; rpc("oauth_cancel").catch(() => {}); const o = $("#msignin"); if (o) o.innerHTML = '<p class="ok">Cancelled. Nothing was added.</p>'; return drawMailbox() }
   if (m === "signin") return mailboxSignIn(mb, e.target.closest("[data-provider]").dataset.provider);
   if (m === "open") { const p = PROVIDERS[mb.provider]; try { await rpc("open_page", { url: p.page }) } catch (err) { toast("Couldn't open your web browser. Go to " + p.page.replace(/^https:\/\//, "")) } return }
@@ -574,13 +584,14 @@ async function settingsClick(e) {
   const k = e.target.closest("[data-s]")?.dataset.s;
   if (k === "size") { lookSet("size", e.target.closest("[data-size]").dataset.size); applyLook(); drawSettings(); return }
   if (k === "moresettings") { moreSettings = !moreSettings; drawSettings(); return }
+  if (k === "opendevice") return openDevicePage(e.target.closest("[data-s]"));
   if (k === "cancelsignin") { resignFlow++; rpc("oauth_cancel").catch(() => {}); const o = veil.querySelector("[data-pwres]:not(:empty)"); if (o) o.innerHTML = "Cancelled."; for (const b of veil.querySelectorAll("[data-s=resign]")) b.disabled = false; return }
   if (k === "resign") {
     const btn = e.target.closest("[data-s]"), id = +btn.dataset.id, prov = btn.dataset.provider, acct = (S.accounts || []).find(m => m.id === id), out = veil.querySelector(`[data-pwres="${id}"]`), my = ++resignFlow;
     if (!acct || !out) return;
     btn.disabled = true;
     try {
-      await signInFlow(prov, acct.user, { id }, r => { if (resignFlow === my) out.innerHTML = sayHTML({ ...r, cancel: true }) }, () => resignFlow === my && veil.dataset.kind === "settings");
+      await signInFlow(prov, acct.user, { id }, r => { if (resignFlow === my) out.innerHTML = sayHTML({ ...r, cancel: !r.final }) }, () => resignFlow === my && veil.dataset.kind === "settings");
       if (resignFlow === my) { out.innerHTML = '<span class="ok">Signed in. Your list is untouched.</span>'; lastSnap = ""; load() }
     } catch (err) { if (err !== "" && resignFlow === my) out.innerHTML = sayHTML(friendly(String(err), prov === "google" ? "gmail" : "outlook", "", "account")) }
     if (resignFlow === my) btn.disabled = false;
@@ -604,6 +615,10 @@ async function settingsClick(e) {
       await rpc("test_account", { host: acct.host, port: acct.port, user: acct.user, password: pw });
       await rpc("save_account", { id, host: acct.host, port: acct.port, user: acct.user, password: pw });
       box.value = ""; out.innerHTML = '<span class="ok">Saved. Your list is untouched.</span>';
+      if ((S.accounts || []).find(m => m.id === id)?.auth) { // it signed in with an account until now: the row is a password row from here on
+        lastSnap = ""; await load(); await drawSettings();
+        const again = veil.querySelector(`[data-pwres="${id}"]`); if (again) again.innerHTML = '<span class="ok">Saved. It uses this code now. Your list is untouched.</span>';
+      }
     } catch (err) { out.innerHTML = `<span class="bad">${esc(String(err).replace(/^Error: /, ""))}</span>` }
   }
   if (k === "addacct") { openAddMailbox(); return }

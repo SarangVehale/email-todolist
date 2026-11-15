@@ -1,6 +1,6 @@
 # Settings reference
 
-> **Status:** current · **Audience:** developers and support; anyone who reads `settings.json` · **Last reviewed:** 2026-11-14
+> **Status:** current · **Audience:** developers and support; anyone who reads `settings.json` · **Last reviewed:** 2026-11-15
 
 Every setting the engine keeps, with its type, default, allowed values and where you change it in the window. The source of
 truth is [`engine/src/settings.rs`](../../engine/src/settings.rs) (defaults and `Settings::validate`) and the Settings dialog in
@@ -13,8 +13,8 @@ The settings are one JSON file, `settings.json`, in the app's local data folder 
 are in the system keychain (`engine/src/secrets.rs`). A file that cannot be read gives the defaults.
 
 The window changes settings only through [`save_settings`](../api/rpc.md#save_settings), which merges a patch, validates the
-result and restarts the background threads. Mailboxes change only through `save_account`, `add_account` and
-`remove_account`, and `onboarded` only through `finish_setup` and `sign_out`; a patch that would change them is refused. So is a
+result and restarts the background threads. Mailboxes change only through `save_account`, `add_account`, `oauth_finish` and
+`remove_account`, and which of them sign in with a Google or Microsoft account (`oauth`) only through `oauth_finish`, `save_account`, `remove_account` and `sign_out`; `onboarded` only through `finish_setup` and `sign_out`; a patch that would change them is refused. So is a
 patch that would change the phone hub's access code (`hub.token`), which only the app makes.
 
 This shows how the Settings dialog is grouped, top to bottom, and which settings each group holds.
@@ -39,8 +39,8 @@ flowchart TD
 
 | Path | Type | Default | Allowed values | In the window |
 | --- | --- | --- | --- | --- |
-| `account.host` | string | `""` | letters, digits, `.` and `-`, at most 253; empty until set up | setup wizard (provider or "IMAP server"); "Add a mailbox" |
-| `account.port` | integer | `993` | 1 to 65535 (0 refused) | wizard "Port" for "Other IMAP server" only |
+| `account.host` | string | `""` | letters, digits, `.` and `-`, at most 253; empty until set up | first-run screens (read from the email address, or typed on "Your mail server"); "Add a mailbox" |
+| `account.port` | integer | `993` | 1 to 65535 (0 refused) | the "Port" box for "Other IMAP server" only |
 | `account.user` | string | `""` | at most 320 bytes, no control characters | "Email address" |
 | `account.id` | integer | `0` | always 0 for the first mailbox | none |
 | `more_accounts` | array of `{id, host, port, user}` | `[]` | at most 4; ids 1 to 4, each once; each needs a valid server and a non-empty login; no mailbox (server and login, ignoring case, `googlemail.com` read as `gmail.com`) twice | "Add another mailbox", "Remove" |
@@ -55,8 +55,8 @@ password". A mailbox listed in `oauth` has no password: its refresh token is the
 
 | Path | Type | Default | Allowed values | In the window |
 | --- | --- | --- | --- | --- |
-| `ai.mode` | string | `rules` | `rules`, `ollama`, `anthropic` (a save with any other value is refused; a file already saved with one reads as `rules`) | "Ranking" drop-down; wizard step 3 |
-| `ai.ollama_model` | string | `""` | at most 100 bytes, no spaces or control characters | "Ollama model" text box; wizard drop-down filled by `detect_ollama`. Empty means Ollama mode ranks with rules |
+| `ai.mode` | string | `rules` | `rules`, `ollama`, `anthropic` (a save with any other value is refused; a file already saved with one reads as `rules`) | "Ranking" drop-down (under More options in the simple view) |
+| `ai.ollama_model` | string | `""` | at most 100 bytes, no spaces or control characters | "Ollama model" text box. Empty means Ollama mode ranks with rules |
 | `ai.ollama_url` | string | `http://127.0.0.1:11434` | `http://` or `https://`, at most 200, no spaces | none |
 | `ai.anthropic_model` | string | `claude-haiku-5-5` | as `ollama_model` | none |
 
@@ -66,8 +66,8 @@ The Anthropic key itself is a secret (`set_secret`, keychain entry `anthropic-ke
 
 | Path | Type | Default | Allowed values | In the window |
 | --- | --- | --- | --- | --- |
-| `alerts.desktop` | boolean | `true` | | "Desktop notifications"; wizard step 4 |
-| `alerts.ntfy_topic` | string | `""` (off) | at most 64 letters, digits, `-` and `_` | "ntfy topic" (trimmed); wizard "Generate" makes `inbox-` and 16 random characters |
+| `alerts.desktop` | boolean | `true` | | "Desktop notifications" ("Tell me when something important arrives" in the simple view) |
+| `alerts.ntfy_topic` | string | `""` (off) | at most 64 letters, digits, `-` and `_` | "ntfy topic" (trimmed) |
 | `alerts.ntfy_server` | string | `https://ntfy.sh` | `http://` or `https://`, at most 200, no spaces | none |
 
 ### Alert schedule
@@ -101,7 +101,7 @@ Urgent mail alerts whatever the quiet hours and categories; your reminders are a
 
 | Path | Type | Default | Allowed values | In the window |
 | --- | --- | --- | --- | --- |
-| `writeback` | boolean | `false` | | "Let Inbox Agent file mail"; wizard step 5 "Let Inbox Agent file mail for me" |
+| `writeback` | boolean | `false` | | "Let Inbox Agent file mail" (under More options in the simple view); setup makes sure it is off |
 
 ### Updates
 
@@ -113,7 +113,7 @@ Urgent mail alerts whatever the quiet hours and categories; your reminders are a
 
 | Path | Type | Default | Allowed values | In the window |
 | --- | --- | --- | --- | --- |
-| `hub.enabled` | boolean | `false` | | "Phone hub"; wizard step 5 "Use on phone or tablet" |
+| `hub.enabled` | boolean | `false` | | "Phone hub" (under More options in the simple view); setup makes sure it is off |
 | `hub.port` | integer | `8787` | 1024 to 65535 | none |
 | `hub.token` | string | `""` | made by the engine: 32 letters and digits. A patch cannot change it | the QR code and "Rotate access code". `save_settings` clears it when it saves with the hub off and makes one when it saves with the hub on and none, and refuses a patch that sets it to another value; `rotate_hub_token` makes a new one whether or not the hub is on |
 

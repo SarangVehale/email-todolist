@@ -49,6 +49,7 @@ const portBad = a => a.port !== undefined && a.port !== null && !(Number.isInteg
 // An engine test reads every address written in setup.js and checks the engine accepts it, so this list cannot drift from the real one unseen.
 const OPEN_HOSTS = ["myaccount.google.com", "accounts.google.com", "mail.google.com", "login.yahoo.com", "mail.yahoo.com", "account.apple.com", "appleid.apple.com", "www.icloud.com", "app.fastmail.com", "login.microsoftonline.com", "login.live.com", "account.live.com", "account.microsoft.com", "microsoft.com", "www.microsoft.com", "outlook.live.com", "outlook.office.com", "outlook.office365.com"];
 const openable = u => typeof u === "string" && u.length <= 2048 && /^https:\/\/[A-Za-z0-9.-]+([/?#][^\s\\\u0000-\u001f\u007f-\u009f]*)?$/.test(u) && OPEN_HOSTS.includes(u.slice(8).split(/[/?#]/)[0].toLowerCase());
+M.checkedAt = Math.floor(Date.now() / 1000) - 125; // when the mailbox was last read: fixed, so that a change of it is a change the window can be seen to follow
 const syncAccounts = () => { M.accounts = [M.settings.account, ...M.settings.more_accounts].filter(m => m.host).map(m => ({ id: m.id, user: m.user, host: m.host, gmail: /(^|\.)gmail\.com$/.test(m.host), status: "idle", auth: (M.settings.oauth || {})[m.id] || "" })) };
 // Sign in with Google or Microsoft: offered only when the address has ?signin=google,microsoft (the real app offers it when the build has a client ID).
 const SIGNIN = (new URLSearchParams(location.search).get("signin") || "").split(",");
@@ -65,7 +66,7 @@ function mock(cmd, a) {
     case "state": {
       // like the engine: every task that is not finished, and the newest 200 finished ones with their total
       const done = M.tasks.filter(x => x.status === "done").sort((x, y) => (y.done_at || y.received) - (x.done_at || x.received)), shown = Math.min(20000, Math.max(200, Number.isFinite(+(a && a.done)) ? +a.done : 200));
-      return Promise.resolve(JSON.parse(JSON.stringify({ ...M, tasks: [...M.tasks.filter(x => x.status !== "done"), ...done.slice(0, shown)], done_total: done.length, has_anthropic_key: !!M.hasKey, rules: M.rules, checked_at: Math.floor(Date.now() / 1000) - 125 })));
+      return Promise.resolve(JSON.parse(JSON.stringify({ ...M, tasks: [...M.tasks.filter(x => x.status !== "done"), ...done.slice(0, shown)], done_total: done.length, has_anthropic_key: !!M.hasKey, rules: M.rules, checked_at: M.checkedAt })));
     }
     case "set_done": if (t().repeat && a.done && t().uid >= 2000000000) { const nx = (t().remind || t().due || "2026-11-17").slice(0, 10); const d = new Date(nx + "T12:00:00"); d.setDate(d.getDate() + (t().repeat === "daily" ? 1 : t().repeat === "weekly" ? 7 : 30)); const iso = d.toISOString().slice(0, 10); if (t().remind) t().remind = iso + t().remind.slice(10); if (t().due) t().due = iso; return Promise.resolve(true) } t().status = a.done ? "done" : "open"; t().done_at = a.done ? Date.now() / 1000 : 0; log((a.done ? "archived “" : "reopened “") + (t().action || t().subject) + "”"); return Promise.resolve(true);
     case "set_snooze": if (a.date) { if (!/^\d{4}-\d{2}-\d{2}$/.test(a.date) || new Date(a.date + "T09:00:00") <= new Date()) return Promise.reject("Pick a day from today (only before 09:00) to a year ahead"); t().snooze_until = new Date(a.date + "T09:00:00").getTime() / 1000; return Promise.resolve(true) } { const p = a.preset; if (!["3h", "tomorrow", "nextweek", "clear"].includes(p)) return Promise.reject("unknown snooze option"); t().snooze_until = p === "clear" ? 0 : Date.now() / 1000 + (p === "3h" ? 10800 : p === "tomorrow" ? 86400 : 604800); log((p === "clear" ? "unsnoozed “" : "snoozed “") + (t().action || t().subject) + "”"); return Promise.resolve(true) }
@@ -164,6 +165,7 @@ function mock(cmd, a) {
       const id = a.id || 0;
       if (id === 0) M.settings.account = { id: 0, host: a.host, port: a.port, user: a.user };
       else { const m = M.settings.more_accounts.find(x => x.id === id); if (!m) return Promise.reject("There is no such mailbox"); Object.assign(m, { host: a.host, port: a.port, user: a.user }) }
+      delete (M.settings.oauth || {})[id]; // a password for a mailbox that signed in with an account ends that sign-in
       syncAccounts(); return Promise.resolve(true);
     }
     case "add_account": {

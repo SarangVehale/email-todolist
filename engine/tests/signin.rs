@@ -14,6 +14,8 @@ use std::time::{Duration, Instant};
 
 /// These tests share the flow, the token store and the endpoints, which are one each per process.
 static SERIAL: Mutex<()> = Mutex::new(());
+/// How long the scripted mail server waits before it answers a sign-in, in milliseconds (0 unless a test wants a slow one).
+static IMAP_DELAY_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 // ───────────────────────── the scripted token server ─────────────────────────
 
@@ -157,6 +159,9 @@ fn imap_conn(mut c: TcpStream, log: &Mutex<Vec<String>>, good: &Mutex<Vec<String
                 let _ = c.write_all(b"+ \r\n");
                 let mut resp = String::new();
                 let _ = r.read_line(&mut resp);
+                std::thread::sleep(Duration::from_millis(
+                    IMAP_DELAY_MS.load(std::sync::atomic::Ordering::Relaxed),
+                ));
                 let raw = base64::engine::general_purpose::STANDARD
                     .decode(resp.trim())
                     .unwrap_or_default();
@@ -213,15 +218,31 @@ fn scene(tok: Option<&Tok>) -> Scene {
     let g = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     oauth::forget_all();
     secrets::delete_all();
-    assert!(oauth::use_test_endpoints(tok.map(Tok::endpoints)));
+    assert!(oauth::use_test_endpoints(Some(
+        tok.map_or_else(no_ids, Tok::endpoints)
+    )));
     Scene { _g: g }
 }
 impl Drop for Scene {
     fn drop(&mut self) {
+        IMAP_DELAY_MS.store(0, std::sync::atomic::Ordering::Relaxed);
         oauth::use_test_endpoints(None);
         watcher::use_plain_server(None);
         oauth::forget_all();
         secrets::delete_all();
+    }
+}
+/// Endpoints with no client ID: what a build that has not been registered with Google or Microsoft looks like (whatever the constants in `oauth.rs` are).
+fn no_ids() -> Endpoints {
+    Endpoints {
+        google_auth: String::new(),
+        google_token: String::new(),
+        google_revoke: String::new(),
+        ms_device: String::new(),
+        ms_token: String::new(),
+        google_id: String::new(),
+        google_secret: String::new(),
+        ms_id: String::new(),
     }
 }
 fn http_get(addr: &str, target: &str) -> (u16, String) {
@@ -897,6 +918,15 @@ fn nothing_is_saved_for_a_token_the_mail_server_does_not_accept() {
     wait_state(&c, "done");
     let e = c.rpc("oauth_finish", &json!({})).unwrap_err();
     assert!(watcher::is_sign_in_problem(&e), "{e}");
+    assert!(
+        e.to_string().contains("Invalid credentials"),
+        "it is the server's own refusal that comes back, not a message about a missing token: {e}"
+    );
+    assert_eq!(
+        imap.log.lock().unwrap().clone(),
+        vec!["me@gmail.com|BAD"],
+        "one attempt, with the new token"
+    );
     let s = Settings::load(&dir);
     assert!(
         s.account.host.is_empty() && s.oauth.is_empty(),
@@ -1110,14 +1140,17 @@ fn the_phone_hub_cannot_start_poll_cancel_or_finish_a_sign_in() {
 }
 
 #[test]
-fn only_a_test_of_this_crate_can_point_the_sign_in_somewhere_else() {
-    // in the app the function does nothing; here it is honoured, which is what lets the tests above run
+fn the_sign_in_is_offered_exactly_when_a_client_id_is_set_and_each_provider_has_one_server() {
+    // (that the test endpoints are honoured only in a test of this crate is a guard that this file cannot reach: it is in `oauth::use_test_endpoints`)
     let _s = scene(None);
-    assert!(oauth::use_test_endpoints(None));
-    assert!(
-        !oauth::available(Provider::Google) && !oauth::available(Provider::Microsoft),
-        "the constants are empty in this build"
-    );
+    assert!(!oauth::available(Provider::Google) && !oauth::available(Provider::Microsoft));
+    let tok = Tok::start();
+    assert!(oauth::use_test_endpoints(Some(tok.endpoints())));
+    assert!(oauth::available(Provider::Google) && oauth::available(Provider::Microsoft));
+    let mut only_google = no_ids();
+    only_google.google_id = "gid".into();
+    assert!(oauth::use_test_endpoints(Some(only_google)));
+    assert!(oauth::available(Provider::Google) && !oauth::available(Provider::Microsoft));
     assert_eq!(Provider::Google.host(), "imap.gmail.com");
     assert_eq!(Provider::Microsoft.host(), "outlook.office365.com");
 }
@@ -1144,5 +1177,285 @@ fn a_finished_sign_in_that_is_not_used_is_forgotten_instead_of_waiting_in_memory
     std::thread::sleep(Duration::from_millis(2300));
     let e = c.rpc("oauth_finish", &json!({})).unwrap_err().to_string();
     assert!(e.contains("too long ago"), "{e}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+fn gmail_mailbox_with_a_sign_in(dir: &std::path::Path, refresh: &str) {
+    oauth_mailbox(dir, 0, "imap.gmail.com", "me@gmail.com", "google");
+    secrets::set("oauth-refresh-0", refresh).unwrap();
+}
+
+#[test]
+fn signing_in_again_proves_the_new_token_not_the_old_grant_and_keeps_the_old_one_when_it_fails() {
+    let tok = Tok::start();
+    tok.say("/gtoken", 200, tokens("NEW-BAD", Some("RT-new"), MAIL));
+    // the old grant still works: a retry that fell back to it would pass, and the new token would be saved unproved
+    let imap = imap_start(&["OLD-ACCESS"]);
+    let _s = scene(Some(&tok));
+    watcher::use_plain_server(Some(imap.addr));
+    let (c, dir) = fresh("again-bad");
+    gmail_mailbox_with_a_sign_in(&dir, "RT-old");
+    oauth::prime(0, "OLD-ACCESS", 3600);
+    google_round(&c, "me@gmail.com", |_, st| format!("/?code=C&state={st}"));
+    wait_state(&c, "done");
+    let e = c.rpc("oauth_finish", &json!({"id": 0})).unwrap_err();
+    assert!(watcher::is_sign_in_problem(&e), "{e}");
+    assert_eq!(
+        imap.log.lock().unwrap().clone(),
+        vec!["me@gmail.com|NEW-BAD"],
+        "the old grant was not tried in its place"
+    );
+    assert_eq!(
+        secrets::get("oauth-refresh-0").as_deref(),
+        Some("RT-old"),
+        "the old sign-in is as it was"
+    );
+    assert!(
+        tok.bodies("/grevoke").contains(&"token=RT-new".to_string()),
+        "the grant that was never used is cancelled at Google"
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn signing_in_again_with_a_good_token_replaces_the_grant_and_cancels_the_old_one() {
+    let tok = Tok::start();
+    tok.say("/gtoken", 200, tokens("NEW-GOOD", Some("RT-new"), MAIL));
+    tok.say("/grevoke", 200, json!({}));
+    let imap = imap_start(&["NEW-GOOD"]);
+    let _s = scene(Some(&tok));
+    watcher::use_plain_server(Some(imap.addr));
+    let (c, dir) = fresh("again-good");
+    gmail_mailbox_with_a_sign_in(&dir, "RT-old");
+    google_round(&c, "me@gmail.com", |_, st| format!("/?code=C&state={st}"));
+    wait_state(&c, "done");
+    assert_eq!(c.rpc("oauth_finish", &json!({"id": 0})).unwrap(), json!(0));
+    assert_eq!(secrets::get("oauth-refresh-0").as_deref(), Some("RT-new"));
+    assert_eq!(
+        tok.bodies("/grevoke"),
+        vec!["token=RT-old".to_string()],
+        "the old grant is cancelled, with the token in the body"
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn what_is_wrong_with_the_mailbox_is_refused_before_the_sign_in_is_used_up() {
+    let tok = Tok::start();
+    tok.say("/gtoken", 200, tokens("AT1", Some("RT1"), MAIL));
+    let imap = imap_start(&["AT1"]);
+    let _s = scene(Some(&tok));
+    watcher::use_plain_server(Some(imap.addr));
+    let (c, dir) = fresh("duplicate");
+    // the same address is already a mailbox
+    Settings {
+        account: AccountCfg {
+            id: 0,
+            host: "imap.gmail.com".into(),
+            port: 993,
+            user: "me@gmail.com".into(),
+        },
+        onboarded: true,
+        ..Settings::default()
+    }
+    .save(&dir)
+    .unwrap();
+    secrets::set("imap-password", "pw").unwrap();
+    google_round(&c, "me@gmail.com", |_, st| format!("/?code=C&state={st}"));
+    wait_state(&c, "done");
+    let e = c
+        .rpc("oauth_finish", &json!({"add": true}))
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("already in the app"), "{e}");
+    assert_eq!(
+        c.rpc("oauth_poll", &json!({})).unwrap()["state"],
+        "done",
+        "the sign-in was not spent: the person does not repeat the browser trip"
+    );
+    assert!(
+        imap.log.lock().unwrap().is_empty(),
+        "the mail server was not asked"
+    );
+    assert!(tok.bodies("/grevoke").is_empty());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_token_is_never_sent_to_a_host_the_settings_file_names_instead_of_the_providers() {
+    let tok = Tok::start();
+    let imap = imap_start(&["AT1"]);
+    let _s = scene(Some(&tok));
+    secrets::set("oauth-refresh-0", "RT").unwrap();
+    oauth::prime(0, "AT1", 3600);
+    // a settings file that was edited or damaged: a Google sign-in on another server
+    let a = watcher::Account {
+        host: "imap.evil.example".into(),
+        port: 993,
+        user: "me@gmail.com".into(),
+        password: String::new(),
+        oauth: Some((0, Provider::Google)),
+    };
+    let e = match watcher::connect_plain_account(imap.addr, &a) {
+        Ok(_) => panic!("connected with a token to another server"),
+        Err(e) => e,
+    };
+    assert!(e.to_string().contains("only for imap.gmail.com"), "{e}");
+    assert!(imap.log.lock().unwrap().is_empty(), "no token was sent");
+    watcher::use_plain_server(Some(imap.addr));
+    assert!(watcher::check_token(&a, "AT1").is_err());
+    assert!(
+        imap.log.lock().unwrap().is_empty(),
+        "no token was sent by the check either"
+    );
+    // the provider's own server, in any letter case, is fine
+    let ok = watcher::Account {
+        host: "IMAP.Gmail.com".into(),
+        ..a
+    };
+    let mut s = watcher::connect_plain_account(imap.addr, &ok).expect("the provider's own server");
+    let _ = s.logout();
+}
+
+#[test]
+fn a_dropped_connection_is_not_a_refused_sign_in() {
+    let tok = Tok::start();
+    let _s = scene(Some(&tok));
+    // a server that hangs up as soon as it is asked to authenticate
+    let l = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = l.local_addr().unwrap();
+    std::thread::spawn(move || {
+        for mut c in l.incoming().flatten() {
+            let _ = c.write_all(b"* OK ready\r\n");
+            let mut r = BufReader::new(c.try_clone().unwrap());
+            let mut line = String::new();
+            let _ = r.read_line(&mut line);
+            drop(c); // gone
+        }
+    });
+    secrets::set("oauth-refresh-0", "RT").unwrap();
+    oauth::prime(0, "AT1", 3600);
+    let a = watcher::Account {
+        host: "imap.gmail.com".into(),
+        port: 993,
+        user: "me@gmail.com".into(),
+        password: String::new(),
+        oauth: Some((0, Provider::Google)),
+    };
+    let e = match watcher::connect_plain_account(addr, &a) {
+        Ok(_) => panic!("signed in to a server that hung up"),
+        Err(e) => e,
+    };
+    assert!(
+        !watcher::is_sign_in_problem(&e),
+        "a dropped connection is an ordinary error, tried again soon: {e}"
+    );
+    assert!(
+        tok.bodies("/gtoken").is_empty(),
+        "and it did not cost a new token"
+    );
+}
+
+#[test]
+fn removing_a_mailbox_while_its_token_is_being_refreshed_leaves_nothing_behind() {
+    let tok = Tok::start();
+    tok.say_slowly(
+        "/mstoken",
+        200,
+        json!({"access_token": "MT-new", "refresh_token": "MR-rotated", "expires_in": 3600}),
+        500,
+    );
+    let _s = scene(Some(&tok));
+    secrets::set("oauth-refresh-0", "MR-old").unwrap();
+    let refresh = std::thread::spawn(|| oauth::access_token(0, Provider::Microsoft));
+    std::thread::sleep(Duration::from_millis(150)); // the provider is being asked
+    oauth::sign_out_mailbox(0, Some(Provider::Microsoft));
+    let _ = refresh.join().unwrap();
+    assert!(
+        secrets::get("oauth-refresh-0").is_none(),
+        "the rotated token was not written back after the removal"
+    );
+    // and nothing is left in memory to be used for the removed mailbox
+    let e = oauth::access_token(0, Provider::Microsoft).unwrap_err();
+    assert!(watcher::is_sign_in_problem(&e), "{e}");
+}
+
+#[test]
+fn a_microsoft_sign_in_cancelled_while_the_code_is_being_asked_for_does_not_come_back() {
+    let tok = Tok::start();
+    tok.say_slowly("/msdevice", 200, json!({"device_code": "DC", "user_code": "ABCD-EFGH", "verification_uri": "https://www.microsoft.com/link", "expires_in": 900, "interval": 1}), 500);
+    tok.say("/mstoken", 400, json!({"error": "authorization_pending"}));
+    let _s = scene(Some(&tok));
+    let (c, dir) = fresh("ms-cancel");
+    let c2 = c.clone();
+    let start = std::thread::spawn(move || {
+        c2.rpc(
+            "oauth_start",
+            &json!({"provider": "microsoft", "user": "me@outlook.com"}),
+        )
+    });
+    std::thread::sleep(Duration::from_millis(150));
+    c.rpc("oauth_cancel", &json!({})).unwrap();
+    let r = start.join().unwrap();
+    assert!(r.is_err(), "the start that was cancelled says so: {r:?}");
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(
+        c.rpc("oauth_poll", &json!({})).unwrap()["state"],
+        "idle",
+        "no code is left on screen for a sign-in that was cancelled"
+    );
+    assert!(
+        tok.bodies("/mstoken").is_empty(),
+        "and nothing polls for it"
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn the_status_line_tells_a_signed_in_mailbox_to_sign_in_again_not_to_enter_a_password() {
+    let pw = watcher::Account {
+        host: "imap.example.com".into(),
+        port: 993,
+        user: "a@example.com".into(),
+        password: "x".into(),
+        oauth: None,
+    };
+    let acc = watcher::Account {
+        oauth: Some((0, Provider::Google)),
+        ..pw.clone()
+    };
+    assert!(watcher::refused_status(&pw).contains("Enter your password again in Settings"));
+    assert!(watcher::refused_status(&acc).contains("Sign in again in Settings"));
+    assert!(!watcher::refused_status(&acc).contains("password"));
+}
+
+#[test]
+fn a_change_made_in_settings_while_the_mail_server_is_asked_is_kept() {
+    let tok = Tok::start();
+    tok.say("/gtoken", 200, tokens("AT1", Some("RT1"), MAIL));
+    let imap = imap_start(&["AT1"]);
+    let _s = scene(Some(&tok));
+    watcher::use_plain_server(Some(imap.addr));
+    let (c, dir) = fresh("lost-update");
+    google_round(&c, "me@gmail.com", |_, st| format!("/?code=C&state={st}"));
+    wait_state(&c, "done");
+    // a setting changes while oauth_finish is waiting for the mail server (the scripted server answers after a pause)
+    IMAP_DELAY_MS.store(500, std::sync::atomic::Ordering::Relaxed);
+    let c2 = c.clone();
+    let slow = std::thread::spawn(move || c2.rpc("oauth_finish", &json!({})));
+    std::thread::sleep(Duration::from_millis(150));
+    c.rpc(
+        "save_settings",
+        &json!({"patch": {"followups": {"days": 5}}}),
+    )
+    .unwrap();
+    let finished = slow.join().unwrap();
+    assert!(finished.is_ok(), "{finished:?}");
+    assert_eq!(
+        Settings::load(&dir).followups.days,
+        5,
+        "the change was not undone by the save that followed"
+    );
+    assert_eq!(Settings::load(&dir).account.user, "me@gmail.com");
     let _ = std::fs::remove_dir_all(dir);
 }

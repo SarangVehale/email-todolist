@@ -193,21 +193,21 @@ a case changes mail. Record the result and, for any failure, the **Log** tab tex
 | MT-136 | Press Tab until a row is focused, then `j` several times and `x` | The highlighted row moves down each time, and `x` finishes the highlighted row |
 | MT-137 | Open "Show automated" on a long list, click a row in it, then "Show 150 more" under the fold | The page does not jump; the row opens where it is; only the fold gets more rows, not the list above it |
 | MT-138 | In select mode click a row, then shift-click a row further down | The rows between them are selected, and no row that is not drawn |
-| MT-139 | On a clean Windows computer with no earlier settings, start the installed app and press Get started, type a Gmail address, press the button "Open Google's page" | The default browser opens Google's app-passwords page; the window says that page should be open |
+| MT-139 | On a clean Windows computer with no earlier settings, start the installed app, press Get started, type a Gmail address, press Continue, then press the button "Open Google's page" | The default browser opens Google's app-passwords page; the window says that page should be open |
 | MT-140 | Make a code there, copy it, come back and press Paste (Windows may ask to allow reading the clipboard) | The window connects by itself and moves to "You're connected."; the list starts to fill. If Windows refuses the clipboard, the window says to press Ctrl and V and the pasted code connects with Connect |
 | MT-141 | Do the same with a wrong code (change one letter) | "That code didn't work. Make a new one with the button above and paste it here." and nothing is saved; Details for a helper shows the server's own words |
 | MT-142 | Repeat MT-139 to MT-140 with Yahoo, iCloud and Fastmail addresses | The button opens that provider's page; the steps written beside it match what the page shows (note any that have drifted) |
-| MT-143 | Type an Outlook or Hotmail address | The screen says it cannot be connected yet, and offers a way back |
+| MT-143 | In a build with no Microsoft client ID, type an Outlook or Hotmail address | The screen says it cannot be connected yet, and offers a way back |
 | MT-144 | After setup close the window with its X | The app keeps running (its icon is near the clock); clicking the icon brings the list back. The last setup screen said so |
 | MT-145 | In the simple view press Done on a message, wait ten seconds, then press Undo | Undo is still there and brings the message back |
 | MT-146 | In the simple view press Later on a message | It leaves the list, is in the Later tab, and returns at nine the next morning |
 | MT-147 | On a Gmail message in the simple view open it and press Open in Gmail | The browser opens that message in the right Google account |
 | MT-148 | Set the text to Huge in Settings on a 1366 by 768 laptop screen | Nothing important is cut off; the Done and Later buttons can be pressed; the list scrolls |
 | MT-149 | Ask a person who has never used the app, aged 70 or more, to set it up from the downloaded installer to a filled list, with nobody helping | Note where they stop, what they say, and how long it took. This is the test the design cannot replace |
-| MT-150 | With a Google client ID in `oauth.rs`, type a Gmail address and press Sign in with Google | The browser opens Google's page with the address as the hint; after you allow it the tab says it can be closed, and the window moves to "You're connected." Mail is read |
+| MT-150 | With a Google client ID in `oauth.rs`, type a Gmail address, press Continue and press Sign in with Google | The browser opens Google's page with the address as the hint; after you allow it the tab says it can be closed, and the window moves to "You're connected." Mail is read |
 | MT-151 | Do it with an account that is not yours to untick the mail permission on Google's page | "Mail access was not allowed…" and nothing is saved |
-| MT-152 | After MT-150 remove the app at myaccount.google.com/permissions, then wait for the next sync | The mailbox says it needs to sign in again; Settings, Sign in again, works; the list is untouched |
+| MT-152 | After MT-150 remove the app at myaccount.google.com/permissions, then wait for the next sync | The status bar says "your account's sign-in was refused. Sign in again in Settings" and the mailbox row says it needs you to sign in again; Settings, Sign in again, works; the list is untouched |
 | MT-153 | Remove the mailbox in Settings | The app disappears from myaccount.google.com/permissions (it was revoked) and no entry `oauth-refresh-0` is left in the system keychain |
 | MT-154 | With a Microsoft client ID, type an Outlook or Hotmail address and press Sign in with Microsoft | A code is shown, Microsoft's page opens, the code is accepted, and the window connects; mail is read |
-| MT-155 | Leave a sign-in waiting for six minutes, then try again | "The sign-in took too long. Try again."; a new sign-in works |
+| MT-155 | Leave a Google sign-in waiting for six minutes (a Microsoft one until its code runs out, up to 15 minutes), then try again | "The sign-in took too long. Try again."; a new sign-in works |
 | MT-156 | Leave the app running for more than an hour with a signed-in mailbox, then receive a message | It arrives without any prompt (the token was refreshed by itself) |

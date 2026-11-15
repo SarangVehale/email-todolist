@@ -52,7 +52,7 @@ spaces); the text after an error colon, inside "connection lost (...)" and the l
 unless they start with one of a few fixed phrases; any piece that looks like a path or a mail folder becomes `<name>`;
 and the line is cut to 200 characters. Crash lines keep only the time, thread and file:line; the panic text is dropped.
 
-### 3. Deferred: Google sign-in with your own client ID
+### 3. Google sign-in with your own client ID (deferred here; built in Phase 12, see [ADR-0015](../adr/0015-sign-in-with-google-and-microsoft-needs-the-owners-client-id.md))
 
 The review's list of what a safe version needs, kept for the next pass:
 

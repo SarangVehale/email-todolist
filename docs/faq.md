@@ -1,6 +1,6 @@
 # Frequently asked questions
 
-> **Status:** current · **Audience:** anyone using or considering Inbox Agent · **Last reviewed:** 2026-11-14
+> **Status:** current · **Audience:** anyone using or considering Inbox Agent · **Last reviewed:** 2026-11-15
 
 Short answers, each true of the code today, with a link to the document that owns the topic. If something is broken rather than unclear,
 use the [troubleshooting page](troubleshooting.md).
@@ -93,8 +93,9 @@ are built ([ADR-0015](adr/0015-sign-in-with-google-and-microsoft-needs-the-owner
 
 ### Why is Outlook / Microsoft 365 not supported?
 
-Microsoft turned off password sign-in for IMAP, and the app has no "sign in with Microsoft" flow. The window lists the entry as "not
-supported yet". See [connect a mailbox](guides/connect-a-mailbox.md#what-is-not-supported).
+Microsoft turned off password sign-in for IMAP. When the build has been registered with Microsoft, the Outlook screen offers **Sign in with Microsoft**;
+otherwise it says that Microsoft does not let an app like this one sign in with a code, so the mailbox cannot be read yet. See
+[connect a mailbox](guides/connect-a-mailbox.md#what-is-not-supported).
 
 ### Which providers work?
 
@@ -134,7 +135,7 @@ fold "Show left your inbox · N", and comes back to the main list if the message
 
 ### How do I undo?
 
-Press `z` or the **Undo** button that appears for a few seconds. It takes back done, star, priority, snooze, due date and title changes
+Press `z` or the **Undo** button that appears (for five seconds in the dense view; in the simple view it stays until your next action). It takes back done, star, priority, snooze, due date and title changes
 and whole batches. Muting a sender is the exception: open a task and choose **Normal**. Finishing a repeating task of yours cannot be
 undone. See [rules and sender choices](guides/rules-and-sender-choices.md) and [keyboard shortcuts](reference/keyboard-shortcuts.md).
 
@@ -151,7 +152,7 @@ corrections of a sender in one direction move that sender's later mail one or tw
 
 ### Why did a task close by itself?
 
-The app saw a reply from you in your Sent folder: "Closed automatically because you replied." Press `x` or the circle to reopen it. See
+The app saw a reply from you in your Sent folder: "Closed automatically because you replied." Press `x` or the circle to reopen it (in the simple view: open the Done tab and press **Put back**). See
 [the life of a message](architecture/message-lifecycle.md).
 
 ### What is a "Waiting" task?
@@ -190,8 +191,9 @@ Yes. Closing the window hides it to the tray and the engine keeps reading mail; 
 
 ### How do I stop it starting with my computer?
 
-The only switch is "Open Inbox Agent when I turn on this computer" on the last first-run screen (on unless you untick it). The window has no setting for it
-afterwards: use your operating system's list of startup apps (not checked here).
+The switch "Open Inbox Agent when I turn on this computer" is on the last first-run screen (on unless you untick it) and, in an installed build, on the first page of
+Settings in the simple view (under **More options** it is not repeated). The dense view's Settings has no switch for it: use your operating system's list of startup
+apps (not checked here).
 
 ### Does it work offline?
 

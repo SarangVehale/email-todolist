@@ -1,6 +1,6 @@
 # Troubleshooting
 
-> **Status:** current · **Audience:** anyone using Inbox Agent when something does not work · **Last reviewed:** 2026-11-14
+> **Status:** current · **Audience:** anyone using Inbox Agent when something does not work · **Last reviewed:** 2026-11-15
 
 Find what you see in the first column, read the likely cause, and do what the third column says. Every message here is the text the
 window or the engine produces. The fourth column links to the step-by-step runbook or guide. If nothing matches, press **Copy
@@ -31,7 +31,7 @@ flowchart TD
 | What you see | Likely cause | What to do | More |
 | --- | --- | --- | --- |
 | Status bar: `error: your mail server refused the sign-in. Enter your password again in Settings` | The app password is wrong or was cancelled, or IMAP is off at the provider. The app retries every 5 minutes | Make a new app password. **Settings**, **New app password**, **Save password** | [Mailbox will not connect](runbooks/mailbox-wont-connect.md) |
-| Status bar: "Sign in again in Settings". Settings: "Needs a new app password" | No password is saved for a mailbox (for example a mailbox restored from a backup, which comes without one) | Paste its app password and press **Save password** | [Backup and restore](guides/backup-and-restore.md) |
+| Status bar: "Sign in again in Settings". Settings: "Needs a new app password" (in the simple view "Needs a new code. Paste it below."; "Needs you to sign in again" for a mailbox that signs in with an account) | No password is saved for a mailbox (for example a mailbox restored from a backup, which comes without one) | Paste its app password and press **Save password** | [Backup and restore](guides/backup-and-restore.md) |
 | "That code didn't work. Make a new one with the button above and paste it here." (**Connect**; the server's own words, `sign-in refused: …`, are behind **Details for a helper**). In the **Add a mailbox** dialog the same sentence under **Test connection** | The same as the first row | Make a new code with the button on that screen and paste it (do not type it); on Gmail check that IMAP is on | [Connect a mailbox](guides/connect-a-mailbox.md) |
 | "Google did not let Inbox Agent in with that account…", "Mail access was not allowed…", "The sign-in took too long…" (sign in with an account) | See the table of sign-in messages | Follow it | [Connect a mailbox](guides/connect-a-mailbox.md#if-something-goes-wrong) |
 | "Couldn't open your web browser. Open it yourself and go to …" | The system has no default browser, or refused to start it | Type the address shown into any browser | [Connect a mailbox](guides/connect-a-mailbox.md) |
@@ -40,10 +40,10 @@ flowchart TD
 | `error: …` about looking up an address, or a time-out | The server name is wrong, the network is down, or something blocks the connection. The app retries every 30 seconds | Check the spelling and your connection | [Mailbox will not connect](runbooks/mailbox-wont-connect.md) |
 | `error: your system keychain is not available (…). Unlock it and restart the app` | The system keychain is locked or not running | Unlock it, quit the app from the tray, open it again | [Mailbox will not connect](runbooks/mailbox-wont-connect.md) |
 | "Connected · no Sent folder found, so replies you send will not close tasks and there are no follow-up reminders" (not an error: the mailbox can be added) | The server flags no Sent folder and none has a common name. The mailbox works, but nothing closes by itself when you reply and there are no follow-up reminders | Add it anyway, or report the folder names if you want those two | [Connect a mailbox](guides/connect-a-mailbox.md) |
-| The provider entry "Outlook / Microsoft 365 (not supported yet)" | Microsoft turned off password sign-in for IMAP, and the app has no Microsoft sign-in | Use another mailbox | [Connect a mailbox](guides/connect-a-mailbox.md#what-is-not-supported) |
+| The provider entry "Outlook, Hotmail or Live (not supported yet)" (or the Outlook screen with no way in) | Microsoft turned off password sign-in for IMAP, and the app has no Microsoft sign-in | Use another mailbox | [Connect a mailbox](guides/connect-a-mailbox.md#what-is-not-supported) |
 | `That mailbox is already in the app` | The same server and address is there already | Nothing to do | [Connect a mailbox](guides/connect-a-mailbox.md) |
 | `You can read at most five mailboxes at once`, or **Add another mailbox** is greyed out | Five mailboxes are in use | Remove one first | [Connect a mailbox](guides/connect-a-mailbox.md) |
-| "Paste the code first." | **Connect** with the code box empty. Nothing is saved | Paste the code and press **Connect** | [Connect a mailbox](guides/connect-a-mailbox.md) |
+| "Paste the code first." (on the **Your mail server** screen: "Type the password first.") | **Connect** with the code box empty. Nothing is saved | Paste the code and press **Connect** | [Connect a mailbox](guides/connect-a-mailbox.md) |
 | `Paste the new password first` | **Save password** in Settings with the box empty. Nothing is sent | Paste the new app password and press **Save password** | [Connect a mailbox](guides/connect-a-mailbox.md) |
 | `Enter the app password` | **Test connection** in the **Add a mailbox** dialog with an empty password | Paste the app password and test again | [Connect a mailbox](guides/connect-a-mailbox.md) |
 | `Enter the mail server and the email address` | **Connect** or **Test connection** with the server or the address empty | Fill in both, then try again | [Connect a mailbox](guides/connect-a-mailbox.md) |
@@ -62,7 +62,7 @@ flowchart TD
 | "No matches" | The search box or a chip hides everything | Press `/`, then `Esc`, and choose the **All** chip | [List is empty or stale](runbooks/list-is-empty-or-stale.md) |
 | Status bar: "Connecting…" for minutes | The network is down or the server does not answer | Wait for the retry (30 seconds); see the connecting rows | [Mailbox will not connect](runbooks/mailbox-wont-connect.md) |
 | A task with the tag **Left inbox**, in the fold "Show left your inbox · N" | You archived or moved the message elsewhere; the task stays open | Press `x` if it is dealt with | [FAQ](faq.md) |
-| "Closed automatically because you replied." | The app saw your reply in the Sent folder | Press `x` or the circle to reopen it | [FAQ](faq.md) |
+| "Closed automatically because you replied." | The app saw your reply in the Sent folder | Press `x` or the circle to reopen it (simple view: **Put back** in the Done tab) | [FAQ](faq.md) |
 | Log: `skipped message N: larger than 5 MB` | A message over 5 MB is never read | Read it in your mail program | [List is empty or stale](runbooks/list-is-empty-or-stale.md) |
 | Log: `the mail server renumbered your inbox; starting a fresh sync` | The provider restarted its message numbering, so that mailbox's tasks were cleared and its newest 50 are read again | Wait. Rules, sender choices and your own tasks stay | [List is empty or stale](runbooks/list-is-empty-or-stale.md) |
 | Log: `could not read your Sent folder (…); mail still loads, but replies you have already sent are not detected` | No Sent folder was found | Mail still arrives; replies are not noticed | [Connect a mailbox](guides/connect-a-mailbox.md) |

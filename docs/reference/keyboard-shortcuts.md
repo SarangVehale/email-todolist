@@ -1,6 +1,6 @@
 # Keyboard shortcuts
 
-> **Status:** current · **Audience:** users who work from the keyboard, and developers who change a key · **Last reviewed:** 2026-11-14
+> **Status:** current · **Audience:** users who work from the keyboard, and developers who change a key · **Last reviewed:** 2026-11-15
 
 Every key the window handles, by mode, as the code handles it (`keydown` listeners in `app/ui/main.js` and
 `app/ui/drafts.js`). The `?` card in the window shows the short version.

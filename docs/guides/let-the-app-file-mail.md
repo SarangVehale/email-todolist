@@ -1,6 +1,6 @@
 # Let the app file mail
 
-> **Status:** current · **Audience:** anyone deciding whether to switch on write-back · **Last reviewed:** 2026-11-14
+> **Status:** current · **Audience:** anyone deciding whether to switch on write-back · **Last reviewed:** 2026-11-15
 
 By the end of this guide you will know what the setting **Let Inbox Agent file mail** does to your mailbox, what it never does, and how
 to switch it on and off safely. It is called write-back in the documents. It takes about five minutes to read.
@@ -58,7 +58,7 @@ by something else) and "could not reach mailbox for updates: …".
 
 ## Switch it on
 
-1. **Settings**, section **Mailbox**, tick **Let Inbox Agent file mail**. It is off after setup, which no longer asks. It shows "N change(s) waiting" while changes are queued.
+1. **Settings** (press **More options** first in the simple view), section **Mailbox**, tick **Let Inbox Agent file mail**. It is off after setup, which no longer asks. It shows "N change(s) waiting" while changes are queued.
 2. The queued changes start applying within seconds. This includes changes made by your rules (a rule that files mail marks it done; a
    rule that sets a priority queues its label).
 

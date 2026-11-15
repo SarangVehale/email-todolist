@@ -1,6 +1,6 @@
 # Test plan: the first release, 0.1.0
 
-> **Status:** current · **Audience:** release manager, maintainers and testers · **Last reviewed:** 2026-11-14
+> **Status:** current · **Audience:** release manager, maintainers and testers · **Last reviewed:** 2026-11-15
 
 This is the checklist for deciding whether `0.1.0`, the first public build, can be published. It applies [the testing
 strategy](strategy.md) in the shape of [the test-plan template](../templates/test-plan.md). Nothing has been released, so every
@@ -86,7 +86,7 @@ Gate 13 refuses to run when the app already has a data folder: move `%LOCALAPPDA
 
 ## Manual cases
 
-All 129 cases in [the manual plan](../TESTCASES.manual.md) are still owed: no result is recorded for any of them. The cases are
+All 147 cases in [the manual plan](../TESTCASES.manual.md) are still owed: no result is recorded for any of them. The cases are
 run on **clean machines** (a fresh Windows user or VM, a Mac, a Linux box), not the development computer, with a throwaway message
 wherever a case changes mail.
 

@@ -815,46 +815,52 @@ impl Core {
 
 impl Core {
     /// Saves the mailbox of a sign-in that has just worked (`oauth::take_done`): the first mailbox or the one named by `id` (setup, or signing in again),
-    /// or with `add` the lowest free number. Nothing is saved unless the mail server accepts what the sign-in gave.
+    /// or with `add` the lowest free number. What is wrong with the mailbox is refused before the sign-in is used up; the mail server is asked with
+    /// exactly the new token before anything is saved; and the settings are read again after that, so a change made while it was asked is kept.
     fn oauth_finish(self: &Arc<Self>, a: &Value) -> Result<Value> {
         let add = a["add"].as_bool().unwrap_or(false);
-        let s = self.settings();
-        let id = if add {
-            if !s.onboarded || s.mailboxes().is_empty() {
-                return Err(anyhow!("Set up your first mailbox before adding another"));
-            }
-            let used: std::collections::HashSet<u32> = s.mailboxes().iter().map(|m| m.id).collect();
-            let Some(id) = (0..crate::store::MAX_MAILBOXES).find(|n| !used.contains(n)) else {
-                return Err(anyhow!("You can read at most five mailboxes at once"));
+        let (provider, user) = crate::oauth::peek()?;
+        // where this mailbox goes, in these settings: its number, its entry, and the settings with it in them (validated)
+        let plan = |s: &Settings| -> Result<(u32, AccountCfg, Settings)> {
+            let id = if add {
+                if !s.onboarded || s.mailboxes().is_empty() {
+                    return Err(anyhow!("Set up your first mailbox before adding another"));
+                }
+                let used: std::collections::HashSet<u32> =
+                    s.mailboxes().iter().map(|m| m.id).collect();
+                (0..crate::store::MAX_MAILBOXES)
+                    .find(|n| !used.contains(n))
+                    .ok_or_else(|| anyhow!("You can read at most five mailboxes at once"))?
+            } else {
+                match a.get("id") {
+                    None | Some(Value::Null) => 0,
+                    Some(v) => u32::try_from(v.as_u64().unwrap_or(u64::MAX)).unwrap_or(u32::MAX),
+                }
             };
-            id
-        } else {
-            match a.get("id") {
-                None | Some(Value::Null) => 0,
-                Some(v) => u32::try_from(v.as_u64().unwrap_or(u64::MAX)).unwrap_or(u32::MAX),
+            let new = AccountCfg {
+                id,
+                host: provider.host().to_string(),
+                port: 993,
+                user: user.clone(),
+            };
+            let mut candidate = s.clone();
+            if id == 0 {
+                candidate.account = new.clone();
+            } else if add {
+                candidate.more_accounts.push(new.clone());
+            } else if let Some(slot) = candidate.more_accounts.iter_mut().find(|m| m.id == id) {
+                *slot = new.clone();
+            } else {
+                return Err(anyhow!("There is no such mailbox"));
             }
+            candidate.oauth.insert(id, provider.name().to_string());
+            candidate.validate()?;
+            Ok((id, new, candidate))
         };
+        plan(&self.settings())?;
         let done = crate::oauth::take_done()?;
-        let new = AccountCfg {
-            id,
-            host: done.provider.host().to_string(),
-            port: 993,
-            user: done.user.clone(),
-        };
-        let old = s.mailboxes().into_iter().find(|m| m.id == id);
-        let mut candidate = s.clone();
-        if id == 0 {
-            candidate.account = new.clone();
-        } else if add {
-            candidate.more_accounts.push(new.clone());
-        } else if let Some(slot) = candidate.more_accounts.iter_mut().find(|m| m.id == id) {
-            *slot = new.clone();
-        } else {
-            return Err(anyhow!("There is no such mailbox"));
-        }
-        candidate.oauth.insert(id, done.provider.name().to_string());
-        candidate.validate()?;
-        // prove it first: sign in to the mail server with the token, so that nothing is saved for a token the server does not accept
+        // prove it first: sign in to the mail server with exactly this token, so that nothing is saved for one the server does not accept
+        let (id, new, _) = plan(&self.settings())?;
         crate::oauth::prime(id, &done.access, done.expires_in);
         let acct = Account {
             host: new.host.clone(),
@@ -863,13 +869,28 @@ impl Core {
             password: String::new(),
             oauth: Some((id, done.provider)),
         };
-        if let Err(e) = watcher::check_sign_in(&acct) {
-            crate::oauth::drop_cached(id);
+        if let Err(e) = watcher::check_token(&acct, &done.access) {
+            crate::oauth::discard(id, &done);
             return Err(e);
         }
-        let changed = old.is_some_and(|o| {
+        // the settings may have been changed while the server was asked: read them again, and plan again
+        let s = self.settings();
+        let (id, new, candidate) = match plan(&s) {
+            Ok(x) => x,
+            Err(e) => {
+                crate::oauth::discard(id, &done);
+                return Err(e);
+            }
+        };
+        crate::oauth::prime(id, &done.access, done.expires_in);
+        let old = s.mailboxes().into_iter().find(|m| m.id == id);
+        let changed = old.as_ref().is_some_and(|o| {
             (o.host.as_str(), o.user.as_str()) != (new.host.as_str(), new.user.as_str())
         });
+        let before = s
+            .oauth
+            .get(&id)
+            .and_then(|k| crate::oauth::Provider::parse(k));
         if changed {
             // stop the syncs first: one that is mid-batch would write the old mailbox's mail back after the reset
             self.stop
@@ -883,14 +904,24 @@ impl Core {
             } else if changed {
                 self.store_for(id)?.reset_for_new_account()?;
             }
-            secrets::set(&secrets::oauth_key(id), &done.refresh)?;
+            // signing in again replaces the old grant: Google is told to cancel it
+            if let (Some(p), Some(old_refresh)) = (before, secrets::get(&secrets::oauth_key(id))) {
+                if old_refresh != done.refresh {
+                    crate::oauth::revoke(p, &old_refresh);
+                }
+            }
+            secrets::set(&secrets::oauth_key(id), &done.refresh)
+                .map_err(|e| anyhow!("Couldn't save the sign-in in your system keychain ({e})"))?;
             secrets::delete(&secrets::imap_key(id)); // a sign-in replaces any password the mailbox had
             candidate.save(&self.dir)
         })();
         if s.onboarded && (changed || saved.is_ok()) {
             self.start();
         }
-        saved?;
+        if let Err(e) = saved {
+            crate::oauth::discard(id, &done);
+            return Err(e);
+        }
         Ok(json!(id))
     }
 }

@@ -36,6 +36,7 @@ suite("the dense view stays as it was", it => {
     await page.waitFor(() => document.documentElement.classList.contains("easy"));
     assert.deepEqual(await look(page), { easy: true, light: true, zoom: "1.2", view: "todo" }, "the simple view brings large text and light colours");
     assert.equal(await page.run(() => localStorage.getItem("ia.easy")), "1");
+    await page.waitFor(() => getComputedStyle(document.body).backgroundColor === "rgb(255, 255, 255)"); // the browser may take a frame to show it
     assert.equal(await page.run(() => getComputedStyle(document.body).backgroundColor), "rgb(255, 255, 255)", "the page is light");
   });
 });
@@ -92,9 +93,33 @@ suite("the easy list", it => {
     await page.click("[data-view=snoozed]");
     await page.waitFor(u => document.querySelector(`.row[data-uid="${u}"]`), first);
     assert.equal(await page.run(() => document.querySelector("h1").textContent), "Put away until later");
-    assert.deepEqual(await page.run(u => [...document.querySelectorAll(`.row[data-uid="${u}"] .ea button`)].map(b => b.textContent), first), ["Done"], "a message that is put away offers only Done");
+    assert.deepEqual(await page.run(u => [...document.querySelectorAll(`.row[data-uid="${u}"] .ea button`)].map(b => b.textContent), first), ["Done", "Bring back now"], "a message that is put away can be done or brought back");
     await page.click("#undoBtn");
     await page.waitFor(u => !find(u).snooze_until, first);
+  });
+
+  it("a message that was put away can be brought back at once, and says so", async page => {
+    await start(page, { easy: true });
+    const first = await page.run(() => +document.querySelector("#view .row").dataset.uid);
+    await page.click(`.row[data-uid="${first}"] [data-act=later]`);
+    await page.waitFor(u => !document.querySelector(`.row[data-uid="${u}"]`), first);
+    await page.click("[data-view=snoozed]");
+    await page.waitFor(u => document.querySelector(`.row[data-uid="${u}"] [data-act=unlater]`), first);
+    assert.equal(await page.run(u => document.querySelector(`.row[data-uid="${u}"] [data-act=unlater]`).getAttribute("aria-label"), first).then(x => x.startsWith("Bring back now: ")), true);
+    await page.click(`.row[data-uid="${first}"] [data-act=unlater]`);
+    await page.waitFor(u => !find(u).snooze_until, first);
+    await page.click("[data-view=todo]");
+    await page.waitFor(u => document.querySelector(`.row[data-uid="${u}"]`), first);
+  });
+
+  it("the time of the last read follows the engine, so a quiet mailbox does not look stuck", async page => {
+    await start(page, { easy: true });
+    await page.run(() => load()); // the window has now seen the engine's answer once: a later change has to be noticed against that
+    const before = await page.run(() => document.querySelector("#foot span").textContent);
+    await page.run(() => { M.checkedAt += 3 * 3600 + 60 * 7 });
+    await page.run(() => load());
+    await page.waitFor(b => document.querySelector("#foot span").textContent !== b, before);
+    assert.match(await page.run(() => document.querySelector("#foot span").textContent), /^Watching your mailbox\. Last read at /);
   });
 
   it("the Done tab says Put back and does", async page => {
@@ -184,6 +209,7 @@ suite("the easy list", it => {
     assert.equal(await page.run(() => document.querySelector("[data-s=light]").checked), true);
     await page.click("[data-s=light]");
     await page.waitFor(() => !document.documentElement.classList.contains("light"));
+    await page.waitFor(() => getComputedStyle(document.body).backgroundColor === "rgb(0, 0, 0)"); // the browser may take a frame to show it
     assert.equal(await page.run(() => getComputedStyle(document.body).backgroundColor), "rgb(0, 0, 0)", "light text on black again");
     assert.equal(await page.run(() => localStorage.getItem("ia.theme")), "dark");
   });

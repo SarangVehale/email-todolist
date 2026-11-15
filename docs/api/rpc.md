@@ -1,6 +1,6 @@
 # Engine command reference
 
-> **Status:** current · **Audience:** developers who change the window, the engine or the phone hub · **Last reviewed:** 2026-11-14
+> **Status:** current · **Audience:** developers who change the window, the engine or the phone hub · **Last reviewed:** 2026-11-15
 
 Every command the engine answers, with its arguments, its answer, its errors and what it changes. The window calls them
 through `rpc(cmd, args)` (see [the overview](README.md)); the code is `Core::rpc` in
@@ -93,8 +93,8 @@ through `rpc(cmd, args)` (see [the overview](README.md)); the code is `Core::rpc
 | [`diagnostics`](#diagnostics) | Support | no | string |
 
 Every command is called by the window (`app/ui/main.js`, `drafts.js`, `setup.js`) and answered by the demo backend
-(`app/ui/mock.js`). There is no command the window calls that the engine lacks, and none the engine has that the window
-never calls.
+(`app/ui/mock.js`). There is no command the window calls that the engine lacks. One the engine has is no longer called by the window:
+`detect_ollama` (the first-run screen that used it is gone; it stays for anyone who calls the engine directly).
 
 ## Reading the list
 
@@ -107,7 +107,7 @@ Everything the window draws: settings, tasks, log, status. Polled every 3 second
 * **Answer:** an object; every field is described in [the state shape](../reference/state-shape.md). `sign_in` says which of "Sign in with Google / Microsoft" this build offers.
 * **Errors:** database errors only.
 * **Side effects:** none. Reads the settings file, the database, and the keychain (whether an Anthropic key exists).
-* **Hub:** yes, with a reduced answer: `settings` holds only `onboarded` and `writeback`; there is no `rules`, `accounts` or `checked_at`; `has_anthropic_key` is `false`; `update` is `null`; a log line `connected as <login>; ...` loses the login.
+* **Hub:** yes, with a reduced answer: `settings` holds only `onboarded` and `writeback`; there is no `rules`, `accounts`, `checked_at` or `sign_in`; `has_anthropic_key` is `false`; `update` is `null`; a log line `connected as <login>; ...` loses the login.
 
 ## Changing a task
 
@@ -375,7 +375,7 @@ so only the addresses the rule below allows are opened (`webpage::allowed`).
 * **Answer:** `true`.
 * **Errors:** `That page can't be opened from here` for any address the rule refuses; `Couldn't open your browser: <reason>` when the system has no
   browser to hand it to.
-* **The rule:** the address starts with `https://`; it is at most 2,048 characters, with no control character, space or backslash; the host (up to the
+* **The rule:** the address starts with `https://`; it is at most 2,048 bytes, with no control character, space or backslash; the host (up to the
   first `/`, `?` or `#`) is made of letters, digits, `.` and `-` only, so no user name, no port and no encoded character, and is, in lower case, one of:
   `myaccount.google.com`, `accounts.google.com`, `mail.google.com`, `login.yahoo.com`, `mail.yahoo.com`, `account.apple.com`, `appleid.apple.com`,
   `www.icloud.com`, `app.fastmail.com`, `login.microsoftonline.com`, `login.live.com`, `account.live.com`, `account.microsoft.com`, `microsoft.com`,
@@ -412,7 +412,7 @@ Where the sign-in stands.
   for example `You chose not to allow Inbox Agent, so nothing was connected.`, `The sign-in took too long. Try again.` or `Mail access was not allowed. Sign
   in again and keep the box that lets Inbox Agent read your email ticked.`; what the provider said is not kept.
 * **Errors:** none.
-* **Side effects:** none.
+* **Side effects:** none, except that a finished sign-in that has waited more than ten minutes is forgotten.
 * **Hub:** no.
 
 ### `oauth_cancel`
@@ -466,11 +466,12 @@ Saves a new app password, server or address for a mailbox that exists (or for th
   default 993 when missing or `null`); `user`; `password` (required).
 * **Answer:** `true`.
 * **Errors:** `Enter the app password for this mailbox` (the password is empty once spaces are removed; checked first, so
-  nothing is saved); a password for a mailbox that signed in with an account ends that sign-in (its refresh token is revoked at Google and deleted); `That mail server port isn't valid` (a port that is given but is not a whole number from 1 to 65535, which includes a number in quotes);
+  nothing is saved); `That mail server port isn't valid` (a port that is given but is not a whole number from 1 to 65535, which includes a number in quotes);
   `Enter the mail server and the email address` (either is empty, for any mailbox);
   `There is no such mailbox` (an `id` from 1 to 4 that is not set up); any [settings validation](../reference/settings.md#validation)
   message, such as `That mail server name isn't valid` or `That mailbox is already in the app`.
-* **Side effects:** when the server or address of an existing mailbox changes, the background threads stop (the stop flag is
+* **Side effects:** a password for a mailbox that signed in with an account ends that sign-in: its `oauth` entry is removed, `oauth-refresh-<n>` is deleted from the keychain
+  and a Google token is revoked (best effort). When the server or address of an existing mailbox changes, the background threads stop (the stop flag is
   shared, so every mailbox's threads stop and reconnect, not only this one's) and that mailbox's tasks,
   drafts, queued changes, corrections and follow-ups are deleted first. Stores the password in the system keychain, saves the
   settings, and restarts the background threads if setup is finished. It does not test the password: the window calls
@@ -497,7 +498,7 @@ Adds another mailbox (up to five in all).
 * **Answer:** `true`.
 * **Errors:** `There is no such mailbox`.
 * **Side effects:** stops the syncs, deletes the mailbox's tasks, drafts, queued changes, corrections, follow-ups and counters,
-  deletes its password from the keychain, removes it from the settings (the last one also sets `onboarded` to `false`), and
+  deletes its password from the keychain, ends its sign-in if it had one (deletes `oauth-refresh-<n>`, removes its `oauth` entry, and tells Google to revoke the token), removes it from the settings (the last one also sets `onboarded` to `false`), and
   restarts. Nothing in the mailbox itself is touched.
 * **Hub:** no.
 
@@ -506,9 +507,9 @@ Adds another mailbox (up to five in all).
 * **Arguments:** none.
 * **Answer:** `true`.
 * **Errors:** `Add your first mailbox before finishing setup`: the first mailbox has no server, no address or no saved
-  password. Nothing is changed. If the keychain itself cannot be read, its own error comes back instead.
-* **Side effects:** sets `onboarded` to `true`, saves, restarts the background threads. The wizard calls it after
-  `save_account`, which is what supplies the first mailbox and its password.
+  password (or, when it signs in with an account, no saved sign-in: `oauth-refresh-0`). Nothing is changed. If the keychain itself cannot be read, its own error comes back instead.
+* **Side effects:** sets `onboarded` to `true`, saves, restarts the background threads. The first-run screens call it after
+  `save_account` (which supplies the first mailbox and its password) or after `oauth_finish` (which supplies it with a sign-in).
 * **Hub:** no.
 
 ### `sign_out`
@@ -519,7 +520,7 @@ Adds another mailbox (up to five in all).
 * **Answer:** `true`.
 * **Side effects:** stops the background threads; deletes every task, draft, queued change, log line, correction, sender
   choice, rule, follow-up record and counter, then rewrites the database file; deletes `crash.log` and set-aside database
-  copies; deletes every mailbox password and the Anthropic key from the keychain; removes the mailboxes from the settings,
+  copies; tells Google to revoke each Google sign-in, deletes every mailbox password, every refresh token and the Anthropic key from the keychain, forgets the tokens held in memory and ends a sign-in that is waiting; removes the mailboxes and their `oauth` entries from the settings,
   sets `onboarded` to `false` and turns the hub off with its access code cleared. Other options (ranking, alerts, drafts)
   stay. The mailboxes themselves are not touched. Restarts, so the window shows setup again.
 * **Hub:** no.
@@ -534,7 +535,7 @@ Changes options by merging a patch into the current settings.
   dropped. For example `{"patch": {"alerts": {"quiet_start": "22:00", "quiet_end": "07:00"}}}`.
 * **Answer:** the whole settings object after the change (the same shape as `state.settings`).
 * **Errors:** `A settings change must be an object`;
-  `The account is changed with save_account, not with settings` (the patch would change `account`, `more_accounts` or
+  `The account is changed with save_account, not with settings` (the patch would change `account`, `more_accounts`, `oauth` or
   `onboarded`; a patch that leaves their values as saved is accepted);
   `The access code is made by the app: use Rotate access code` (the patch would change `hub.token`; a patch that leaves it as
   saved is accepted, and so is one that does not mention it); a type error from reading the result (for example a string where

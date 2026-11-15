@@ -58,24 +58,27 @@ pub fn connect(a: &Account) -> Result<Sess> {
 /// every IDLE, so the sync loop uses this handle to put the 60-second limit back; without it a server that goes silent
 /// after an IDLE would hang the thread for good.
 pub fn connect_with_socket(a: &Account) -> Result<(Sess, TcpStream)> {
+    with_credential(a, |secret| dial_tls(a, secret))
+}
+
+/// One TLS connection and one sign-in with `secret`, nothing more.
+fn dial_tls(a: &Account, secret: &Secret) -> Result<(Sess, TcpStream)> {
     use std::net::ToSocketAddrs;
-    with_credential(a, |secret| {
-        let addr = (a.host.as_str(), a.port)
-            .to_socket_addrs()?
-            .next()
-            .ok_or_else(|| anyhow!("could not find the server {}", a.host))?;
-        let tcp = TcpStream::connect_timeout(&addr, Duration::from_secs(15))?;
-        tcp.set_read_timeout(Some(Duration::from_secs(60)))?;
-        tcp.set_write_timeout(Some(Duration::from_secs(60)))?;
-        let socket = tcp.try_clone()?;
-        let tls = TlsConnector::builder().build()?;
-        let stream = tls
-            .connect(&a.host, tcp)
-            .map_err(|e| anyhow!("secure connection failed: {e}"))?;
-        let mut client = imap::Client::new(stream);
-        client.read_greeting()?;
-        Ok((sign_in(client, &a.user, secret)?, socket))
-    })
+    let addr = (a.host.as_str(), a.port)
+        .to_socket_addrs()?
+        .next()
+        .ok_or_else(|| anyhow!("could not find the server {}", a.host))?;
+    let tcp = TcpStream::connect_timeout(&addr, Duration::from_secs(15))?;
+    tcp.set_read_timeout(Some(Duration::from_secs(60)))?;
+    tcp.set_write_timeout(Some(Duration::from_secs(60)))?;
+    let socket = tcp.try_clone()?;
+    let tls = TlsConnector::builder().build()?;
+    let stream = tls
+        .connect(&a.host, tcp)
+        .map_err(|e| anyhow!("secure connection failed: {e}"))?;
+    let mut client = imap::Client::new(stream);
+    client.read_greeting()?;
+    Ok((sign_in(client, &a.user, secret)?, socket))
 }
 
 /// What a connection signs in with: the password, or the token of a Google or Microsoft sign-in (XOAUTH2).
@@ -104,15 +107,23 @@ impl imap::Authenticator for XOAuth2<'_> {
     }
 }
 
+/// What a failed sign-in is: the server's own NO or BAD answer is a refusal (retried only after a long wait, and it costs a new token); a dropped
+/// connection or a read error is an ordinary error that is tried again soon.
+fn refusal(e: imap::Error) -> anyhow::Error {
+    let said = e.to_string();
+    match e {
+        imap::Error::No(_) | imap::Error::Bad(_) => anyhow::Error::new(SignInRefused(said)),
+        other => anyhow::Error::new(other),
+    }
+}
+
 fn sign_in<T: Read + Write>(
     client: imap::Client<T>,
     user: &str,
     secret: &Secret,
 ) -> Result<Session<T>> {
     match secret {
-        Secret::Password(p) => client
-            .login(user, p)
-            .map_err(|e| anyhow::Error::new(SignInRefused(e.0.to_string()))),
+        Secret::Password(p) => client.login(user, p).map_err(|e| refusal(e.0)),
         Secret::Token(t) => client
             .authenticate(
                 "XOAUTH2",
@@ -122,7 +133,22 @@ fn sign_in<T: Read + Write>(
                     calls: std::cell::Cell::new(0),
                 },
             )
-            .map_err(|e| anyhow::Error::new(SignInRefused(e.0.to_string()))),
+            .map_err(|e| refusal(e.0)),
+    }
+}
+
+/// A sign-in with a Google or Microsoft account is only ever for that provider's own mail server, whatever the settings file says: a token is never sent to
+/// another host, even if the file was edited or damaged.
+fn host_ok(a: &Account) -> Result<()> {
+    match a.oauth {
+        Some((_, p)) if !a.host.eq_ignore_ascii_case(p.host()) => {
+            Err(anyhow::Error::new(SignInRefused(format!(
+                "a sign-in with {} is only for {}",
+                p.label(),
+                p.host()
+            ))))
+        }
+        _ => Ok(()),
     }
 }
 
@@ -132,6 +158,7 @@ fn with_credential<R>(a: &Account, mut attempt: impl FnMut(&Secret) -> Result<R>
     let Some((id, p)) = a.oauth else {
         return attempt(&Secret::Password(&a.password));
     };
+    host_ok(a)?;
     let token = crate::oauth::access_token(id, p)?;
     match attempt(&Secret::Token(&token)) {
         Err(e) if is_sign_in_problem(&e) => {
@@ -157,16 +184,40 @@ pub fn use_plain_server(addr: Option<std::net::SocketAddr>) -> bool {
     true
 }
 
-/// Signs in to the mailbox and signs out again, to prove that the server accepts what the account signs in with. Nothing is read.
-pub fn check_sign_in(a: &Account) -> Result<()> {
+/// Signs in with exactly this token, once, and signs out again: the proof that the mail server accepts a new sign-in before it is saved. There is no retry and
+/// no refresh, so what is proved is this token, and the server's own refusal is what comes back. Nothing is read.
+pub fn check_token(a: &Account, token: &str) -> Result<()> {
+    host_ok(a)?;
+    let secret = Secret::Token(token);
     let plain = *PLAIN_SERVER.lock().unwrap_or_else(|e| e.into_inner());
     match plain {
-        Some(addr) => connect_plain_account(addr, a).map(|mut s| {
+        Some(addr) => dial_plain(addr, a, &secret).map(|mut s| {
             let _ = s.logout();
         }),
-        None => connect(a).map(|mut s| {
+        None => dial_tls(a, &secret).map(|(mut s, _)| {
             let _ = s.logout();
         }),
+    }
+}
+
+fn dial_plain(
+    addr: std::net::SocketAddr,
+    a: &Account,
+    secret: &Secret,
+) -> Result<Session<TcpStream>> {
+    let tcp = TcpStream::connect_timeout(&addr, Duration::from_secs(5))?;
+    tcp.set_read_timeout(Some(Duration::from_secs(10)))?;
+    let mut client = imap::Client::new(tcp);
+    client.read_greeting()?;
+    sign_in(client, &a.user, secret)
+}
+
+/// What the status line says when the server refuses the sign-in. A mailbox that signs in with an account has no password to enter.
+pub fn refused_status(a: &Account) -> &'static str {
+    if a.oauth.is_some() {
+        "error: your account's sign-in was refused. Sign in again in Settings"
+    } else {
+        "error: your mail server refused the sign-in. Enter your password again in Settings"
     }
 }
 
@@ -176,13 +227,7 @@ pub fn connect_plain_account(
     addr: std::net::SocketAddr,
     a: &Account,
 ) -> Result<Session<TcpStream>> {
-    with_credential(a, |secret| {
-        let tcp = TcpStream::connect_timeout(&addr, Duration::from_secs(5))?;
-        tcp.set_read_timeout(Some(Duration::from_secs(10)))?;
-        let mut client = imap::Client::new(tcp);
-        client.read_greeting()?;
-        sign_in(client, &a.user, secret)
-    })
+    with_credential(a, |secret| dial_plain(addr, a, secret))
 }
 
 /// Plain-TCP connection for tests against a local mock server. Never used with a real mailbox.
@@ -723,6 +768,8 @@ pub fn run(
                     maintain(&mut s, store, folder.as_deref(), &mut sent, stop, follow);
                     last_check = std::time::Instant::now();
                 }
+                // the server was asked and had nothing new, or the new mail has been read: either way the mailbox has just been checked
+                status("idle");
             }
             Ok(())
         }));
@@ -737,7 +784,7 @@ pub fn run(
             let refused = is_sign_in_problem(&e);
             let wait = if refused { SIGN_IN_RETRY } else { RETRY };
             if refused {
-                status("error: your mail server refused the sign-in. Enter your password again in Settings");
+                status(refused_status(a));
             } else {
                 status(&format!("error: {e}"));
             }

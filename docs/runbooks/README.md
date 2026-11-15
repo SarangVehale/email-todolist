@@ -1,6 +1,6 @@
 # Runbooks
 
-> **Status:** current · **Audience:** users with a problem, maintainers who run the project · **Last reviewed:** 2026-11-14
+> **Status:** current · **Audience:** users with a problem, maintainers who run the project · **Last reviewed:** 2026-11-15
 
 A runbook is a list of steps that works when you are stressed: short sentences, commands you can copy, and a way out at every step. Start
 with the picture below, then open the runbook it leads to. The [troubleshooting page](../troubleshooting.md) maps exact messages to

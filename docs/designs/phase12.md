@@ -10,18 +10,18 @@ each other. They agreed on almost everything; this is what they said and what is
 
 | Where she gives up today | Where it is | The fix |
 | --- | --- | --- |
-| The installer says "Windows protected your PC" | The build is unsigned | A picture guide next to the download and in the welcome screen now; free signing (SignPath Foundation) is an application only the owner can make |
+| The installer says "Windows protected your PC" | The build is unsigned | A guide in words (`docs/guides/install-and-the-windows-warning.md`: pictures are the owner's to take on a real machine); free signing (SignPath Foundation) is an application only the owner can make |
 | A form with a provider menu and "App password", help that says "2-Step Verification" and "IMAP" with no link | `app/ui/setup.js` step 2 | Type the email address; the provider is read from it; one screen per provider with a button that opens the right page and three plain steps |
 | "Test connection" must be found and pressed, and failures print `sign-in refused: …` | `setup.js` | The test runs by itself when the code is pasted; errors are sentences with one next step; the raw text is behind "Details" |
 | Outlook and Hotmail: "(not supported yet)" | `setup.js` | Microsoft sign-in (free for personal accounts), shown when the owner has set a client ID; until then a friendly full sentence before she has spent any effort |
-| Steps 3 to 5 ask about Ollama, a Claude key, ntfy, a phone hub | `setup.js` | Gone from the wizard; safe defaults (rules only, desktop alerts on, filing off, phone off) |
-| A dense black page of 11-pixel uppercase labels, five dots, a rail and a footer of key caps | `style.css`, `main.js` | Easy mode: large text, light theme, plain headings, a big **Done** and **Later** on each card; the dense look stays as "Show everything" |
-| Closing the window seems to quit the app | `app/src-tauri/src/lib.rs` | A sentence the first time: it keeps watching, the icon near the clock opens it |
+| Steps 3 to 5 ask about Ollama, a Claude key, ntfy, a phone hub | `setup.js` | Gone from the first-run screens; setup makes sure that filing and the phone hub are off, and leaves ranking and alerts as they are (rules and desktop alerts in a new install) |
+| A dense black page of 11-pixel uppercase labels, five dots, a rail and a footer of key caps | `style.css`, `main.js` | Easy mode: large text, light theme, plain headings, a big **Done** and **Later** on each card; the dense look is one switch away ("Simple view" in Settings) |
+| Closing the window seems to quit the app | `app/src-tauri/src/lib.rs` | A sentence on the last setup screen: it keeps watching, the icon near the clock opens it (a sentence on the first real close is not built: the shell would have to show it) |
 
 ## Decisions
 
 * **Easy mode is the default for a new install; an existing install keeps what it has.** The choice is per device (`localStorage`: `ia.easy`,
-  `ia.size`, `ia.theme`), so a phone and a laptop can differ, and "Show everything" in Settings turns the dense look back on.
+  `ia.size`, `ia.theme`), so a phone and a laptop can differ, and the "Simple view" switch in Settings turns the dense look back on.
   Nothing is removed from the engine: every feature stays; Easy mode hides it.
 * **Sign-in.** Gmail has two paths: the guided app-password trip (works for everyone, free) and **Sign in with Google** (one click, no code),
   which exists only when a Google client ID is set in the build. Google's `https://mail.google.com/` scope is *restricted*: an unverified app
@@ -37,14 +37,14 @@ each other. They agreed on almost everything; this is what they said and what is
 * **No tokens in a log, a backup or a URL an error could echo.** The refresh token lives in the system keychain beside the app passwords;
   the access token only in memory; the loopback listener and every other point of the Phase 3 checklist (`designs/phase3.md`, section 3) stay.
 * **Plain words.** App password becomes "the 16-letter code", snooze "Later", mute "Stop showing mail from them"; the engine's error text is
-  mapped to sentences in the window (the engine keeps its precise messages: they are the log's and the tests').
+  mapped to sentences in the window's setup screens (the engine keeps its precise messages: they are the log's and the tests'; the status line and the mailbox rows still show the engine's text).
 
 ## What is built, in order
 
 1. **Easy setup (built).** Welcome (what it does and does not do, in three sentences); the email address; the provider guide (a button that opens the
    provider's page, three steps, a large paste box and a **Paste** button that takes the clipboard); one **Connect** that tests, saves and finishes; a
-   last screen with **Open my list**. Alerts on, filing off, phone off, rules only, and a sentence about starting with Windows and about the app
-   running when the window is closed. *Tests:* the whole flow in the window suite; the provider is read from the address (a table test); errors map to
+   last screen with **Open my list**. Filing and the phone hub are made sure to be off (ranking and alerts are left as they are), and a sentence says what starting with Windows does and that the app
+   keeps running when the window is closed. *Tests:* the whole flow in the window suite; the provider is read from the address (a table test); errors map to
    sentences (a table test); the pages the window opens are checked against the engine's list (an engine test).
    *What differs from the first plan:* there is no separate "Test" step and no auto-test on typing (Connect, or Paste, is the test); the Add a mailbox
    dialog in Settings keeps its single form and gains the same button and sentences, not the three screens (a second mailbox is rare); the one-time
@@ -52,14 +52,14 @@ each other. They agreed on almost everything; this is what they said and what is
    later change).
 2. **Easy look (built; the guide is `guides/the-simple-view.md`).** Text size (Normal, Large, Huge; Large by default), a light theme (default in Easy mode), plain section names, a big **Done**
    and **Later** on every card, the dense page's dots, rail, counters and key hints hidden, an **Undo** that stays until the next action, a
-   first-run card, "Open this email" in the mail's own website, a sentence on the first close of the window, a "last checked" line, and a
-   Settings page of five rows with "More options" under it. *Tests:* the accessibility checks (contrast, names, targets) run in both
-   themes and every size; the hostile-text test runs in Easy mode too.
+   first-run card, "Open in Gmail" for a Gmail message (other providers have no address the app can build), a "last read at" line, and a
+   Settings page of five rows with "More options" under it. *Tests:* the accessibility checks (contrast, names, targets) run on five combinations of
+   view, theme and size and on every first-run screen; the hostile-text test runs in the simple view too.
 3. **Sign in with Google and with Microsoft (built, and off until the owner registers the app: [ADR-0015](../adr/0015-sign-in-with-google-and-microsoft-needs-the-owners-client-id.md), [the runbook](../runbooks/register-sign-in.md)).** XOAUTH2 in the IMAP client, a token store with one refresher, the loopback (Google) and
    device-code (Microsoft) flows, a mailbox that says how it signs in, sign-out that removes the right keychain entries. *Tests:* a scripted
    token server and a scripted IMAP server that accepts XOAUTH2 (success, a rejected token that is refreshed once, a revoked grant, a flow
-   with the wrong state, a hostile redirect), and the Phase 3 checklist item by item.
-4. **Gates and a rehearsal of the release workflow** (the Tauri opener is a new dependency and a new permission).
+   with the wrong state, a stalled or oversized callback), and the Phase 3 checklist (one item, keeping the server's error challenge, is not done: the server's refusal text comes back as the error, which is what the challenge says).
+4. **Gates and a rehearsal of the release workflow** (the `open` crate is a new dependency of the engine; the shell's permissions are unchanged).
 
 ## Out of scope
 

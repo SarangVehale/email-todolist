@@ -42,6 +42,7 @@ flowchart TD
 | [Let the app file mail](guides/let-the-app-file-mail.md) | Optional changes to your mailbox |
 | [Calendar invitations](guides/calendar-invitations.md) | What happens to an invitation |
 | [The simple view](guides/the-simple-view.md) | Big buttons, plain words, large text and light colours |
+| [Install, and the Windows warning](guides/install-and-the-windows-warning.md) | What to press when Windows or macOS warns about the installer |
 | [FAQ](faq.md) | Short answers to common questions |
 | [Keyboard shortcuts](reference/keyboard-shortcuts.md) | Every key the window handles |
 | [Privacy](../PRIVACY.md) | What is stored and what leaves your computer |
@@ -114,3 +115,4 @@ The [design documents](designs/README.md) say what each phase set out to do. Eac
 | [Phase 10 review](2026-11-14_PHASE10_REVIEW.md) | Documentation as code |
 | [Phase 11 review](2026-11-14_PHASE11_REVIEW.md) | Gaps closed that the documentation and the first CI run found |
 | [Review of everything after Phase 11](2026-11-15_POST_PHASE11_REVIEW.md) | The council, drift passes and review loop over the upkeep, accessibility, release and licence work |
+| [Phase 12 review](2026-11-15_PHASE12_REVIEW.md) | The council, drift passes and review loop over simple setup, the simple view and sign in with Google and Microsoft |

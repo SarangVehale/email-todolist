@@ -1,6 +1,6 @@
 # The answer to `state`
 
-> **Status:** current · **Audience:** developers who change the window or what the engine sends it · **Last reviewed:** 2026-11-14
+> **Status:** current · **Audience:** developers who change the window or what the engine sends it · **Last reviewed:** 2026-11-15
 
 `state` is the one read the window makes: it polls it every 3 seconds and draws everything from the answer. This page lists
 every field of the answer and of a task. The source of truth is `Core::state` in [`engine/src/core.rs`](../../engine/src/core.rs)

@@ -1,6 +1,6 @@
 # Choose how mail is ranked
 
-> **Status:** current · **Audience:** anyone choosing between rules, a local model and a cloud key · **Last reviewed:** 2026-11-14
+> **Status:** current · **Audience:** anyone choosing between rules, a local model and a cloud key · **Last reviewed:** 2026-11-15
 
 By the end of this guide you will have picked how new mail gets its priority, and you will know exactly what each choice sends and where.
 It takes about five minutes, plus the time to install a local model if you choose one.
@@ -19,8 +19,7 @@ It takes about five minutes, plus the time to install a local model if you choos
 | **Local AI (Ollama)** | A model that runs on your computer | Nothing, as long as Ollama's address is on your computer (see the warning below) | [Ollama](https://ollama.com) installed, and a model pulled, for example `ollama pull llama3.2` |
 | **Claude with your own API key** (**Claude (own API key)** in Settings) | Anthropic's model, through your own API key | Details of each new message go to `api.anthropic.com` (see the next table) | An Anthropic API key. Anthropic bills it to your API account |
 
-The window also says: "Signing in with a Claude subscription isn’t offered: Anthropic doesn’t permit it in third-party apps." Only an
-API key works.
+The window has no sign-in with a Claude subscription: Anthropic does not permit it in third-party apps, so only an API key works.
 
 Whichever you pick, the priority is 1 to 5 (5 needs attention within the hour, 1 means ignore), plus a category from eight
 (`work`, `personal`, `finance`, `travel`, `notification`, `promo`, `reading`, `other`), a short action, whether a reply is needed, and
@@ -48,7 +47,7 @@ text goes to that computer.**
 ## Steps
 
 1. **At first run** nothing is asked: setup starts with **Rules only**, which is instant and fully private.
-2. **To change it:** open **Settings** (or press `,`) and use the dropdown in the **Ranking** section.
+2. **To change it:** open **Settings** (or press `,`), press **More options** if you are in the simple view (the default for a new install), and use the dropdown in the **Ranking** section.
 3. For **Local AI (Ollama)**: type the **Ollama model** name (Settings, placeholder `llama3.2`).
 4. For **Claude**: paste the key into **API key** (placeholder `sk-ant-…`). In Settings, once the key is saved, the window says "Key saved to
    keychain" and the label reads "(saved — enter a new one to replace)".
@@ -107,7 +106,7 @@ Your own [rules, sender choices and corrections](rules-and-sender-choices.md) ap
 
 | What you see | Why | What to do |
 | --- | --- | --- |
-| Red text after **Test**: "No model is chosen", "No API key is saved", or a connection or key error | No model name or key is set, Ollama is not running, the model name is wrong, or the key is wrong or has no credit | Type a model name or paste the key; start Ollama and press **Detect**, or paste the key again |
+| Red text after **Test**: "No model is chosen", "No API key is saved", or a connection or key error | No model name or key is set, Ollama is not running, the model name is wrong, or the key is wrong or has no credit | Type a model name or paste the key; start Ollama, check the model name under **Ranking**, and press **Test**, or paste the key again |
 | Everything is ranked "Rule-based: …" in the reason | **Rules only** is chosen, or the model is not configured or keeps failing | Press **Test** with a model chosen and read the message. A green **Test** under **Rules only** only shows that the rules ran |
 | "The AI didn’t answer, so a quick reply was used" | The model failed when a draft was asked for | Check the same things, then press **Draft a reply** again |
 

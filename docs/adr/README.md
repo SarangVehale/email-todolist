@@ -1,6 +1,6 @@
 # Architecture decision records
 
-> **Status:** current · **Audience:** anyone who wants to know why the app is built the way it is · **Last reviewed:** 2026-11-14
+> **Status:** current · **Audience:** anyone who wants to know why the app is built the way it is · **Last reviewed:** 2026-11-15
 
 An architecture decision record (ADR) is a one-page note of a choice that is hard to reverse or that a newcomer would question:
 what forced it, what was decided, and what it costs. This page lists them and says how to add one.

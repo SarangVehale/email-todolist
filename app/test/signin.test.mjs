@@ -102,6 +102,77 @@ suite("sign in with an account: the first-run screens", it => {
   }, { path: WITH });
 });
 
+suite("sign in with an account: after the first mailbox", it => {
+  const addDialog = async page => { await openSettings(page); await page.click("[data-s=addacct]"); await page.waitFor(() => document.activeElement.id === "m-user") };
+
+  it("Cancel is gone once the mailbox is being saved, so it cannot say 'nothing was connected' about a mailbox that was", async page => {
+    await toScreen(page, "me@gmail.com");
+    await page.run(wrapMock, [{ cmd: "oauth_finish", hold: true }]);
+    await page.click("[data-w=signin]");
+    await page.waitFor(() => /Signed in\. Connecting to your mailbox/.test(document.querySelector("#w-result")?.textContent || ""));
+    assert.equal(await page.run(() => !!document.querySelector("[data-w=cancelsignin]")), false);
+    await release(page);
+    await page.waitFor(() => W.step === "ready");
+  }, { path: WITH });
+
+  it("cancelling and signing in again at once is not undone by the first sign-in giving up", async page => {
+    await toScreen(page, "me@gmail.com");
+    await page.run(() => { SIGNIN_POLL = 900 });
+    await page.run(wrapMock, []);
+    await page.click("[data-w=signin]");
+    await page.waitFor(() => document.querySelector("[data-w=cancelsignin]"));
+    await page.click("[data-w=cancelsignin]");
+    await page.click("[data-w=signin]"); // a new sign-in, while the first one's loop is still sleeping
+    await page.waitFor(() => W.step === "ready");
+    assert.equal((await calls(page)).filter(c => c === "oauth_cancel").length, 1, "only the Cancel button cancelled: the first loop did not cancel the second sign-in");
+  }, { path: WITH });
+
+  it("a signed-in mailbox can go back to a code, which ends the sign-in", async page => {
+    await page.run(() => { M.settings.oauth = { 1: "google" }; syncAccounts() });
+    await page.run(() => { lastSnap = ""; return load() });
+    await openSettings(page);
+    await page.waitFor(() => document.querySelector("details.why [data-s=savepw]"));
+    assert.match(await page.run(() => document.querySelector(".mbx details.why summary").textContent), /Use a code instead of signing in/);
+    await page.run(() => { document.querySelector(".mbx details.why").open = true });
+    await page.fill("input[data-s=newpw][data-id='1']", "abcd efgh ijkl mnop");
+    await page.click("[data-s=savepw][data-id='1']");
+    await page.waitFor(() => !M.settings.oauth[1]);
+    await page.waitFor(() => !document.querySelector("[data-s=resign]"));
+    assert.equal(await page.run(() => document.querySelectorAll(".mbx > input[type=password]").length), 2, "it takes a password again, in plain view");
+    assert.match(await page.run(() => document.querySelector("[data-pwres='1']").textContent), /It uses this code now/);
+  }, { path: WITH });
+
+  it("a signed-in mailbox whose sign-in has gone says to sign in again, not to paste a password", async page => {
+    await page.run(() => { M.settings.oauth = { 0: "google" }; syncAccounts(); M.accounts[0].status = "no password" });
+    await page.run(() => { lastSnap = ""; return load() });
+    await openSettings(page);
+    assert.match(await page.run(() => document.querySelector(".mbx").textContent), /Needs you to sign in again/);
+  }, { path: WITH });
+
+  it("the Add a mailbox dialog shows the Microsoft code and can open its page; Outlook is not called unsupported when it can sign in", async page => {
+    await page.run(() => { SIGNIN_POLL = 30 });
+    await addDialog(page);
+    assert.equal(await page.run(() => [...document.querySelectorAll("#m-provider option")].find(o => o.value === "outlook").textContent), "Outlook, Hotmail or Live");
+    await page.run(() => { const s = document.querySelector("#m-provider"); s.value = "outlook"; s.dispatchEvent(new Event("change", { bubbles: true })) });
+    await page.waitFor(() => document.querySelector("[data-m=signin]"));
+    assert.match(await page.run(() => document.querySelector(".help").textContent), /Press the button above/);
+    assert.doesNotMatch(await page.run(() => document.querySelector(".help").textContent), /not supported/);
+    await page.fill("#m-user", "new@hotmail.com");
+    await page.run(wrapMock, [{ cmd: "oauth_poll", hold: true }]);
+    await page.click("[data-m=signin]");
+    await page.waitFor(() => document.querySelector(".devcode"));
+    await page.click("[data-m=opendevice]");
+    await page.waitFor(() => (window.__opened || []).includes("https://www.microsoft.com/link"));
+    await page.run(() => { window.__held.forEach(f => f()) }); await page.run(unwrapMock);
+    await page.waitFor(() => M.accounts.length === 3);
+  }, { path: WITH });
+
+  it("without a Microsoft sign-in the menu still says Outlook is not supported yet", async page => {
+    await addDialog(page);
+    assert.match(await page.run(() => [...document.querySelectorAll("#m-provider option")].find(o => o.value === "outlook").textContent), /not supported yet/);
+  });
+});
+
 suite("sign in with an account: mailboxes added later", it => {
   const addDialog = async page => { await openSettings(page); await page.click("[data-s=addacct]"); await page.waitFor(() => document.activeElement.id === "m-user") };
 
@@ -120,8 +191,9 @@ suite("sign in with an account: mailboxes added later", it => {
     await page.waitFor(() => [...document.querySelectorAll(".mbx")].length === 3);
     const row = await page.run(() => { const r = [...document.querySelectorAll(".mbx")].find(x => x.textContent.includes("new@gmail.com")); return { text: r.textContent, pw: !!r.querySelector("input[type=password]"), again: !!r.querySelector("[data-s=resign]") } });
     assert.match(row.text, /Signed in with Google\. No password is kept\./);
-    assert.deepEqual([row.pw, row.again], [false, true]);
-    assert.equal(await page.run(() => document.querySelectorAll(".mbx input[type=password]").length), 2, "the other two still take a password");
+    assert.deepEqual([row.pw, row.again], [true, true], "it signs in again, and a code can be used instead (the box is under 'Use a code instead of signing in')");
+    assert.equal(await page.run(() => document.querySelectorAll(".mbx > input[type=password]").length), 2, "the other two take a password in plain view");
+    assert.equal(await page.run(() => document.querySelectorAll(".mbx > details.why input[type=password]").length), 1);
   }, { path: WITH });
 
   it("Sign in again signs the same mailbox in again and says the list is untouched", async page => {

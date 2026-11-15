@@ -1,6 +1,6 @@
 # Testing strategy
 
-> **Status:** current · **Audience:** maintainers, reviewers and anyone adding a test · **Last reviewed:** 2026-11-14
+> **Status:** current · **Audience:** maintainers, reviewers and anyone adding a test · **Last reviewed:** 2026-11-15
 
 This page says what is tested at which layer, how to run each layer, what CI runs, and the review gates every run of work goes
 through. The plan for one release, with its sign-off, is [the test plan](test-plan.md). The catalogue of every test is
@@ -10,11 +10,11 @@ through. The plan for one release, with its sign-off, is [the test plan](test-pl
 
 | Layer | What it proves | Where | Count | Run it with |
 | --- | --- | --- | --- | --- |
-| Engine tests | What the engine does: parsing, ranking, the store, the commands, the phone hub, and the IMAP client against a scripted server | `engine/tests/*.rs` | 503 in 23 files | `cd engine && cargo test` |
-| Window tests | What the real window does with the demo backend's answers, driven by real key presses and clicks in a headless browser | `app/test/*.test.mjs` | 65 in 7 files | `cd app && npm test` |
+| Engine tests | What the engine does: parsing, ranking, the store, the commands, the phone hub, and the IMAP client against a scripted server | `engine/tests/*.rs` | 512 (511 in the 25 files of `engine/tests`, one inside `engine/src/core.rs`) | `cd engine && cargo test` |
+| Window tests | What the real window does with the demo backend's answers, driven by real key presses and clicks in a headless browser | `app/test/*.test.mjs` | 121 in 10 files | `cd app && npm test` |
 | Scripts | The version fields agree, the release check works, the catalogue and the documents are current | `scripts/` | the checks, and tests of three of them (`test_check_docs.py` has 40, `test_bump_version.py` 9 and `test_gen_licenses.py` 10) | see below |
 | Packaged app | The built program as a user and a hostile neighbour meet it, its installer, and a heavy mailbox (Windows only) | `scripts/packaged_check/`, `scripts/scale_check/` | 114 checks, an install cycle, one measurement | `python scripts/packaged_check/check_app.py` |
-| Manual cases | Behaviour that needs a real mailbox, a real calendar, a real phone or a clean machine | `docs/TESTCASES.manual.md` | 129 cases, MT-01 to MT-138 | by hand |
+| Manual cases | Behaviour that needs a real mailbox, a real calendar, a real phone or a clean machine | `docs/TESTCASES.manual.md` | 147 cases, MT-01 to MT-156 | by hand |
 
 ## What is tested where
 
@@ -23,9 +23,9 @@ are slow, few and need a person or a machine set aside.
 
 ```mermaid
 flowchart BT
-    E["Engine tests: 503, no network, a scripted IMAP server on localhost"] --> W["Window tests: 113, the real files in a real headless browser"]
+    E["Engine tests: 512, no network, a scripted IMAP server on localhost"] --> W["Window tests: 121, the real files in a real headless browser"]
     W --> P["Packaged app: 114 checks, the install cycle, the scale check, Windows only"]
-    P --> M["Manual cases: 129, a live mailbox and clean machines"]
+    P --> M["Manual cases: 147, a live mailbox and clean machines"]
 ```
 
 * **The engine tests** use only the engine's public API, a temporary folder and an in-memory keychain. The IMAP client is tested

@@ -1,0 +1,60 @@
+# Phase 12 review record, 2026-11-15
+
+Run 10, which is not on the original roadmap: the owner asked for "direct Google login", for several accounts, and for an app that is "stupidly simple to use:
+my grandma should get it up and running". Design: `docs/designs/phase12.md` and [ADR-0015](adr/0015-sign-in-with-google-and-microsoft-needs-the-owners-client-id.md).
+Three gates, each by models other than the one that wrote the work. Every finding was checked against the code before anything changed.
+
+## What was built
+
+* **Several accounts** already existed (Phase 6, up to five mailboxes). Nothing new was needed; the owner was told.
+* **Simple setup.** Welcome, the email address (the provider is read from the domain), a button that opens the page where the provider makes the app password
+  (the new engine command `open_page`, an `https` and host allow-list that the phone hub cannot call), a paste box and a **Paste** button, one **Connect** that
+  tests, saves and finishes, and a last screen. Errors are sentences (`friendly()`), the server's words behind "Details for a helper". Outlook, Hotmail and
+  unknown providers get an honest screen and a plain server form.
+* **The simple view.** Cards with a big Done and Later, plain headings, an Undo that stays, large text and light colours per device, a simple Settings page
+  with "More options", and `state.checked_at` for "Last read at".
+* **Sign in with Google (loopback and PKCE) and Microsoft (device code)** in `engine/src/oauth.rs`, XOAUTH2 in `watcher.rs`, the refresh token in the keychain,
+  the setting `oauth`, four commands. **Off until the owner puts a client ID in `oauth.rs`** ([the runbook](runbooks/register-sign-in.md)).
+
+First commit `3434999` (503 engine tests, 113 window tests); the fixes below in the commit after it (512 engine tests, 121 window tests).
+Mutation checks: every new guard was put back to its old behaviour once: 6 on the page allow-list and the hub, 3 on `checked_at`, 18 on the sign-in code, 15 on
+the first-run screens, 17 on the simple view and 14 on the review fixes. Survivors were all explained: a second-`@` check that the domain pattern already makes
+(removed), a filter-bar guard that the stylesheet also provides, and four guards that each had a second defence (the host pin and the removal-versus-refresh lock;
+removed together they fail the test); three weak tests were strengthened (the password was not trimmed; a client-ID guard; a "last read" test that could not fail).
+
+## Gate 1: council (three seats, blind to each other)
+
+| Seat | Verdict | Findings |
+| --- | --- | --- |
+| Opus | ship with fixes | no blocker. The check of a new sign-in retried with the old saved token (hiding the server's refusal; when signing in again it approved the old grant); Cancel stayed on screen while the mailbox was being saved; the status line gave password advice to a signed-in mailbox; the sign-in was used up before the mailbox was checked; a cancelled Microsoft start left a stale code; "Last read at" went stale on a quiet mailbox |
+| Sonnet | ship with fixes | no blocker. "Last read at" stale (and not in the window's snapshot); two tests assert the client-ID constants are empty, so the runbook's step 1 turned the suite red; the same retry flaw; the password advice; a stale poll loop could cancel a newer sign-in; setup reset a person's ranking and filing choices; the Add dialog still called Outlook unsupported; "Later" had no way back; a Microsoft refresh token may exceed Windows' keychain limit (unverified) |
+| Fable | ship with fixes | no blocker. A token went to whatever host the settings file named; a signed-in mailbox had no way back to a code; "Open that page" was dead outside setup; wrong words for a refused account sign-in; the sign-in used up too early; a settings change during the server check was lost; a refresh could write a token back after removal; a Microsoft start without a generation check; the simple view depended on pressing "Open my list"; the welcome card overclaimed; every IMAP failure counted as a refusal; tests that cannot fail; the design overclaimed (first close, "Open this email") |
+
+All of it that is not listed under "Not changed" below was true and is fixed.
+
+## Gate 2: drift passes
+
+| Pass | Result |
+| --- | --- |
+| Technical documents (Sonnet) | about 40 drifts: test and manual-case counts, the command reference (what `save_account`, `remove_account`, `finish_setup`, `sign_out`, `save_settings`, `state` and `open_page` do now), the settings reference (a table row outside its table; six references to wizard steps that no longer exist), the security model (the host claim, the outbound calls, missing rows), the design (a first-close sentence that was never built, "Show everything", a Tauri permission that never changed, a "hostile redirect" test that does not exist), an error placed under Errors that is a side effect, review dates |
+| Promises in the guides (Haiku) | 14 reported, 14 real: a "Detect" button and a "Claude subscription" sentence that the window no longer has; wording that fits only the dense view (the status line, Undo's timing, the Add task button, "press x or the circle"); Settings paths that omit "More options"; the autostart switch that exists; "four sentences" for five; the password message on the server screen |
+
+## Gate 3: sol-loop with Opus as the single reviewer
+
+Pending when this was written: see the end of the file for the rounds.
+
+## Not changed, on purpose
+
+* **The status line and the mailbox rows show the engine's text** (`error: …`) in the simple view, so a lost connection prints a system error. The design said the window maps
+  these to sentences; it does so in the setup screens only. The design now says so. Mapping the status line is worth doing later, with its own tests.
+* **A Microsoft refresh token may be longer than Windows' keychain accepts** (about 1,280 characters). Unverified; the save now says "Couldn't save the sign-in in your system
+  keychain" and manual case MT-154 checks it with a real account.
+* **The production guard on the test endpoints** (`oauth::use_test_endpoints` does nothing outside this crate's tests) cannot be tested from a test of this crate, which is
+  where it is honoured. It is two lines; the test that was named for it was renamed to what it checks.
+* **The server's XOAUTH2 error challenge** is read and answered but its text is not shown: the server's refusal comes back as the error, which says the same.
+
+## What CI showed
+
+| Run | Commit | Result |
+| --- | --- | --- |
+| 42 | `3434999` | Ubuntu and the audit green. Windows and macOS failed in two window tests that read the page's background colour one frame after a switch of the light theme (the browser had not yet shown it); the engine tests passed everywhere. The tests now wait for the colour. |

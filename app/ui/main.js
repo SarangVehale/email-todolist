@@ -179,7 +179,7 @@ function easyMoreHTML(t) {
 function easyRowHTML(t) {
   const done = t.status === "done", name = esc(label(t));
   const buttons = done ? `<button class="big" data-act="done" aria-label="Put back: ${name}">Put back</button>`
-    : `<button class="big" data-act="done" aria-label="Done: ${name}">Done</button>${isSnoozed(t) ? "" : `<button class="big ghost" data-act="later" aria-label="Later: ${name}">Later</button>`}`;
+    : `<button class="big" data-act="done" aria-label="Done: ${name}">Done</button>${isSnoozed(t) ? `<button class="big ghost" data-act="unlater" aria-label="Bring back now: ${name}">Bring back now</button>` : `<button class="big ghost" data-act="later" aria-label="Later: ${name}">Later</button>`}`;
   return `<div class="row ${t.uid === cur ? "cur" : ""} ${t.uid === openUid ? "open" : ""} ${done ? "isdone" : ""}" data-uid="${t.uid}">
     <div class="mid" data-act="open" role="button" tabindex="0" aria-expanded="${t.uid === openUid}"><div class="t">${name}</div><div class="s">${t.urgent ? "<b>Urgent</b> · " : ""}${esc(t.sender)} · ${agoWords(t.received)}</div></div>
     <div class="ea">${buttons}</div>
@@ -188,7 +188,7 @@ function easyRowHTML(t) {
 }
 /** The card at the top of the easy list until it is dismissed once. */
 const welcomeCard = () => `<div class="welcomecard" role="region" aria-label="How this works"><b>How this works</b>
-  <p>Inbox Agent only reads your email. It never sends anything, and nothing in your mailbox changes.</p>
+  <p>Inbox Agent only reads your email. It never sends anything, and it changes your mailbox only if you switch that on in Settings.</p>
   <p><b>Done</b> hides a message from this list. <b>Later</b> puts it away until tomorrow. If you press the wrong one, <b>Undo</b> appears at the bottom of the window.</p>
   <button class="big" data-act="welcomed">Got it</button></div>`;
 function rowHTML(t) {
@@ -291,6 +291,8 @@ function showUndo(msg) { $("#undoMsg").textContent = msg; $("#undo").style.displ
 const easyWatching = () => S.checked_at ? `Watching your mailbox. Last read at ${new Date(S.checked_at * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}.` : "Watching your mailbox.";
 /** Later: put it away until tomorrow, the same as pressing H. */
 const laterTap = t => handleExtra({ target: { closest: () => ({ dataset: { preset: "tomorrow" } }) } }, t, "snooze");
+/** Bring a message that was put away back to the list at once. */
+const unlaterTap = t => handleExtra({ target: { closest: () => ({ dataset: { preset: "clear" } }) } }, t, "snooze");
 /* A repeating task of yours does not go to Done: the engine moves it to its next time. There is no undo for that. */
 const repeating = new Set(); // ids being finished right now
 async function repeatDone(list) {
@@ -359,6 +361,7 @@ document.addEventListener("click", e => {
   else if (a === "done") setDone(t);
   else if (a === "star") toggleStar(t);
   else if (a === "later") laterTap(t);
+  else if (a === "unlater") unlaterTap(t);
   else if (!e.target.closest(".more")) { openUid = openUid === t.uid ? null : t.uid; render() }
 });
 document.addEventListener("keydown", e => {
@@ -387,7 +390,7 @@ $("#undoBtn").onclick = () => { undoStack.pop()?.(); $("#undo").style.display = 
 async function load() {
   if (busy) return;
   try {
-    const d = await rpc("state", { done: view === "done" ? doneWanted : 200 }), snap = JSON.stringify([d.tasks, d.log, d.status, d.pending, d.settings, d.update, d.accounts, d.done_total]);
+    const d = await rpc("state", { done: view === "done" ? doneWanted : 200 }), snap = JSON.stringify([d.tasks, d.log, d.status, d.pending, d.settings, d.update, d.accounts, d.done_total, d.checked_at, d.sign_in]);
     if (snap === lastSnap) return; lastSnap = snap; S = d; S._doneAtLoad = d.tasks.filter(t => t.status === "done").length;
     if (flt.acct && !(d.accounts || []).some(a => String(a.id) === flt.acct)) flt.acct = ""; // that mailbox is gone
     const v = $("#veil");

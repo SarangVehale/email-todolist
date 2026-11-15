@@ -1,6 +1,6 @@
 # Phone and tablet
 
-> **Status:** current · **Audience:** anyone who wants the list on a phone or tablet · **Last reviewed:** 2026-11-14
+> **Status:** current · **Audience:** anyone who wants the list on a phone or tablet · **Last reviewed:** 2026-11-15
 
 By the end of this guide you will have your list open on a phone or tablet, with an icon on its home screen, served by your own
 computer through the **phone hub**. It takes about five minutes.
@@ -14,7 +14,7 @@ computer through the **phone hub**. It takes about five minutes.
 
 ## Steps
 
-1. Open **Settings** (press `,`) and go to **Phone and tablet**. Tick **Phone hub**. It is off after setup.
+1. Open **Settings** (press `,`), press **More options** if you are in the simple view, and go to **Phone and tablet**. Tick **Phone hub**. It is off after setup.
 2. The window shows a QR code and, under it, the address it stands for. The address looks like
    `http://192.168.1.20:8787/?token=…`: your computer's address on its network, port 8787, and a 32-character access code.
 3. Scan the QR code with the phone's camera and open the link. The list appears. The page keeps the access code in the browser's own

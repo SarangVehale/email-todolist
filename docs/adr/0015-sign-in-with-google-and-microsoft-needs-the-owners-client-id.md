@@ -28,7 +28,7 @@ answer for everyone else.
   right `state`.
 * **Microsoft:** the device-code flow, against the `consumers` tenant (personal accounts). The window shows the short code.
 * **Tokens:** the refresh token lives in the system keychain (`oauth-refresh-<n>`), the access token only in memory. Tokens travel in a POST
-  body or an IMAP command, never in an address, and no text from a provider is kept: a failure is one of a fixed list of codes.
+  body or an IMAP command, never in an address, and no text from a token endpoint is kept: a failure is one of a fixed list of codes. (The mail server's own refusal text is kept, as for a password, in the error and the activity log.)
 * **Where a token goes:** a Google sign-in is only ever for `imap.gmail.com` and a Microsoft one only for `outlook.office365.com`, checked
   whenever settings are saved. Only the sign-in commands can change which mailboxes sign in this way.
 * **IMAP:** XOAUTH2. A refused token is dropped and one new one is tried once; a withdrawn sign-in is not asked about again for five minutes.

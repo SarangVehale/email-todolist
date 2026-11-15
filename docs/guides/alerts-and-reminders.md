@@ -1,6 +1,6 @@
 # Alerts and reminders
 
-> **Status:** current · **Audience:** anyone who wants to be told about important mail, or reminded about their own tasks · **Last reviewed:** 2026-11-14
+> **Status:** current · **Audience:** anyone who wants to be told about important mail, or reminded about their own tasks · **Last reviewed:** 2026-11-15
 
 By the end of this guide you will have chosen where alerts go (desktop notifications, ntfy on your phone or both), set quiet hours and a
 daily digest, and made a task that reminds you and repeats. It takes about ten minutes.
@@ -49,7 +49,7 @@ ntfy is a free notification service. The app posts to an address made from the s
 subscribed to the same topic shows it.
 
 1. Install the ntfy app on your phone.
-2. Type a name into **ntfy topic** in Settings, section **Alerts** (the first-run screens no longer ask for it). Choose a long name nobody
+2. Type a name into **ntfy topic** in Settings (press **More options** first in the simple view), section **Alerts** (the first-run screens no longer ask for it). Choose a long name nobody
    would guess: it works like a password. A name such as `inbox-` followed by 16 random letters and digits is a good one.
 3. Subscribe to the same topic in the ntfy app.
 
@@ -63,7 +63,7 @@ alerts go with ntfy's priority 5 when urgent and 4 otherwise. The digest, snooze
 
 ## Quiet hours, categories and the digest
 
-In **Settings**, section **Alert schedule**:
+In **Settings** (press **More options** first in the simple view), section **Alert schedule**:
 
 * **Quiet from** and **Quiet until**: set both, or the window says "Set both a start and an end for quiet hours". The quiet period may cross
   midnight (22:00 to 07:00). The start is inside the quiet time and the end is outside. "Urgent mail still gets through during quiet
@@ -78,7 +78,7 @@ In **Settings**, section **Alert schedule**:
 
 Reminders are for tasks you add yourself, not for mail (for mail, snooze it).
 
-1. Press `a` or **Add task**. Give it a title, a priority and, if you like, a due date.
+1. Press `a` (or **Add task** in the dense view: the simple view does not draw that button, and the key still works). Give it a title, a priority and, if you like, a due date.
 2. Open the task. Set **Remind** to a date and time, and choose a repeat: **Doesn’t repeat**, **Every day**, **Every week** or
    **Every month**. The window says "Reminder set" or "Repeat set".
 3. At that time the notification appears, once, within about 20 seconds (the app looks every 20 seconds). **Clear** removes the reminder.

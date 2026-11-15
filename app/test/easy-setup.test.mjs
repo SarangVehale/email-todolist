@@ -103,7 +103,8 @@ suite("the first-run screens", it => {
     s = await here(page); assert.equal(s.h2, "You're connected.");
     assert.deepEqual((await calls(page)).filter(c => c !== "open_page"), ["test_account", "save_account", "save_settings", "finish_setup"], "tested, then saved, then finished: no second button");
     const patch = await page.run(() => window.__calls.find(c => c.cmd === "save_settings").a.patch);
-    assert.deepEqual(patch, { ai: { mode: "rules" }, alerts: { desktop: true }, writeback: false, hub: { enabled: false } }, "the safe defaults: rules only, alerts on, the mailbox untouched, no phone hub");
+    assert.deepEqual(patch, { writeback: false, hub: { enabled: false } }, "setup makes sure of two things only: the mailbox is not filed in and the phone hub is off (ranking and alerts are left as they are)");
+    assert.deepEqual(await page.run(() => [localStorage.getItem("ia.easy"), document.documentElement.classList.contains("easy")]), ["1", true], "the simple view is settled when the mailbox is connected, not only when the last screen is closed");
     assert.equal(await page.run(() => W.pw), "", "the code is not kept in the window once it is saved");
     await page.click("[data-w=finish]");
     await page.waitFor(() => !veil.classList.contains("show"));

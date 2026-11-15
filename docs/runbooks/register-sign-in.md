@@ -50,7 +50,7 @@ Microsoft account. It costs nothing. Without it the app works exactly as before 
 
 ### Both
 
-1. Run the [engine tests](../testing/strategy.md) (`cd engine && cargo test`) and build the app. The two buttons now appear for the provider
+1. Run the [engine tests](../testing/strategy.md) (`cd engine && cargo test`: they do not depend on the IDs) and build the app. The two buttons now appear for the provider
    whose ID you filled in.
 2. Try each by hand, using the [manual cases](../TESTCASES.manual.md) MT-150 to MT-156, with an account of your own.
 
@@ -58,7 +58,7 @@ Microsoft account. It costs nothing. Without it the app works exactly as before 
 
 On a clean install, type a Gmail address. The next screen says **Connect your Gmail** and has **Sign in with Google**. Press it: your browser
 opens Google's page; you sign in (and, until verification, press through the warning); the window moves to "You're connected." A Hotmail address
-shows **Sign in with Microsoft** and a short code to type.
+shows **Sign in with Microsoft**; pressing it shows a short code to type on Microsoft's page.
 
 ## If something goes wrong
 
