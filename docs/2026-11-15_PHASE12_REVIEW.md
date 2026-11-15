@@ -53,7 +53,18 @@ Round 1 (a ledger of the council's and the drift passes' findings was given up f
 | R1-8 | nit | **fixed**: a Cancel pressed while the "done" answer was on its way no longer leads to a saved mailbox (a window test sends "done" after Cancel) |
 | (test comment) | nit | **fixed**: a comment said the old grant "would pass"; it would show in the server's log |
 
-Round 2 verifies these (below).
+Round 2 (the fixes above, read in the code): **CHANGES REQUESTED**, no blocker or major, three minor and four nits.
+
+| Id | Severity | Outcome |
+| --- | --- | --- |
+| R2-1 | minor | **fixed**: `oauth_finish` put the new refresh token in place without holding the lock a refresh takes, so a refresh that had read the old token just before could still write over it; it now holds the lock (`oauth::lock_refresh`) while the token is put in place and cached. No test can hit a window that small; the lock is held across the keychain write and the cache, and the one it narrows is covered by R1-1's test |
+| R2-2 | minor | **fixed**: pressing Cancel after the poll said "done", starting a new sign-in over a finished one, and a finished one going stale each dropped the tokens without telling Google; each now revokes the grant (a test for the three) |
+| R2-3 | minor | **fixed**: `save_account` ended the old sign-in (revoked and deleted its token) before the settings that say so were saved, the same fault as R1-2 in the sibling command; it now ends it after the save (a test watches the settings while Google is being told) |
+| R2-4 | nit | **fixed**: the old refresh token is read with `lookup`, so an unreadable keychain is refused before anything is changed instead of being read as "none" |
+| R2-5, R2-6 | nit | **fixed**: the command reference now says which refusals spend the sign-in (those after the server was asked, including a settings change in between) and lists a settings or database error |
+| R2-7 | nit | **fixed**: the retry loop added to the Enter-key test could hide a key press the app really drops, and the focus fault that needed it is fixed; the loop is gone and a failure now prints where the keyboard was and what Connect said |
+
+Round 3 verifies these (below).
 
 A mutant that revokes the old grant "even if nothing was saved" survived: the revoke is after the early return on a failed save, so the mutation changes nothing (equivalent); the
 ordering is held by the test that makes the save fail and checks that the old grant was not revoked.

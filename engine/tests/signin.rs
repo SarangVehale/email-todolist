@@ -1527,3 +1527,64 @@ fn when_the_settings_cannot_be_saved_the_old_sign_in_keeps_working_and_the_new_g
     );
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn a_finished_sign_in_that_is_dropped_is_cancelled_at_google_so_no_grant_is_left_unowned() {
+    let tok = Tok::start();
+    tok.say("/gtoken", 200, tokens("AT1", Some("RT1"), MAIL));
+    tok.say("/grevoke", 200, json!({}));
+    let _s = scene(Some(&tok));
+    let (c, dir) = fresh("dropped");
+    let revoked = |n: usize| {
+        let until = Instant::now() + Duration::from_secs(5);
+        while tok.bodies("/grevoke").len() < n && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        tok.bodies("/grevoke")
+    };
+    // cancelled after it finished (the person pressed Cancel as the answer arrived)
+    google_round(&c, "me@gmail.com", |_, st| format!("/?code=C&state={st}"));
+    wait_state(&c, "done");
+    c.rpc("oauth_cancel", &json!({})).unwrap();
+    assert_eq!(revoked(1), vec!["token=RT1".to_string()]);
+    // replaced by a new sign-in before it was used
+    google_round(&c, "me@gmail.com", |_, st| format!("/?code=C&state={st}"));
+    wait_state(&c, "done");
+    google_round(&c, "me@gmail.com", |_, st| format!("/?code=C&state={st}"));
+    assert_eq!(
+        revoked(2).len(),
+        2,
+        "the first was cancelled when the second began"
+    );
+    // forgotten because it was not used in time
+    wait_state(&c, "done");
+    std::thread::sleep(Duration::from_millis(2300));
+    assert_eq!(c.rpc("oauth_poll", &json!({})).unwrap()["state"], "idle");
+    assert_eq!(revoked(3).len(), 3, "and so was the one that went stale");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_password_ends_the_old_sign_in_only_after_the_settings_that_say_so_are_saved() {
+    let tok = Tok::start();
+    // the revoke takes a while: what the settings say while it is under way shows the order
+    tok.say_slowly("/grevoke", 200, json!({}), 700);
+    let _s = scene(Some(&tok));
+    let (c, dir) = fresh("order");
+    gmail_mailbox_with_a_sign_in(&dir, "RT-old");
+    let c2 = c.clone();
+    let save = std::thread::spawn(move || {
+        c2.rpc(
+            "save_account",
+            &json!({"id": 0, "host": "imap.gmail.com", "user": "me@gmail.com", "password": "abcd efgh ijkl mnop"}),
+        )
+    });
+    std::thread::sleep(Duration::from_millis(300)); // Google is being told, and the settings are already saved
+    assert!(
+        Settings::load(&dir).oauth.is_empty(),
+        "the settings were saved before the old grant was given up"
+    );
+    assert!(save.join().unwrap().is_ok());
+    assert!(secrets::get("oauth-refresh-0").is_none() && secrets::get("imap-password").is_some());
+    let _ = std::fs::remove_dir_all(dir);
+}

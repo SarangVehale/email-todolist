@@ -429,11 +429,11 @@ Saves the mailbox of a sign-in that is `done`, once.
 * **Arguments:** `add` (boolean, default false): add a new mailbox with the lowest free number (setup must be finished); otherwise `id` (integer, default 0): the
   first mailbox during setup, or a mailbox that is signing in again.
 * **Answer:** the mailbox number.
-* **Errors:** a mailbox that cannot be saved is refused before the sign-in is spent: `Set up your first mailbox before adding another`, `You can read at most five mailboxes at
-  once`, `There is no such mailbox` (an `id` that is not set up) and the settings validation messages such as `That mailbox is already in the app`; the sign-in stays and can be
-  finished again once the cause is removed. Spent, with a Google grant that was never used revoked: the mail server's refusal of the token (`sign-in refused: …`) or any
+* **Errors:** a mailbox that cannot be saved is refused before the server is asked, and the sign-in is not spent: `Set up your first mailbox before adding another`, `You can read at most five mailboxes at
+  once`, `There is no such mailbox` (an `id` that is not set up) and the settings validation messages such as `That mailbox is already in the app`; it can be finished again once the cause is
+  removed (the same refusal after the server was asked, because the settings changed meanwhile, does spend it). Spent, with a Google grant that was never used revoked: the mail server's refusal of the token (`sign-in refused: …`) or any
   connection error (nothing is saved for a token the server does not accept), `That sign-in changed. Sign in again.` (another sign-in finished in between) and
-  `Couldn't save the sign-in in your system keychain (…)` (the keychain is put back as it was). Not spent, and nothing to do with the mailbox: `There is no finished sign-in to use. Sign in again.`
+  `Couldn't save the sign-in in your system keychain (…)` and a settings or database error (the keychain is put back as it was); the keychain being unreadable at the start is refused before anything is changed. Not spent, and nothing to do with the mailbox: `There is no finished sign-in to use. Sign in again.`
   and `That sign-in was too long ago to use. Sign in again.` (a finished sign-in that is not saved within ten minutes is forgotten, so tokens do not wait in memory).
 * **Side effects:** signs in to `imap.gmail.com` (Google) or `outlook.office365.com` (Microsoft) with exactly the new token (XOAUTH2, once, with no retry and no refresh: not through the
   token store) and out again, reads the settings again, then saves the mailbox with `oauth` set, the refresh token in the keychain (`oauth-refresh-<n>`) and no password (an

@@ -34,6 +34,9 @@ First public build.
   settings cannot be saved); the new token was held in memory before the server had accepted it; a Cancel pressed just as the sign-in finished could still save the mailbox. CI run 43 then
   failed once on macOS in a setup test, which showed a real fault: a dialog's 30-millisecond focus timer, fired late on a slow computer, pulled the keyboard from the code box to
   the "Open page" button, so Enter opened the page instead of connecting. The timer now leaves the keyboard alone when it is already inside the dialog.
+  A second round found: a finished sign-in that is cancelled, replaced or forgotten before it is saved is now cancelled at Google too (no grant is left that nothing
+  holds); putting a new refresh token in place of an old one waits for a refresh that is in flight; a password for a signed-in mailbox ends the old sign-in only after
+  the settings that say so are saved; and an unreadable keychain is refused before anything is changed.
 - Sign in with Google and with Microsoft (Phase 12, third part), built and off until the person who builds the app registers it (the buttons show only
   when `engine/src/oauth.rs` names a client ID: [the runbook](docs/runbooks/register-sign-in.md), [ADR-0015](docs/adr/0015-sign-in-with-google-and-microsoft-needs-the-owners-client-id.md)).
   Google uses the loopback flow with PKCE (a one-shot listener on `127.0.0.1` that keeps accepting until a request carries the right `state`, 5 seconds and 8 KB for

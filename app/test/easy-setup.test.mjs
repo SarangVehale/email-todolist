@@ -139,11 +139,8 @@ suite("the first-run screens", it => {
     await page.waitFor(() => W.step === "guide");
     assert.match(await page.run(() => document.querySelector("[data-w=open]").textContent), /Open Yahoo's page/);
     await page.fill("#w-pw", "abcdefghijklmnop"); await page.key("Enter");
-    // a key press sent to a slow browser can be lost once: press again if Connect has not started, and say what happened if it never does
-    const started = () => page.run(() => W.busy || W.step === "ready");
-    for (let i = 0; i < 3 && !(await started()); i++) { await page.settle(1500); if (!(await started())) await page.key("Enter") }
-    assert.ok(await started(), "Enter on the code started Connect: " + JSON.stringify(await page.run(() => ({ busy: W.busy, step: W.step, result: W.result, pw: W.pw.length, active: document.activeElement && (document.activeElement.id || document.activeElement.tagName), veil: veil.dataset.kind }))));
-    await page.waitFor(() => W.step === "ready");
+    try { await page.waitFor(() => W.step === "ready") } // (when it fails, the window's own state says why: where the keyboard was, and what Connect said)
+    catch (e) { throw new Error(e.message + " " + JSON.stringify(await page.run(() => ({ busy: W.busy, step: W.step, result: W.result, pw: W.pw.length, active: document.activeElement && (document.activeElement.id || document.activeElement.tagName) })))) }
   });
 
   it("a refused code says so in a sentence, keeps what was typed, saves nothing, and works after a new code", async page => {

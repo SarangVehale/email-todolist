@@ -385,6 +385,11 @@ fn lock_store() -> std::sync::MutexGuard<'static, Store> {
 /// One refresh at a time, so the sync, the write-back and a restart of the settings cannot all ask a provider at once.
 static REFRESHING: Mutex<()> = Mutex::new(());
 
+/// Held while a mailbox's refresh token is put in place of another (a sign-in again): no refresh of the old one can then be in flight to write over it.
+pub fn lock_refresh() -> std::sync::MutexGuard<'static, ()> {
+    REFRESHING.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 fn fresh(id: u32) -> Option<String> {
     lock_store()
         .cache
@@ -562,7 +567,11 @@ fn finish_flow(gen: u64, st: St) {
 pub fn poll() -> Value {
     let mut f = lock_flow();
     if matches!(&f.st, St::Done(d) if d.at.elapsed() > keep()) {
-        f.st = St::Idle;
+        if let St::Done(d) = std::mem::replace(&mut f.st, St::Idle) {
+            drop(f); // (the request to Google is made without the lock)
+            revoke(d.provider, &d.refresh);
+            return json!({"state": "idle"});
+        }
     }
     match &f.st {
         St::Idle => json!({"state": "idle"}),
@@ -577,9 +586,15 @@ pub fn poll() -> Value {
 
 /// Stops a sign-in that is waiting, and forgets how the last one ended.
 pub fn cancel() {
-    let mut f = lock_flow();
-    f.cancel.store(true, Ordering::Relaxed);
-    f.st = St::Idle;
+    let old = {
+        let mut f = lock_flow();
+        f.cancel.store(true, Ordering::Relaxed);
+        std::mem::replace(&mut f.st, St::Idle)
+    };
+    // a sign-in that had finished and was never saved is cancelled at Google too: no copy of it is left anywhere
+    if let St::Done(d) = old {
+        revoke(d.provider, &d.refresh);
+    }
 }
 
 /// Who the finished sign-in is for, without using it up (so that what is wrong with the mailbox can be refused before the tokens are spent).
@@ -600,9 +615,13 @@ pub fn take_done() -> Result<Done> {
     let mut f = lock_flow();
     match std::mem::replace(&mut f.st, St::Idle) {
         St::Done(d) if d.at.elapsed() <= keep() => Ok(d),
-        St::Done(_) => Err(anyhow!(
-            "That sign-in was too long ago to use. Sign in again."
-        )),
+        St::Done(d) => {
+            drop(f);
+            revoke(d.provider, &d.refresh);
+            Err(anyhow!(
+                "That sign-in was too long ago to use. Sign in again."
+            ))
+        }
         other => {
             f.st = other;
             Err(anyhow!(
@@ -640,14 +659,17 @@ pub fn start(p: Provider, user: &str) -> Result<Value> {
         return Err(anyhow!("That email address isn't valid"));
     }
     let (e, test) = endpoints();
-    let (gen, cancel) = {
+    let (gen, cancel, old) = {
         let mut f = lock_flow();
         f.cancel.store(true, Ordering::Relaxed); // a flow still waiting is over
         f.gen += 1;
         f.cancel = Arc::new(AtomicBool::new(false));
-        f.st = St::Waiting { device: None };
-        (f.gen, f.cancel.clone())
+        let old = std::mem::replace(&mut f.st, St::Waiting { device: None });
+        (f.gen, f.cancel.clone(), old)
     };
+    if let St::Done(d) = old {
+        revoke(d.provider, &d.refresh); // a finished sign-in that was never saved, and is now replaced
+    }
     let started: Result<Value> = match p {
         Provider::Google => start_google(gen, cancel, &e, test, user),
         Provider::Microsoft => start_microsoft(gen, cancel, &e, test, user),

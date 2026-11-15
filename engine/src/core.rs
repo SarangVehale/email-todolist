@@ -557,10 +557,12 @@ impl Core {
                         &secrets::imap_key(id),
                         &s_arg(a, "password").replace(' ', ""),
                     )?;
-                    if was.is_some() {
+                    let r = candidate.save(&self.dir);
+                    if r.is_ok() && was.is_some() {
+                        // the old sign-in ends only once the settings that say so are saved: a failed save leaves it working
                         crate::oauth::sign_out_mailbox(id, was);
                     }
-                    candidate.save(&self.dir)
+                    r
                 })();
                 // the syncs hold the old password (or were stopped above): start them again, whatever happened
                 if s.onboarded && (changed || saved.is_ok()) {
@@ -900,31 +902,43 @@ impl Core {
                 .unwrap_or_else(|e| e.into_inner())
                 .store(true, Ordering::Relaxed);
         }
-        let old_refresh = secrets::get(&secrets::oauth_key(id));
-        let saved = (|| -> Result<()> {
-            if add {
-                self.store()?.clear_mailbox(id)?;
-            } else if changed {
-                self.store_for(id)?.reset_for_new_account()?;
+        let old_refresh = match secrets::lookup(&secrets::oauth_key(id)) {
+            Ok(x) => x,
+            Err(e) => {
+                crate::oauth::discard(id, &done);
+                return Err(e); // the keychain cannot be read: nothing has been changed yet
             }
-            secrets::set(&secrets::oauth_key(id), &done.refresh)
-                .map_err(|e| anyhow!("Couldn't save the sign-in in your system keychain ({e})"))?;
-            let r = candidate.save(&self.dir);
-            if r.is_err() {
-                // the settings were not saved: the keychain goes back to what it held, so the mailbox keeps the sign-in it had
-                match &old_refresh {
-                    Some(o) => {
-                        let _ = secrets::set(&secrets::oauth_key(id), o);
-                    }
-                    None => secrets::delete(&secrets::oauth_key(id)),
+        };
+        let saved = {
+            // no refresh of the mailbox's old token can be in flight while the new one is put in its place
+            let _refresh = crate::oauth::lock_refresh();
+            let saved = (|| -> Result<()> {
+                if add {
+                    self.store()?.clear_mailbox(id)?;
+                } else if changed {
+                    self.store_for(id)?.reset_for_new_account()?;
                 }
+                secrets::set(&secrets::oauth_key(id), &done.refresh).map_err(|e| {
+                    anyhow!("Couldn't save the sign-in in your system keychain ({e})")
+                })?;
+                let r = candidate.save(&self.dir);
+                if r.is_err() {
+                    // the settings were not saved: the keychain goes back to what it held, so the mailbox keeps the sign-in it had
+                    match &old_refresh {
+                        Some(o) => {
+                            let _ = secrets::set(&secrets::oauth_key(id), o);
+                        }
+                        None => secrets::delete(&secrets::oauth_key(id)),
+                    }
+                }
+                r
+            })();
+            if saved.is_ok() {
+                secrets::delete(&secrets::imap_key(id)); // a sign-in replaces any password the mailbox had
+                crate::oauth::prime(id, &done.access, done.expires_in);
             }
-            r
-        })();
-        if saved.is_ok() {
-            secrets::delete(&secrets::imap_key(id)); // a sign-in replaces any password the mailbox had
-            crate::oauth::prime(id, &done.access, done.expires_in);
-        }
+            saved
+        };
         if s.onboarded && (changed || saved.is_ok()) {
             self.start();
         }
