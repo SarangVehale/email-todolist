@@ -145,7 +145,7 @@ cd engine && IMAP_HOST=imap.example.com IMAP_USER=you@example.com IMAP_PASS=... 
 
 ## Status
 
-Built and tested: engine (480 tests, including protocol tests against a scripted mock IMAP server and a dedicated edge-case suite), the window (62 tests in a real browser), UI in a browser, phone hub, installer build.
+Built and tested: engine (480 tests, including protocol tests against a scripted mock IMAP server and a dedicated edge-case suite), the window (65 tests in a real browser), UI in a browser, phone hub, installer build.
 The IMAP sync and write-back are tested against a scripted mock server, which proves what the client sends and how it parses
 standard responses, but a real Gmail or other server may differ. Not yet exercised against a live mailbox, and releases are unsigned.
 See [SECURITY.md](SECURITY.md) for the full list of limits, and the [version history](docs/VERSION_HISTORY.md) for how the project got here.

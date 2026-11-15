@@ -59,7 +59,7 @@ function tagsHTML(t) {
   else if (t.needs_reply) out.push('<span class="tg">↩ Reply</span>');
   if (t.due) out.push(`<span class="tg ${t.due <= isoToday() ? "r" : ""}">Due ${dueLabel(t.due)}</span>`);
   if (t.attachment_count) out.push(`<span class="tg">Files ${t.attachment_count}</span>`);
-  if (t.remind) out.push(`<span class="tg ${t.remind <= nowLocal() ? "r" : ""}" title="${esc(t.repeat ? "Repeats " + t.repeat : "Reminder")}">${t.repeat ? "↻ " : ""}Remind ${dueLabel(t.remind.slice(0, 10))} ${t.remind.slice(11)}</span>`);
+  if (t.remind) out.push(`<span class="tg ${t.remind <= nowLocal() ? "r" : ""}" title="${esc(t.repeat ? "Repeats " + t.repeat : "Reminder")}">${t.repeat ? "↻ " : ""}Remind ${dueLabel(t.remind.slice(0, 10))} ${esc(t.remind.slice(11))}</span>`);
   else if (t.repeat) out.push(`<span class="tg" title="Moves to the next date when you finish it">↻ ${esc(t.repeat)}</span>`);
   if (t.event) out.push(`<span class="tg ${t.event.cancelled ? "r" : ""}">${t.event.cancelled ? "Event cancelled" : "Event " + dueLabel(evDay(t.event))}</span>`);
   if (flt.q.trim() && bodyHit(t, flt.q.trim().toLowerCase()) && !textMatch(t, flt.q.trim().toLowerCase())) out.push('<span class="tg" title="The words are in the message text">In text</span>');
