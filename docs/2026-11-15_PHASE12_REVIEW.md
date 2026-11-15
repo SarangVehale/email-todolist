@@ -64,7 +64,17 @@ Round 2 (the fixes above, read in the code): **CHANGES REQUESTED**, no blocker o
 | R2-5, R2-6 | nit | **fixed**: the command reference now says which refusals spend the sign-in (those after the server was asked, including a settings change in between) and lists a settings or database error |
 | R2-7 | nit | **fixed**: the retry loop added to the Enter-key test could hide a key press the app really drops, and the focus fault that needed it is fixed; the loop is gone and a failure now prints where the keyboard was and what Connect said |
 
-Round 3 verifies these (below).
+Round 3 (the last of three; fixes read in the code, locks and deadlocks checked): **APPROVE**, no blocker or major. One minor and three nits.
+
+| Id | Severity | Outcome |
+| --- | --- | --- |
+| R3-1 | minor | **fixed**: when a sign-in again changed the address, the syncs were stopped before the keychain was read, so an unreadable keychain left every mailbox stopped until a restart; the keychain is read first |
+| R3-2 | nit | **accepted**: the old refresh token is read just before the lock is taken, so a Microsoft rotation in between leaves an outdated copy that a failed save would write back. A rotated Microsoft token's predecessor normally stays valid for a while, and a failed save is already an error the person sees |
+| R3-3 | nit | **fixed**: `forget_all` revoked a finished sign-in while holding the refresh lock (every refresh waited up to 5 seconds); the lock is released first |
+| R3-4 | nit | **accepted**: `oauth_start` waits up to 5 seconds for the revoke of a finished sign-in that it replaces, before the browser opens. It happens only when a person starts again over a finished sign-in they never saved, and the request is bounded |
+
+Budget used: 3 of 3 rounds. The skill names OpenAI's GPT Sol; at the owner's instruction Opus was used in its place. The reviewer found the lock order to be always the refresh lock, then
+the token store or the flow lock, with no path that reverses it and none that takes the refresh lock twice.
 
 A mutant that revokes the old grant "even if nothing was saved" survived: the revoke is after the early return on a failed save, so the mutation changes nothing (equivalent); the
 ordering is held by the test that makes the save fail and checks that the old grant was not revoked.
@@ -75,6 +85,13 @@ CI run 43 failed once on macOS in the first-run test of the Enter key. It did no
 keyboard was on the **Open page** button, not in the code box. The cause is real and is not the test's: when a dialog opens, a 30-millisecond timer moves the keyboard to its first control; on a slow computer
 that timer fired after the person had already reached a later screen and pulled the keyboard away. It now does nothing if the keyboard is already inside the dialog (a window test fires the timer late
 and checks, and fails on the old code).
+
+## Tests that depended on how fast the computer is
+
+Four timing faults showed up while this was finished, each in a test and not in the app: the colour measured mid-transition (above); window tests that released a held answer and
+restored the real backend in two steps, so that a poll in between was held again for ever; engine tests that waited a guessed 150 milliseconds before acting on a request that a slow
+computer had not yet made (the token server is now asked, and the test acts when it has seen the request); and the Enter-key retry loop. The engine's sign-in tests ran green six times in a row
+on a quiet machine and failed once in a full run that shared the machine with a browser: a test that depends on a guess about speed is a test that fails on the day it matters.
 
 ## Not changed, on purpose
 
@@ -90,4 +107,7 @@ and checks, and fails on the old code).
 
 | Run | Commit | Result |
 | --- | --- | --- |
+| 45 | `0179532` | Ubuntu, Windows and the audit green; macOS failed in the accessibility test: a colour was measured half-way through a 150-millisecond transition (a contrast of 1.17 for text that is 11), and the failure left the simple view set on that device, which broke the Restore test that followed. The check now switches transitions off before it measures, and the test clears the device's look in a `finally`. |
+| 44 | `05af712` | Green on Ubuntu, Windows and macOS. |
+| 43 | `2fa4914` | Ubuntu, Windows and the audit green; macOS failed once in the Enter-key setup test, which showed the late focus timer described above. |
 | 42 | `3434999` | Ubuntu and the audit green. Windows and macOS failed in two window tests that read the page's background colour one frame after a switch of the light theme (the browser had not yet shown it); the engine tests passed everywhere. The tests now wait for the colour. |

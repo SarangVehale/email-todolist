@@ -16,6 +16,8 @@ use std::time::{Duration, Instant};
 static SERIAL: Mutex<()> = Mutex::new(());
 /// How long the scripted mail server waits before it answers a sign-in, in milliseconds (0 unless a test wants a slow one).
 static IMAP_DELAY_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// How many sign-ins the scripted mail server has been asked for (counted before its pause), so a test can wait until one is under way.
+static IMAP_ASKED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 // ───────────────────────── the scripted token server ─────────────────────────
 
@@ -57,6 +59,15 @@ impl Tok {
             .entry(path.into())
             .or_default()
             .push_back((status, body.to_string(), ms));
+    }
+    /// Waits until the server has been asked on `path` (the answer may still be on its way: some are slow on purpose), so that a test acts at a known moment
+    /// and not after a guess about how fast this computer is.
+    fn wait_for(&self, path: &str) {
+        let until = Instant::now() + Duration::from_secs(10);
+        while self.bodies(path).is_empty() {
+            assert!(Instant::now() < until, "{path} was never asked");
+            std::thread::sleep(Duration::from_millis(10));
+        }
     }
     fn bodies(&self, path: &str) -> Vec<String> {
         self.seen
@@ -159,6 +170,7 @@ fn imap_conn(mut c: TcpStream, log: &Mutex<Vec<String>>, good: &Mutex<Vec<String
                 let _ = c.write_all(b"+ \r\n");
                 let mut resp = String::new();
                 let _ = r.read_line(&mut resp);
+                IMAP_ASKED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 std::thread::sleep(Duration::from_millis(
                     IMAP_DELAY_MS.load(std::sync::atomic::Ordering::Relaxed),
                 ));
@@ -1373,7 +1385,7 @@ fn removing_a_mailbox_while_its_token_is_being_refreshed_leaves_nothing_behind()
     let _s = scene(Some(&tok));
     secrets::set("oauth-refresh-0", "MR-old").unwrap();
     let refresh = std::thread::spawn(|| oauth::access_token(0, Provider::Microsoft));
-    std::thread::sleep(Duration::from_millis(150)); // the provider is being asked
+    tok.wait_for("/mstoken"); // the provider is being asked
     oauth::sign_out_mailbox(0, Some(Provider::Microsoft));
     let _ = refresh.join().unwrap();
     assert!(
@@ -1399,7 +1411,7 @@ fn a_microsoft_sign_in_cancelled_while_the_code_is_being_asked_for_does_not_come
             &json!({"provider": "microsoft", "user": "me@outlook.com"}),
         )
     });
-    std::thread::sleep(Duration::from_millis(150));
+    tok.wait_for("/msdevice");
     c.rpc("oauth_cancel", &json!({})).unwrap();
     let r = start.join().unwrap();
     assert!(r.is_err(), "the start that was cancelled says so: {r:?}");
@@ -1447,8 +1459,11 @@ fn a_change_made_in_settings_while_the_mail_server_is_asked_is_kept() {
     // a setting changes while oauth_finish is waiting for the mail server (the scripted server answers after a pause)
     IMAP_DELAY_MS.store(500, std::sync::atomic::Ordering::Relaxed);
     let c2 = c.clone();
+    let asked = IMAP_ASKED.load(std::sync::atomic::Ordering::Relaxed);
     let slow = std::thread::spawn(move || c2.rpc("oauth_finish", &json!({})));
-    std::thread::sleep(Duration::from_millis(150));
+    while IMAP_ASKED.load(std::sync::atomic::Ordering::Relaxed) == asked {
+        std::thread::sleep(Duration::from_millis(10)); // the mail server is being asked, and is slow to answer
+    }
     c.rpc(
         "save_settings",
         &json!({"patch": {"followups": {"days": 5}}}),
@@ -1477,7 +1492,7 @@ fn a_refresh_that_was_overtaken_by_a_new_sign_in_does_not_write_its_token_over_i
     let _s = scene(Some(&tok));
     secrets::set("oauth-refresh-0", "MR-old").unwrap();
     let refresh = std::thread::spawn(|| oauth::access_token(0, Provider::Microsoft));
-    std::thread::sleep(Duration::from_millis(150)); // the provider is being asked about the old grant
+    tok.wait_for("/mstoken"); // the provider is being asked about the old grant
     secrets::set("oauth-refresh-0", "MR-resigned-in").unwrap(); // the person signed in again meanwhile
     let e = refresh.join().unwrap().unwrap_err().to_string();
     assert!(e.contains("replaced"), "{e}");
@@ -1579,7 +1594,7 @@ fn a_password_ends_the_old_sign_in_only_after_the_settings_that_say_so_are_saved
             &json!({"id": 0, "host": "imap.gmail.com", "user": "me@gmail.com", "password": "abcd efgh ijkl mnop"}),
         )
     });
-    std::thread::sleep(Duration::from_millis(300)); // Google is being told, and the settings are already saved
+    tok.wait_for("/grevoke"); // Google is being told, and the settings are already saved
     assert!(
         Settings::load(&dir).oauth.is_empty(),
         "the settings were saved before the old grant was given up"

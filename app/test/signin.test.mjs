@@ -2,7 +2,7 @@
 // (the demo backend has one when the address says ?signin=google,microsoft), they replace "copy a code" for people who want that, and everything
 // that can go wrong is a sentence.
 import assert from "node:assert/strict";
-import { suite, wrapMock, unwrapMock, release, openSettings } from "./harness.mjs";
+import { suite, wrapMock, release, openSettings } from "./harness.mjs";
 
 const WITH = "/demo.html?demo=1&signin=google,microsoft";
 /** A new install (the demo signed out), the first screens, and a short wait between asks. */
@@ -96,7 +96,7 @@ suite("sign in with an account: the first-run screens", it => {
     assert.match(await page.run(() => document.querySelector("#w-result").textContent), /www\.microsoft\.com\/link/);
     await page.click("[data-w=opendevice]");
     await page.waitFor(() => (window.__opened || []).includes("https://www.microsoft.com/link"));
-    await page.run(() => { window.__held.forEach(f => f()) }); await page.run(unwrapMock);
+    await page.run(() => { window.mock = window.__realMock; window.__held.forEach(f => f()) }); // the real backend first, so that no later poll is held again, then what was held
     await page.waitFor(() => W.step === "ready");
     assert.deepEqual(await page.run(() => [M.settings.oauth[0], M.settings.account.host]), ["microsoft", "outlook.office365.com"]);
   }, { path: WITH });
@@ -176,7 +176,7 @@ suite("sign in with an account: after the first mailbox", it => {
     await page.waitFor(() => document.querySelector(".devcode"));
     await page.click("[data-m=opendevice]");
     await page.waitFor(() => (window.__opened || []).includes("https://www.microsoft.com/link"));
-    await page.run(() => { window.__held.forEach(f => f()) }); await page.run(unwrapMock);
+    await page.run(() => { window.mock = window.__realMock; window.__held.forEach(f => f()) }); // the real backend first, so that no later poll is held again, then what was held
     await page.waitFor(() => M.accounts.length === 3);
   }, { path: WITH });
 

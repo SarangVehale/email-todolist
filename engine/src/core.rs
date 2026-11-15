@@ -895,6 +895,13 @@ impl Core {
             .oauth
             .get(&id)
             .and_then(|k| crate::oauth::Provider::parse(k));
+        let old_refresh = match secrets::lookup(&secrets::oauth_key(id)) {
+            Ok(x) => x,
+            Err(e) => {
+                crate::oauth::discard(id, &done);
+                return Err(e); // the keychain cannot be read: nothing has been changed yet, and nothing has been stopped
+            }
+        };
         if changed {
             // stop the syncs first: one that is mid-batch would write the old mailbox's mail back after the reset
             self.stop
@@ -902,13 +909,6 @@ impl Core {
                 .unwrap_or_else(|e| e.into_inner())
                 .store(true, Ordering::Relaxed);
         }
-        let old_refresh = match secrets::lookup(&secrets::oauth_key(id)) {
-            Ok(x) => x,
-            Err(e) => {
-                crate::oauth::discard(id, &done);
-                return Err(e); // the keychain cannot be read: nothing has been changed yet
-            }
-        };
         let saved = {
             // no refresh of the mailbox's old token can be in flight while the new one is put in its place
             let _refresh = crate::oauth::lock_refresh();

@@ -6,6 +6,8 @@ import { suite, openSettings } from "./harness.mjs";
 
 /** Runs in the page: what is wrong with what is on screen now. */
 const problems = () => {
+  // a colour that is half-way through a transition is not what the page is (a slow computer showed 1.17 where 11 is meant): measure the end of it
+  if (!document.getElementById("nomotion")) document.head.insertAdjacentHTML("beforeend", '<style id="nomotion">*,*:before,*:after{transition:none!important;animation:none!important}</style>');
   const lum = ([r, g, b]) => { const f = v => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4) }; return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b) };
   const parse = c => { const m = c.match(/rgba?\(([^)]+)\)/); if (!m) return null; const p = m[1].split(/[ ,\/]+/).filter(Boolean).map(Number); return { rgb: p.slice(0, 3), a: p.length > 3 ? p[3] : 1 } };
   const over = (top, bottom) => top.a >= 1 ? top.rgb : top.rgb.map((v, i) => v * top.a + bottom[i] * (1 - top.a));
@@ -78,6 +80,7 @@ suite("what a screen reader and a pointer meet", it => {
 
   it("the easy view and the light colours pass the same checks at every text size", async page => {
     const looks = [["easy", "light", "large"], ["easy", "light", "huge"], ["easy", "dark", "large"], ["dense", "light", "normal"], ["dense", "dark", "huge"]];
+    try {
     for (const [mode, theme, size] of looks) {
       const where = `${mode} view, ${theme} colours, ${size} text`;
       await page.run((m, t, s) => { localStorage.clear(); if (m === "easy") localStorage.setItem("ia.easy", "1"); localStorage.setItem("ia.theme", t); localStorage.setItem("ia.size", s); applyLook(); lastSnap = ""; render() }, mode, theme, size);
@@ -97,7 +100,7 @@ suite("what a screen reader and a pointer meet", it => {
       }
       await page.run(() => closeVeil());
     }
-    await page.run(() => localStorage.clear());
+    } finally { await page.run(() => localStorage.clear()) } // a failure must not leave this device's look set for the tests that follow
   });
 
   it("the Add a mailbox dialog, the add-task dialog and the shortcut card", async page => {

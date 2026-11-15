@@ -488,13 +488,14 @@ pub fn discard(id: u32, d: &Done) {
 
 /// Forgets every token held in memory and ends any sign-in that is waiting (signing out).
 pub fn forget_all() {
-    // not while a refresh is in flight: it would write a new token back after this
-    let _one_at_a_time = REFRESHING.lock().unwrap_or_else(|e| e.into_inner());
-    let mut s = lock_store();
-    s.cache.clear();
-    s.dead.clear();
-    drop(s);
-    cancel();
+    {
+        // not while a refresh is in flight: it would write a new token back after this
+        let _one_at_a_time = REFRESHING.lock().unwrap_or_else(|e| e.into_inner());
+        let mut s = lock_store();
+        s.cache.clear();
+        s.dead.clear();
+    }
+    cancel(); // (it may tell Google about a finished sign-in: not while holding the refresh lock)
 }
 
 /// Takes a mailbox's sign-in away: tells Google to revoke it (best effort, with the token in the body of the request), then deletes it from the
