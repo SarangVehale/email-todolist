@@ -7,7 +7,8 @@ then checks the targets of docs/designs/phase8.md: how long the engine takes to 
 and how long the window takes to draw and to react (it is driven with the browser protocol on port 9222).
 
 It REFUSES TO RUN if the app already has a data folder (%LOCALAPPDATA%\\app.inboxagent.desktop): it would have to delete it afterwards,
-and that may be your real mail. Close the app, move that folder away, run this, and move it back."""
+and that may be your real mail. Close the app, move that folder away, run this, and move it back. The app runs with its keychain in memory
+(INBOX_AGENT_KEYCHAIN=memory), so a real mailbox password is never read."""
 import json, os, secrets, shutil, sqlite3, string, subprocess, sys, time, urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -34,7 +35,8 @@ if not os.path.exists(EXE):
     sys.exit(f"{EXE} is missing: build the app first (cd app && npx tauri build).")
 os.makedirs(DATA)
 json.dump({"onboarded": True, "account": {"id": 0, "host": "imap.example.com", "user": "me@example.com", "port": 993}, "hub": {"enabled": True, "port": PORT, "token": TOKEN}}, open(os.path.join(DATA, "settings.json"), "w"))
-env = dict(os.environ, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9222")
+# the seeded settings name a first mailbox, so the app looks for its password: with the keychain in memory it finds none, instead of reading a real one
+env = dict(os.environ, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9222", INBOX_AGENT_KEYCHAIN="memory")
 proc = subprocess.Popen([EXE, "--minimized"], env=env)
 try:
     for _ in range(60):

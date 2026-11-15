@@ -232,7 +232,7 @@ jobs:
           }
           for deb in *.deb; do inside "$deb" "$(dpkg-deb -c "$deb" | awk '{ $1=$2=$3=$4=$5=""; print }' | sed 's/^ *//')"; done
           for tgz in *.app.tar.gz; do inside "$tgz" "$(tar -tzf "$tgz")"; done
-          for img in *.AppImage; do chmod +x "$img"; ./"$img" --appimage-extract > /dev/null 2>&1; inside "$img" "$(find squashfs-root -type f -o -type l)"; rm -rf squashfs-root; done
+          for img in *.AppImage; do chmod +x "$img"; ./"$img" --appimage-extract > /dev/null 2>&1 || missing="$missing $img:(could-not-be-extracted)"; inside "$img" "$(find squashfs-root -type f -o -type l 2>/dev/null)"; rm -rf squashfs-root; done
           echo "::notice title=Licence files inside the packages::checked the deb, the app archive and the AppImage (the Windows installer is checked by scripts/packaged_check/install_check.ps1); missing:${missing:- none}"
           [ -z "$missing" ] || { echo "::error title=Licence files missing::$missing"; exit 1; }
       - name: Write SHA256SUMS.txt
